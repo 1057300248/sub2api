@@ -466,6 +466,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 		}
 		normalized = policyApplied
+		if injectedPayload, injected, injectErr := applyCodexToolLoopInjection(account, normalized); injectErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid Codex tool-loop payload", injectErr)
+		} else if injected {
+			normalized = injectedPayload
+		}
 		ingressSessionOriginalModel = originalModel
 
 		return openAIWSClientPayload{

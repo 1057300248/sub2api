@@ -313,6 +313,12 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		imageInputSize = imageCfg.InputSize
 	}
 
+	if injectedBody, injected, injectErr := applyCodexToolLoopInjection(account, body); injectErr != nil {
+		return nil, fmt.Errorf("inject Codex tool loop: %w", injectErr)
+	} else if injected {
+		body = injectedBody
+	}
+
 	logger.LegacyPrintf("service.openai_gateway",
 		"[OpenAI 自动透传] 命中自动透传分支: account=%d name=%s type=%s model=%s stream=%v",
 		account.ID,

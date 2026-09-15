@@ -2267,6 +2267,19 @@
             <Select v-model="codexFingerprintMode" data-testid="edit-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" />
           </div>
         </div>
+        <div class="mt-4 flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600">
+          <div class="min-w-0">
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexToolLoopInjection') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexToolLoopInjectionDesc') }}
+            </p>
+          </div>
+          <Toggle
+            v-model="codexToolLoopInjectionEnabled"
+            data-testid="edit-codex-tool-loop-injection-toggle"
+            :aria-label="t('admin.accounts.openai.codexToolLoopInjection')"
+          />
+        </div>
       </div>
 
       <!-- OpenAI 订阅档位手动覆盖（Plus/Pro/Free），仅 OAuth 非影子账号 -->
@@ -3529,6 +3542,7 @@ const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
+const codexToolLoopInjectionEnabled = ref(false)
 type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
@@ -4011,6 +4025,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
   codexFingerprintMode.value = 'off'
+  codexToolLoopInjectionEnabled.value = false
   codexImageToolMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
@@ -4063,6 +4078,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
         extra?.codex_cli_only_allow_app_server === true
     }
     if (newAccount.type === 'oauth') {
+      codexToolLoopInjectionEnabled.value = extra?.codex_tool_loop_injection_enabled === true
       const fpMode = extra?.codex_fingerprint_mode as string | undefined
       // 缺省/非法值按 off 呈现，与后端 GetCodexFingerprintMode 的 opt-in 语义一致（#5610）
       codexFingerprintMode.value = (['off', 'device', 'session', 'full'].includes(fpMode || '')
@@ -5603,6 +5619,11 @@ const handleSubmit = async () => {
           newExtra.codex_fingerprint_mode = codexFingerprintMode.value
         } else {
           delete newExtra.codex_fingerprint_mode
+        }
+        if (codexToolLoopInjectionEnabled.value) {
+          newExtra.codex_tool_loop_injection_enabled = true
+        } else {
+          delete newExtra.codex_tool_loop_injection_enabled
         }
       }
 

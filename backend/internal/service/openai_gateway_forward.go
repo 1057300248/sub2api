@@ -739,6 +739,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		requestView = newOpenAIRequestView(body)
 		reqBody = nil
 	}
+	if injectedBody, injected, injectErr := applyCodexToolLoopInjection(account, body); injectErr != nil {
+		return nil, fmt.Errorf("inject Codex tool loop: %w", injectErr)
+	} else if injected {
+		body = injectedBody
+		requestView = newOpenAIRequestView(body)
+		reqBody = nil
+	}
 	// 剥离本会话已被上游判定失效的加密项（invalid_encrypted_content lineage），
 	// 阻断同一失效密文随客户端历史在每一轮重复触发"被拒→剥离→重试/重连"。
 	// lineage 会话键统一按进场形态的 body 派生：后续重试可能改写 body，
