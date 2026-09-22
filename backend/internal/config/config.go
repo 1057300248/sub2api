@@ -2401,8 +2401,10 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.5")
 	viper.SetDefault("gateway.openai_codex_ticket.enabled", false)
 	viper.SetDefault("gateway.openai_codex_ticket.target_length", 292)
-	viper.SetDefault("gateway.openai_codex_ticket.ttl_seconds", 3600)
-	viper.SetDefault("gateway.openai_codex_ticket.refresh_before_seconds", 600)
+	// 票在换发时字节数会漂移、且续航改由账号级 Cookie 罐承担，
+	// 因此票自身的名义寿命缩短：900s 有效、提前 300s 重采。
+	viper.SetDefault("gateway.openai_codex_ticket.ttl_seconds", 900)
+	viper.SetDefault("gateway.openai_codex_ticket.refresh_before_seconds", 300)
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_proxy_url", "")
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_probe_interval_seconds", 6)
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_attempt_timeout_seconds", 25)
