@@ -42,6 +42,15 @@ type openAICodexTicket struct {
 	CapturedAt time.Time `json:"captured_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
 	Attempts   int       `json:"attempts"`
+	// StateBucket 记录铸造这张票时的账号档位（个人 10 块 / Team 12 块），
+	// 账号改档后旧票不再复用，避免把 Team 形状的票发给个人号。
+	StateBucket string `json:"state_bucket,omitempty"`
+	// HarvestPending 是 watchdog 信号：业务响应里出现 312 形态或模型不符时
+	// 置位，harvester 下一轮不等 TTL 直接重采。
+	HarvestPending bool `json:"harvest_pending,omitempty"`
+	// Cookies 记录铸造这张票时账号 Cookie 罐的快照，仅作溯源；实际
+	// 注入使用账号级共享罐（见 openai_codex_cookie.go）。
+	Cookies map[string]string `json:"cookies,omitempty"`
 }
 
 func openAICodexTicketKey(accountID int64, model string) string {
@@ -69,10 +78,17 @@ func (s *OpenAIGatewayService) openAICodexTicketConfig() config.OpenAICodexTicke
 		cfg.TargetLength = 292
 	}
 	if cfg.TTLSeconds <= 0 {
-		cfg.TTLSeconds = 3600
+		// 2026-09-22 起上游改按 Cookie 续命：票本身只是便捷凭证。
+		// 实测：同一张票 + Cookie 罐连续 342s 无失败，服务端在 143s 起换发
+		// 312 形态新票；取 900s 作为"票自身的名义寿命"，真实续航由 Cookie 罐
+		// 保证，harvest 每轮都会用 Cookie 刷到新票。
+		cfg.TTLSeconds = 900
 	}
 	if cfg.RefreshBeforeSeconds <= 0 {
-		cfg.RefreshBeforeSeconds = 600
+		cfg.RefreshBeforeSeconds = 300
+	}
+	if cfg.HarvestAttemptTimeoutSeconds <= 0 {
+		cfg.HarvestAttemptTimeoutSeconds = 25
 	}
 	if cfg.HarvestProbeIntervalSeconds <= 0 {
 		cfg.HarvestProbeIntervalSeconds = 6
@@ -107,6 +123,16 @@ type OpenAICodexTicketStatus struct {
 	RemainingSeconds int64      `json:"remaining_seconds"`
 	Blocked          bool       `json:"blocked"`
 	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	// PlanBucket 是账号档位（personal 10 块 / team 12 块 / unknown）。
+	PlanBucket string `json:"plan_bucket,omitempty"`
+	// NeedsHarvest 表示该模型的票需要重采（过期、watchdog 挂起或档位不符）。
+	NeedsHarvest bool `json:"needs_harvest,omitempty"`
+	// Degraded 表示当前票是降级形态（个人号 312 = 11 块，服务端会改发
+	// 低档模型）。降级票不会被注入，harvester 会继续重采 292。
+	Degraded bool `json:"degraded,omitempty"`
+	// CookieJarReady 表示账号级 Cookie 罐可用——2026-09-22 起真正的续航条件；
+	// 票只是便捷头，因此"票缺失"不再等于"不可用"。
+	CookieJarReady bool `json:"cookie_jar_ready"`
 }
 
 func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) []OpenAICodexTicketStatus {
@@ -120,20 +146,35 @@ func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketCon
 	if targetLen <= 0 {
 		targetLen = 292
 	}
+	bucket := openAICodexStateBucket(account)
+	// Cookie 罐没有独立的过期字段；只要存在受管 Cookie，就认为能续航。
+	// 这里用与出站注入一致的判据，避免 UI 与真实行为不一致。
+	cookieJarReady := len(accountOpenAICodexCookieJar(account)) > 0
 	out := make([]OpenAICodexTicketStatus, 0, len(models))
 	for _, model := range models {
 		model = normalizeOpenAICodexTicketModel(model)
 		if model == "" {
 			continue
 		}
-		status := OpenAICodexTicketStatus{Model: model}
-		ticket := parseOpenAICodexTicketFromAny(0, model, nil)
+		status := OpenAICodexTicketStatus{
+			Model:          model,
+			PlanBucket:     bucket,
+			CookieJarReady: cookieJarReady,
+		}
+		var ticket *openAICodexTicket
 		if account != nil && account.Extra != nil {
 			ticket = parseOpenAICodexTicketFromAny(account.ID, model, account.Extra[openAICodexTicketExtraKey(model)])
 		}
-		if ticket.valid(now, targetLen) {
+		// 与出站注入保持一致：档位匹配、bucket 未变、没有 watchdog 挂起。
+		// 换发票长度会漂移（292↔312），因此不再做精确等长判定。
+		if ticket != nil {
+			status.Length = len(strings.TrimSpace(ticket.State))
+			status.Degraded = openAICodexStateDegraded(ticket.State)
+		}
+		if ticket.usableFor(account, now, 0) {
 			status.Ready = true
-			status.Length = ticket.Length
+			status.Length = len(strings.TrimSpace(ticket.State))
+			status.Degraded = false
 			remaining := int64(ticket.ExpiresAt.Sub(now) / time.Second)
 			if remaining < 0 {
 				remaining = 0
@@ -141,8 +182,12 @@ func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketCon
 			status.RemainingSeconds = remaining
 			exp := ticket.ExpiresAt
 			status.ExpiresAt = &exp
+		} else if ticket != nil {
+			status.NeedsHarvest = true
 		}
-		status.Blocked = cfg.FailClosed && !status.Ready
+		// Cookie 罐可用时请求仍可成功（会换发新票），因此只有 fail-closed
+		// 且既无票又无 Cookie 才视为阻断。
+		status.Blocked = cfg.FailClosed && !status.Ready && !cookieJarReady
 		out = append(out, status)
 	}
 	return out
@@ -181,7 +226,15 @@ func (t *openAICodexTicket) valid(now time.Time, targetLen int) bool {
 		return false
 	}
 	state := strings.TrimSpace(t.State)
-	if len(state) != targetLen || t.Length != targetLen || !strings.HasPrefix(state, openAICodexTicketStatePrefix) {
+	// 上游换发的新票长度不再固定（292/312 并存），只做形状与下界校验；
+	// 档位（个人/Team）匹配由 usableFor 判定。
+	if !openAICodexTicketStateValid(state) {
+		return false
+	}
+	if targetLen > 0 && len(state) < targetLen {
+		return false
+	}
+	if t.Length != 0 && t.Length != len(state) {
 		return false
 	}
 	if t.ExpiresAt.IsZero() || !now.Before(t.ExpiresAt) {
@@ -298,8 +351,13 @@ func (s *OpenAIGatewayService) applyOpenAICodexTicket(ctx context.Context, accou
 		return nil
 	}
 	cfg := s.openAICodexTicketConfig()
+	// Cookie 罐与票解耦：即使没有有效票，只要 Cookie 罐还在，上游也会
+	// 接受请求并换发新票，因此先注入 Cookie 再判定票。
+	applyOpenAICodexCookies(h, s.lookupOpenAICodexCookieJar(account))
+	// 出站注入不因"临近过期"而放弃：票 + Cookie 罐可续航，票过期时
+	// 仅少一个便捷头，请求仍会成功并换发新票。
 	ticket := s.lookupOpenAICodexTicket(account, model)
-	if ticket.valid(time.Now(), cfg.TargetLength) {
+	if ticket.usableFor(account, time.Now(), 0) {
 		h.Set(openAICodexTurnStateHeader, ticket.State)
 		return nil
 	}
@@ -378,6 +436,10 @@ func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, a
 		return "", 0, err
 	}
 	applyOpenAICodexTicketHarvestIdentity(req.Header, model)
+	// 打票请求也带上账号级 Cookie 罐：无 Cookie 时上游只发一次性票、
+	// 不再换发新票；带 Cookie 才能持续拿到可续航的票。
+	harvestJar := s.lookupOpenAICodexCookieJar(account)
+	applyOpenAICodexCookies(req.Header, harvestJar)
 
 	// Synthetic probes must use the dedicated no-reuse transport even when the
 	// production account is bound to a plugin. This also avoids reading pluginManager
@@ -389,12 +451,16 @@ func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, a
 	if resp == nil {
 		return "", 0, errors.New("nil upstream response")
 	}
-	// Only the response header is needed; no connection will be reused.
+	// Only the response headers are needed; no connection will be reused.
 	defer func() {
 		if resp.Body != nil {
 			_ = resp.Body.Close()
 		}
 	}()
+	// 上游下发的 Cookie 是续航主体，先落库再返回票。
+	if updates := openAICodexCookieJarFromResponse(resp); len(updates) > 0 {
+		s.persistOpenAICodexCookieJar(context.WithoutCancel(ctx), account, updates)
+	}
 	return extractOpenAICodexTurnState(resp.Header), resp.StatusCode, nil
 }
 
@@ -503,8 +569,8 @@ func (s *OpenAIGatewayService) refreshOpenAICodexTickets(ctx context.Context) {
 			if model == "" {
 				continue
 			}
-			// 已有一张有效且未临近过期的票 → 本周期不打，省得白刷。
-			if t := s.lookupOpenAICodexTicket(&account, model); t.valid(now, cfg.TargetLength) && !t.needsRefresh(now, refreshBefore) {
+			// 已有一张有效、未临近过期、且不需要重采的票 → 本周期不打，省得白刷。
+			if t := s.lookupOpenAICodexTicket(&account, model); openAICodexTicketUsable(&account, t, now, refreshBefore) {
 				continue
 			}
 			acc := account
@@ -553,12 +619,22 @@ func (s *OpenAIGatewayService) probeOnceOpenAICodexTicket(ctx context.Context, a
 				zap.String("reason", "error"), zap.Error(perr))
 			return nil, nil
 		}
-		if status != http.StatusOK || state == "" || len(state) != cfg.TargetLength || !strings.HasPrefix(state, openAICodexTicketStatePrefix) {
+		if openAICodexStateDegraded(state) {
+			// 312 = 11 块降级形态：服务端会改发低档模型，丢弃并继续重采。
+			s.recordOpenAICodexDegradedProbe(account.ID)
+			logger.L().Warn("openai_codex_ticket degraded probe",
+				zap.Int64("account_id", account.ID), zap.String("model", model),
+				zap.Int("http", status), zap.Int("len", len(state)),
+				zap.Int("consecutive_degraded", s.openAICodexDegradedProbeStreak(account.ID)))
+			return nil, nil
+		}
+		if status != http.StatusOK || !openAICodexTicketStateMatchesAccount(account, state) {
 			logger.L().Info("openai_codex_ticket probe miss",
 				zap.Int64("account_id", account.ID), zap.String("model", model),
 				zap.Int("http", status), zap.Int("len", len(state)))
 			return nil, nil
 		}
+		s.clearOpenAICodexDegradedProbe(account.ID)
 		now := time.Now()
 		ticket := &openAICodexTicket{
 			AccountID:  account.ID,
@@ -567,7 +643,9 @@ func (s *OpenAIGatewayService) probeOnceOpenAICodexTicket(ctx context.Context, a
 			Length:     len(state),
 			CapturedAt: now,
 			ExpiresAt:  now.Add(time.Duration(cfg.TTLSeconds) * time.Second),
-			Attempts:   1,
+			Attempts:    1,
+			StateBucket: openAICodexStateBucket(account),
+			Cookies:     s.lookupOpenAICodexCookieJar(account),
 		}
 		s.storeOpenAICodexTicket(ctx, account, ticket)
 		logger.L().Info("openai_codex_ticket harvested",
@@ -588,12 +666,12 @@ func IsOpenAICodexTicketExtraKey(key string) bool {
 func MergeOpenAICodexTicketExtra(extra, current map[string]any) map[string]any {
 	result := maps.Clone(extra)
 	for key := range result {
-		if IsOpenAICodexTicketExtraKey(key) {
+		if IsOpenAICodexTicketExtraKey(key) || IsOpenAICodexCookieJarExtraKey(key) {
 			delete(result, key)
 		}
 	}
 	for key, value := range current {
-		if IsOpenAICodexTicketExtraKey(key) {
+		if IsOpenAICodexTicketExtraKey(key) || IsOpenAICodexCookieJarExtraKey(key) {
 			if result == nil {
 				result = make(map[string]any)
 			}
@@ -666,7 +744,9 @@ func isOpenAICodexTicketAccount(account *Account) bool {
 // IsOpenAICodexTicketPrivateExtraKey also covers the retired account-level proxy
 // override, whose credentials may remain in older account records.
 func IsOpenAICodexTicketPrivateExtraKey(key string) bool {
-	return IsOpenAICodexTicketExtraKey(key) || key == "codex_harvest_proxy_url"
+	return IsOpenAICodexTicketExtraKey(key) ||
+		IsOpenAICodexCookieJarExtraKey(key) ||
+		key == "codex_harvest_proxy_url"
 }
 
 // RedactOpenAICodexTicketExtra strips ephemeral ticket material from exports

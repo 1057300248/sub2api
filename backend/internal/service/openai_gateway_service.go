@@ -508,8 +508,15 @@ type OpenAIGatewayService struct {
 	// 剥离跨账号回带（openai_codex_turn_state.go）。
 	openaiCodexTurnStateOrigins sync.Map
 	openaiCodexTurnStateWrites  atomic.Uint64
-	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，292 长度门票。
+	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，codex turn-state 门票。
 	openaiCodexTickets           sync.Map
+	// openaiCodexCookies: accountID → map[cookieName]value，账号级 codex 上游
+	// Cookie 罐（__oailb/__cflb/__cf_bm）。票与 Cookie 解耦后，Cookie 才是
+	// 续航主体；见 openai_codex_cookie.go。
+	openaiCodexCookies           sync.Map
+	// openaiCodexDegradedProbes: accountID → 连续收到 312（11 块降级形态）
+	// 的打票次数。账号被判降级后服务端只发 312，面板据此提示需要换出口/养号。
+	openaiCodexDegradedProbes    sync.Map
 	openaiCodexTicketFlight      singleflight.Group
 	openaiCodexTicketLifecycleMu sync.Mutex
 	openaiCodexTicketCancel      context.CancelFunc

@@ -151,26 +151,58 @@ func TestApplyOpenAICodexTicket_ExpiredNotInjected(t *testing.T) {
 	require.Empty(t, h.Get(openAICodexTurnStateHeader))
 }
 
-func TestApplyOpenAICodexTicket_WrongLengthNotInjected(t *testing.T) {
+// 292（10 块）是健康票；312（11 块）是降级信号，必须拒绝注入。
+func TestApplyOpenAICodexTicket_AcceptsHealthyRejectsDegraded(t *testing.T) {
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
 		Enabled:      true,
 		TargetLength: 292,
-		TTLSeconds:   3600,
+		TTLSeconds:   360,
 		FailClosed:   true,
 	}, nil)
 	account := ticketTestAccount(41)
+
+	for _, length := range []int{292, 332} {
+		state := fakeCodexTicketState(length)
+		svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
+			AccountID:  41,
+			Model:      "gpt-6-astra",
+			State:      state,
+			Length:     length,
+			CapturedAt: time.Now(),
+			ExpiresAt:  time.Now().Add(time.Minute),
+		})
+		h := http.Header{}
+		require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", h))
+		require.Equal(t, state, h.Get(openAICodexTurnStateHeader))
+	}
+
+	// Degraded 11-block shape must never be injected.
+	degraded := fakeCodexTicketState(312)
 	svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
 		AccountID:  41,
 		Model:      "gpt-6-astra",
-		State:      fakeCodexTicketState(312),
-		Length:     312,
+		State:      degraded,
+		Length:     len(degraded),
 		CapturedAt: time.Now(),
-		ExpiresAt:  time.Now().Add(time.Hour),
+		ExpiresAt:  time.Now().Add(time.Minute),
 	})
-	h := http.Header{}
-	err := svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", h)
-	require.ErrorIs(t, err, ErrOpenAICodexTicketUnavailable)
-	require.Empty(t, h.Get(openAICodexTurnStateHeader))
+	degradedHeader := http.Header{}
+	require.ErrorIs(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", degradedHeader), ErrOpenAICodexTicketUnavailable)
+	require.Empty(t, degradedHeader.Get(openAICodexTurnStateHeader))
+
+	// 低于配置下界的票不入池。
+	short := fakeCodexTicketState(284)
+	svc.openaiCodexTickets.Store(openAICodexTicketKey(41, "gpt-6-astra"), &openAICodexTicket{
+		AccountID:  41,
+		Model:      "gpt-6-astra",
+		State:      short,
+		Length:     len(short),
+		CapturedAt: time.Now(),
+		ExpiresAt:  time.Now().Add(time.Minute),
+	})
+	shortHeader := http.Header{}
+	require.ErrorIs(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", shortHeader), ErrOpenAICodexTicketUnavailable)
+	require.Empty(t, shortHeader.Get(openAICodexTurnStateHeader))
 }
 
 func TestApplyOpenAICodexTicket_FailOpenSkipsInject(t *testing.T) {
@@ -195,20 +227,14 @@ func TestApplyOpenAICodexTicket_DisabledNoop(t *testing.T) {
 	require.Equal(t, "client-state", h.Get(openAICodexTurnStateHeader))
 }
 
-func TestHarvestOpenAICodexTicket_StopsAt292AndUsesHarvestProxy(t *testing.T) {
-	state312 := fakeCodexTicketState(312)
+// 打票走 harvest 代理、使用 harvest 传输档，并把捕获到的票注入出站请求。
+// 长度不再固定 292：这里用 292 代表任一合法长度。
+func TestHarvestOpenAICodexTicket_UsesHarvestProxyAndInjectsTicket(t *testing.T) {
 	state292 := fakeCodexTicketState(292)
-	header312 := http.Header{}
-	header312.Set(openAICodexTurnStateHeader, state312)
 	header292 := http.Header{}
 	header292.Set(openAICodexTurnStateHeader, state292)
 	upstream := &httpUpstreamRecorder{
 		responses: []*http.Response{
-			{
-				StatusCode: http.StatusOK,
-				Header:     header312,
-				Body:       io.NopCloser(strings.NewReader("data: {}\n\n")),
-			},
 			{
 				StatusCode: http.StatusOK,
 				Header:     header292,
@@ -227,8 +253,6 @@ func TestHarvestOpenAICodexTicket_StopsAt292AndUsesHarvestProxy(t *testing.T) {
 	account := ticketTestAccount(41)
 
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
-	require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
-	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
 	ticket := svc.lookupOpenAICodexTicket(account, "gpt-6-astra")
 	require.NotNil(t, ticket)
 	require.Equal(t, state292, ticket.State)
@@ -237,7 +261,7 @@ func TestHarvestOpenAICodexTicket_StopsAt292AndUsesHarvestProxy(t *testing.T) {
 	require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", h))
 	require.Equal(t, state292, h.Get(openAICodexTurnStateHeader))
 	require.Equal(t, "socks5h://user:pass@harvest.example:31", upstream.lastProxyURL)
-	require.Len(t, upstream.requests, 2)
+	require.Len(t, upstream.requests, 1)
 	require.Empty(t, upstream.requests[0].Header.Get(openAICodexTurnStateHeader))
 	require.Equal(t, openAICodexAstraMinVersion, upstream.requests[0].Header.Get("version"))
 	require.Equal(t, HTTPUpstreamProfileOpenAIHarvest, HTTPUpstreamProfileFromContext(upstream.requests[0].Context()))
@@ -401,7 +425,8 @@ func TestOpenAICodexTicketStatuses_RespectRuntimeConfiguration(t *testing.T) {
 	require.True(t, OpenAICodexTicketStatuses(account, cfg, time.Now())[0].Blocked)
 }
 func TestProbeOpenAICodexTicket_RejectsInvalidState(t *testing.T) {
-	for _, state := range []string{fakeCodexTicketState(312), strings.Repeat("X", 292), ""} {
+	// 312 现在是合法长度；超长与错误前缀仍然拒绝。
+	for _, state := range []string{strings.Repeat("X", 292), "", fakeCodexTicketState(openAICodexTicketMaxStateLength + 64)} {
 		h := http.Header{}
 		h.Set(openAICodexTurnStateHeader, state)
 		upstream := &httpUpstreamRecorder{responses: []*http.Response{{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader(""))}}}

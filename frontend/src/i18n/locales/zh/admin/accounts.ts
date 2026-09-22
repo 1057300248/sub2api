@@ -750,6 +750,10 @@ export default {
         codexTurnTicketMissing: '暂无有效门票，仍允许请求',
         codexTurnTicketReady: '剩余 {time}',
         codexTurnTicketPaused: '未打到 292，该模型已暂停',
+        codexTurnTicketDegraded: '降级票(312)',
+        codexTurnTicketDegradedHint: '收到 11 块(312) 降级票，服务端会改用低档模型；已丢弃并继续重采 292。',
+        codexTurnTicketCookieOnly: 'Cookie 续期',
+        codexTurnTicketCookieHint: '暂无健康 292 票，但账号 Cookie 罐可用，请求会照常发出并等待换发新票。',
         codexImageTool: 'Codex 图片桥接策略',
         codexImageToolDesc:
           '统一控制 Codex /responses 文本请求的 hosted image_generation 桥接和客户端图片工具声明。hosted 工具自动注入仅适用于非 Responses Lite 请求；账号级策略优先于渠道和全局配置，不影响独立图片生成接口。',

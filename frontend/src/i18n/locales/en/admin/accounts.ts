@@ -672,6 +672,10 @@ export default {
         codexTurnTicketMissing: 'No valid ticket; requests remain allowed',
         codexTurnTicketReady: '{time} left',
         codexTurnTicketPaused: 'No 292 ticket; this model is paused',
+        codexTurnTicketDegraded: 'Degraded (312)',
+        codexTurnTicketDegradedHint: 'An 11-block (312) degraded ticket was returned; the server would serve a lower-tier model. It is discarded and 292 is being re-harvested.',
+        codexTurnTicketCookieOnly: 'Cookie renewal',
+        codexTurnTicketCookieHint: 'No healthy 292 ticket yet, but the account cookie jar is alive; requests keep flowing while a fresh ticket is harvested.',
         codexImageTool: 'Codex image bridge policy',
         codexImageToolDesc:
           'Controls the hosted image_generation bridge and client-declared image tools on Codex /responses text requests. Hosted auto-injection applies only to non-Responses Lite requests. Account policy takes precedence over channel and global settings; standalone image-generation endpoints are unaffected.',

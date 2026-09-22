@@ -1175,6 +1175,10 @@ export interface Account {
     remaining_seconds: number
     blocked: boolean
     expires_at?: string
+    plan_bucket?: string
+    needs_harvest?: boolean
+    degraded?: boolean
+    cookie_jar_ready?: boolean
   }>
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {

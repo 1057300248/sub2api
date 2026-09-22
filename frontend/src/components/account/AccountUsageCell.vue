@@ -126,7 +126,9 @@
         >
           <span class="truncate font-medium text-gray-500 dark:text-gray-400" :title="ticket.model">{{ shortCodexTicketModel(ticket.model) }}</span>
           <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400">{{ formatCodexTicketRemaining(ticket.remaining_seconds) }}</span>
+          <span v-else-if="ticket.degraded" class="text-red-600 dark:text-red-400" :title="t('admin.accounts.openai.codexTurnTicketDegradedHint')">{{ t('admin.accounts.openai.codexTurnTicketDegraded') }}</span>
           <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.codexTurnTicketPaused') }}</span>
+          <span v-else-if="account.codex_turn_tickets?.some((item) => item.cookie_jar_ready)" class="text-sky-600 dark:text-sky-400" :title="t('admin.accounts.openai.codexTurnTicketCookieHint')">{{ t('admin.accounts.openai.codexTurnTicketCookieOnly') }}</span>
           <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing') }}</span>
         </div>
       </div>
