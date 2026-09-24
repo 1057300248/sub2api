@@ -2836,7 +2836,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		h.enqueueCyberSessionIdentityRejectedOpsEntry(c, apiKey, reqModel, metadata)
 		return
 	}
-	if cyberBlockKey := h.gatewayService.FindCyberSessionBlockedForIdentity(c.Request.Context(), firstIdentityDecision.effective); cyberBlockKey != "" {
+	if cyberBlockKey := h.findBlockedCyberSessionForIdentity(c, apiKey, firstIdentityDecision.effective); cyberBlockKey != "" {
 		writeCyberSessionBlockedWSError(c.Request.Context(), wsConn)
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "session blocked by cyber-security policy")
 		h.enqueueCyberSessionBlockedOpsEntry(c, apiKey, reqModel, cyberBlockKey)
@@ -3273,7 +3273,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 连接级 cyber session gate 也在 BeforeRequest 先执行，使 native 与
 				// passthrough ingress 都能在 BeforeTurn 及上游写入前无副作用地拒绝。
 				// BeforeTurn 中保留同一检查作为防御式兜底。
-				if cyberBlockedThisConn {
+				if cyberBlockedThisConn && !h.cyberPolicyLogOnly(c, apiKey) {
 					return newOpenAIWSLocalAdmissionCloseError(cyberSessionBlockedClientMsg)
 				}
 				if turn == 1 {
@@ -3367,7 +3367,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			},
 			BeforeTurn: func(turn int) error {
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
-				if cyberBlockedThisConn {
+				if cyberBlockedThisConn && !h.cyberPolicyLogOnly(c, apiKey) {
 					return newOpenAIWSLocalAdmissionCloseError(cyberSessionBlockedClientMsg)
 				}
 				// MapRequestModel 已在当前 turn 的 payload 解析阶段完成。这里
@@ -3467,7 +3467,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				cyberBlockedThisConn, cyberBlockPendingAfterFailover = advanceOpenAIWSCyberBlockState(
 					cyberBlockedThisConn,
 					cyberBlockPendingAfterFailover,
-					cyberMarked,
+					cyberMarked && !h.cyberPolicyLogOnly(c, apiKey),
 					turnErr,
 				)
 				if turnErr != nil {
@@ -4700,7 +4700,7 @@ func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlocked(c *gin.Context, apiKe
 	if !enabled {
 		return false
 	}
-	key := h.gatewayService.FindCyberSessionBlockedForIdentity(c.Request.Context(), identity)
+	key := h.findBlockedCyberSessionForIdentity(c, apiKey, identity)
 	if key == "" {
 		return false
 	}
@@ -4959,7 +4959,8 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarkedWithIdentity(c *gin.Cont
 		IdentitySource:    identity.Metadata.Source,
 		IdentityInherited: identity.Inherited,
 	}
-	if gwSvc != nil && apiKey != nil {
+	cyberLogOnly := h.cyberPolicyLogOnly(c, apiKey)
+	if gwSvc != nil && apiKey != nil && !cyberLogOnly {
 		if identity.BlockKey != "" {
 			blockCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 			gwSvc.MarkCyberSessionBlocked(blockCtx, "", []string{identity.BlockKey})
@@ -4971,6 +4972,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarkedWithIdentity(c *gin.Cont
 		defer cancel()
 		if cmSvc != nil {
 			cmSvc.RecordCyberPolicyEvent(ctx, service.CyberPolicyRecordInput{
+				LogOnly:         cyberLogOnly,
 				RequestID:       requestID,
 				UserID:          userID,
 				UserEmail:       userEmail,
