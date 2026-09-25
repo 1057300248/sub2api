@@ -27,7 +27,7 @@ func (r *clineRateLimitCASAccountRepoStub) SetRateLimitedIfLater(_ context.Conte
 }
 
 func TestHandle429ClineUsesParsedCooldownBeforeProviderFallback(t *testing.T) {
-	for _, platform := range []string{PlatformDeepSeek, PlatformOpenAI} {
+	for _, platform := range []string{PlatformDeepseek, PlatformOpenAI} {
 		t.Run(platform, func(t *testing.T) {
 			repo := &clineRateLimitCASAccountRepoStub{}
 			svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
@@ -52,7 +52,7 @@ func TestHandle429ClineCASFailureDoesNotUseRegularSetter(t *testing.T) {
 	repo := &clineRateLimitCASAccountRepoStub{extendErr: errors.New("database unavailable")}
 	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	account := &Account{
-		ID: 42, Platform: PlatformDeepSeek, Type: AccountTypeAPIKey,
+		ID: 42, Platform: PlatformDeepseek, Type: AccountTypeAPIKey,
 		Credentials: map[string]any{"base_url": "https://api.cline.bot/api/v1"},
 	}
 	svc.handle429(context.Background(), account, http.Header{}, []byte(`Try again in 1h25m`))
