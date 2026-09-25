@@ -1,5 +1,6 @@
 import qualityOps from './qualityOps'
 import accountOps from './accountOps'
+import tokenGuard from './tokenGuard'
 import landing from './landing'
 import common from './common'
 import dashboard from './dashboard'
@@ -13,6 +14,7 @@ import requestTiming from './requestTiming'
 export default {
   qualityOps,
   accountOps,
+  tokenGuard,
   requestTiming,
   ...landing,
   ...common,
