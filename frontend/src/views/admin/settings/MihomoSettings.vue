@@ -11,6 +11,8 @@
       <div v-for="pool in warmPools" :key="pool.source" class="rounded-xl border border-gray-200 p-3 text-xs dark:border-dark-600" data-testid="bps-warm-pool">
         <p class="font-medium">{{ pool.source }} · Warm IP pool</p>
         <p class="mt-2">{{ text('就绪', 'Ready') }} {{ pool.ready }} / {{ text('目标', 'Target') }} {{ pool.target }} · {{ text('探测中', 'Checking') }} {{ pool.checking }} · {{ text('冷却中', 'Cooling') }} {{ pool.cooling }}</p>
+        <p class="mt-1 text-gray-500">{{ text('目标按已启用账号的并发数汇总；不足时复用就绪出口，用户请求不探测冷节点。', 'Targets follow enabled account concurrency. Ready exits are reused when scarce; requests never probe cold nodes.') }}</p>
+        <p v-for="(count, reason) in pool.failure_reasons" :key="reason">{{ reason }}: {{ count }}</p>
         <p v-if="pool.target > 0 && pool.ready === 0" class="mt-1 text-amber-700">{{ text('后台正在预热；不会退回直连。', 'Background warming continues; direct fallback is disabled.') }}</p>
       </div>
     </div>
