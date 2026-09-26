@@ -1,0 +1,77 @@
+name: Cline CAS regression
+
+on:
+  push:
+    branches:
+      - codex/ranxi-production-cline-cas-20260925
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/cline-cas-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cline-cas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUB2API_TEST_POSTGRES_IMAGE: postgres:18.6-alpine
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Check formatting of ported files
+        run: |
+          files=(internal/service/cline_ratelimit.go internal/service/cline_ratelimit_test.go internal/service/cline_ratelimit_dispatch_test.go internal/service/ratelimit_service.go)
+          unformatted="$(gofmt -l "${files[@]}")"
+          if [[ -n "$unformatted" ]]; then printf '%s\n' "$unformatted"; exit 1; fi
+      - name: Cline parsing and 429 dispatch regressions
+        run: |
+          set -o pipefail
+          go test -tags=unit ./internal/service -run '^Test(ParseCline|SetCline|Handle429Cline)' -count=1 -json | tee "$RUNNER_TEMP/cline-unit.jsonl"
+      - name: PostgreSQL 18.6 monotonic CAS and scheduler regressions
+        run: |
+          set -o pipefail
+          go test -tags=integration ./internal/repository -run '^(TestAccountRepoSuite|TestListSchedulableAccountLoadsMatchesListSchedulable)$/^TestSetRateLimitedIfLaterDoesNotShortenReset$' -count=1 -json | tee "$RUNNER_TEMP/cline-postgres.jsonl"
+      - name: Require selected tests to execute and pass
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          required = {
+              'cline-unit.jsonl': {
+                  'TestParseClineRateLimitResetAt',
+                  'TestParseClineRateLimitResetAtRejectsOtherUpstream',
+                  'TestSetClineRateLimitedPrefersAtomicExtension',
+                  'TestSetClineRateLimitedDoesNotFallbackOnExtensionError',
+                  'TestSetClineRateLimitedSupportsLegacyRepository',
+                  'TestParseClineRateLimitResetAtScopesExactHostname',
+                  'TestHandle429ClineUsesParsedCooldownBeforeProviderFallback',
+                  'TestHandle429ClineCASFailureDoesNotUseRegularSetter',
+                  'TestHandle429ClinePatchPreservesOtherProviderFallback',
+              },
+              'cline-postgres.jsonl': {
+                  'TestAccountRepoSuite/TestSetRateLimitedIfLaterDoesNotShortenReset',
+                  'TestListSchedulableAccountLoadsMatchesListSchedulable',
+              },
+          }
+          for filename, expected in required.items():
+              events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP']) / filename).read_text().splitlines() if line.strip()]
+              passed = {event.get('Test') for event in events if event.get('Action') == 'pass'}
+              missing = expected - passed
+              if missing:
+                  raise SystemExit(f'{filename}: required tests did not pass: {sorted(missing)}')
+              print(f'{filename}: all {len(expected)} required tests passed')
+          PY
+      - name: Build backend
+        run: go build ./cmd/server
