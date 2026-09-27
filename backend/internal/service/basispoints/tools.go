@@ -471,6 +471,11 @@ func (b *Bridge) translateHistory(input []any) ([]any, error) {
 		if err := b.validateHistoryContent(item["content"], index, "content"); err != nil {
 			return nil, err
 		}
+		var err error
+		item, err = normalizeHistoryMessage(item, index)
+		if err != nil {
+			return nil, err
+		}
 		result = append(result, item)
 		if toolImages != nil {
 			result = append(result, toolImages)
