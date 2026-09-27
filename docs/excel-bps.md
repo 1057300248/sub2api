@@ -118,6 +118,17 @@ python backend/scripts/e2e-bps-ignore-images.py --expect ignore --stream --outpu
 
 脚本使用无效 base64 占位内容模拟截图，绝不解码或展示图片；验证开启后收到了真实上游的指定文本及成功终态，而不只检查 HTTP 200。最后一条命令复现长历史中的 `input[1032].output[1]` 和约 3 MB 的图片字段。成功探测会消耗所选上游的实际 token，不建议对生产账号自动定时运行。
 
+## 忽略历史中的加密消息内容
+
+在 **账号管理 > 编辑 OpenAI OAuth 账号 > Excel / BPS 协议** 中勾选 **忽略历史中的加密消息内容** 并保存，也支持批量编辑。账号 API 配置为 `extra.openai_excel_bps_ignore_encrypted_content: true`，默认关闭，无需数据库迁移。
+
+用过多代理协作的旧 Codex 会话，历史里子代理的中间消息以 `encrypted_content` 密文保存，只有原生 Codex 通道能读取。BPS 无法转发这类内容，而客户端每轮都会重发历史，所以整个旧会话持续返回 `basispoints_request_invalid`（`type=encrypted_content`）；新开会话不受影响。此选项让管理员选择以有损方式继续旧会话：
+
+- 转发前把消息 `content`（包括 `agent_message`）以及 `function_call_output` / `custom_tool_call_output` 的 `output` 数组中 `type=encrypted_content` 的部分，原位替换为固定的已省略提示；assistant 消息使用 `output_text`，其余使用 `input_text`。
+- 相邻文本（如子代理消息头）、消息顺序、工具调用及 `call_id` 保持不变；明文消息（如子代理的最终结论）照常转发。模型无法得知被省略的内容。
+- 推理项（reasoning）的密文沿用原有处理；工具参数、工具定义和字符串内容不做检查；其他不支持的内容仍按原有校验拒绝。此选项只替换密文部分，不改变 `agent_message` 等条目的结构。
+- 未勾选时保持原有拒绝行为；非 BPS 请求不受影响。开关不改变客户端保存的历史。历史中含截图且系统关闭了 BPS 图片支持时，还需同时开启“图片支持关闭时忽略图片输入”。
+
 ## Base64 图片原生上传
 
 在管理员后台的 **系统设置 > 功能开关 > Excel / BPS 图片支持** 中启用图片支持，并将图片传输方式设为 **BPS 原生附件上传** 后保存。原有开关和容量限制继续生效；未配置传输方式时仍使用原来的 HTTPS 中转。原生模式不要求填写公网图片地址，不会自动切换已有部署。
