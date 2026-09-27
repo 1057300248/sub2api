@@ -698,6 +698,8 @@ func registerSystemRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		system.GET("/mihomo", h.Admin.System.GetMihomo)
 		system.POST("/mihomo", h.Admin.System.ManageMihomo)
 		system.PUT("/mihomo/download-mode", h.Admin.System.SetMihomoDownloadMode)
+		system.POST("/mihomo/nodes/:name/test", h.Admin.System.TestMihomoNode)
+		system.POST("/mihomo/nodes/:name/quality-check", h.Admin.System.CheckMihomoNodeQuality)
 		system.GET("/check-updates", h.Admin.System.CheckUpdates)
 		system.GET("/rollback-versions", h.Admin.System.GetRollbackVersions)
 		system.POST("/update", h.Admin.System.PerformUpdate)
