@@ -1066,7 +1066,7 @@ func (s *AccountTokenGuardService) probe(ctx context.Context, cfg AccountTokenGu
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		code := guardHTTPErrorCode(probeCtx, err)
-		diagnostic := AccountTokenGuardDiagnostic{Code: code, EndedAt: timePtr(time.Now())}
+		diagnostic := AccountTokenGuardDiagnostic{Code: code, EndedAt: guardTimePtr(time.Now())}
 		return AccountTokenGuardProbeResult{State: AccountTokenGuardProbeTransient, Detail: formatGuardDiagnostic(diagnostic), Diagnostic: diagnostic}
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -1075,7 +1075,7 @@ func (s *AccountTokenGuardService) probe(ctx context.Context, cfg AccountTokenGu
 	diagnostic := AccountTokenGuardDiagnostic{HTTPStatus: resp.StatusCode, HeadersAt: &headersAt}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		diagnostic.Code = "upstream_http_error"
-		diagnostic.EndedAt = timePtr(time.Now())
+		diagnostic.EndedAt = guardTimePtr(time.Now())
 		return AccountTokenGuardProbeResult{State: AccountTokenGuardProbeTransient, Detail: formatGuardDiagnostic(diagnostic), LatencyMS: latency, Diagnostic: diagnostic}
 	}
 	result, readDiag, err := readGuardResult(probeCtx, resp.Body, 2<<20, 30*time.Second)
@@ -1084,7 +1084,7 @@ func (s *AccountTokenGuardService) probe(ctx context.Context, cfg AccountTokenGu
 		if diagnostic.Code == "" {
 			diagnostic.Code = guardReadErrorCode(err)
 		}
-		diagnostic.EndedAt = timePtr(time.Now())
+		diagnostic.EndedAt = guardTimePtr(time.Now())
 		return AccountTokenGuardProbeResult{State: AccountTokenGuardProbeTransient, Detail: formatGuardDiagnostic(diagnostic), LatencyMS: latency, Diagnostic: diagnostic}
 	}
 	status := strings.ToLower(guardText(result["status"]))
@@ -1092,7 +1092,7 @@ func (s *AccountTokenGuardService) probe(ctx context.Context, cfg AccountTokenGu
 	code := strings.ToLower(guardText(errorObject["code"]))
 	if result["error"] == nil && (status == "active" || status == "ok" || status == "success" || status == "succeeded") {
 		diagnostic.Code = "ok"
-		diagnostic.EndedAt = timePtr(time.Now())
+		diagnostic.EndedAt = guardTimePtr(time.Now())
 		return AccountTokenGuardProbeResult{State: AccountTokenGuardProbeOK, Detail: formatGuardDiagnostic(diagnostic), LatencyMS: latency, Diagnostic: diagnostic}
 	}
 	if isGuardAuthCode(code) || isGuardAuthCode(status) {
@@ -1100,11 +1100,11 @@ func (s *AccountTokenGuardService) probe(ctx context.Context, cfg AccountTokenGu
 		if diagnostic.Code == "" {
 			diagnostic.Code = status
 		}
-		diagnostic.EndedAt = timePtr(time.Now())
+		diagnostic.EndedAt = guardTimePtr(time.Now())
 		return AccountTokenGuardProbeResult{State: AccountTokenGuardProbeAuth, Detail: formatGuardDiagnostic(diagnostic), LatencyMS: latency, Diagnostic: diagnostic}
 	}
 	diagnostic.Code = firstNonEmptyGuard(code, status, "unexpected_result")
-	diagnostic.EndedAt = timePtr(time.Now())
+	diagnostic.EndedAt = guardTimePtr(time.Now())
 	return AccountTokenGuardProbeResult{State: AccountTokenGuardProbeTransient, Detail: formatGuardDiagnostic(diagnostic), LatencyMS: latency, Diagnostic: diagnostic}
 }
 
@@ -1396,7 +1396,7 @@ func withGuardJobID(detail, jobID string) string {
 	return truncateGuardText(string(raw), 1000)
 }
 
-func timePtr(value time.Time) *time.Time {
+func guardTimePtr(value time.Time) *time.Time {
 	return &value
 }
 
@@ -1487,15 +1487,6 @@ func truncateGuardText(value string, limit int) string {
 		return value
 	}
 	return value[:limit]
-}
-
-func containsGuardAny(haystack string, needles []string) bool {
-	for _, needle := range needles {
-		if needle != "" && strings.Contains(haystack, needle) {
-			return true
-		}
-	}
-	return false
 }
 
 func firstNonEmptyGuard(values ...string) string {
