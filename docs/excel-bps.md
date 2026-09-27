@@ -78,6 +78,18 @@
 
 ## 能力限制
 
+### 历史中的 `encrypted_content`
+
+如果错误为 `basispoints_request_invalid` 且 `param` 指向 `input[n].content[m]` 或
+`input[n].output[m]`，说明该历史部件是 BPS 不能转发的 `encrypted_content`。这是请求进入
+上游前的安全拒绝，服务端没有解密密钥，也不能根据字符串外观把它改成明文；因此没有可用的
+配置可以修复已经保存的这段历史。请从原始来源重发对应的明文，或刷新模型目录、移除
+multi-agent v2 覆盖后新建会话。不要改写类型、删除历史部件或静默切换到另一条路由。
+
+这与顶层 reasoning 的 `invalid_encrypted_content` 不同：后者已有受限的一次重试逻辑，不能
+恢复嵌套消息内容。`encrypted_function_args: []` 表示来源明确声明工具参数是明文，字段缺失
+或 `null` 都不等价；Sub2API 会保留真实的非空加密声明。
+
 `max`/`ultra` 映射 `xhigh`，`none`/`minimal` 映射 `low`，实际 effort 出现在响应/用量中。拒绝强制指定工具与仅 previous_response_id 的增量历史。结构化输出通过提示和本地终态校验实现，详见协议包 README。不要把 HTTP 200 当作模型能力证明。
 
 图片支持 HTTPS URL 和格式有效的原生附件 `file_id`. 需要发送 base64 图片时, 可选择服务器临时图片中转或原生上传模式. 本地转换通过不等于真实上游视觉已验收, 账号权限或模型限制仍可能导致上游拒绝.
