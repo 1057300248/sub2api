@@ -13,7 +13,7 @@ import (
 func normalizeHistoryMessage(item object, index int) (object, error) {
 	kind := text(item["type"])
 	agent := kind == "agent_message"
-	if !agent && kind != "message" && !(kind == "" && text(item["role"]) != "") {
+	if !agent && kind != "message" && (kind != "" || text(item["role"]) == "") {
 		return item, nil
 	}
 	metadata := make(object)
