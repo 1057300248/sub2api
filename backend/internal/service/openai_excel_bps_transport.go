@@ -235,6 +235,11 @@ func excelBPSLocalProxyPort(proxy string) int {
 }
 
 func recordExcelBPSTransportFailure(ctx context.Context, c *gin.Context, account *Account, scope, proxy string, err error, stage string, attempt int, retry bool) {
+	if isExcelBPSClientCancellation(c, err) {
+		logger.FromContext(ctx).Info("excel_bps.client_canceled",
+			zap.Int64("account_id", account.ID), zap.String("stage", stage))
+		return
+	}
 	kind := transportdiag.Classify(err)
 	if errors.Is(err, errExcelBPSProxyUnavailable) {
 		kind = "proxy_unavailable"
