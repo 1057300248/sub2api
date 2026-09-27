@@ -3,6 +3,7 @@ package mihomo
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -222,4 +223,36 @@ func TestSourceApplyRollbackWhenControllerRejects(t *testing.T) {
 	require.Contains(t, status.Error, "previous configuration retained")
 	require.Equal(t, 1, status.Subscriptions)
 	require.Equal(t, 1, status.Nodes)
+}
+
+func TestSubscriptionLifecyclePreservesExisting1024DynamicProxies(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("proxies:\n - {name: subscription-node, type: http, server: localhost, port: 9000}\n"))
+	}))
+	defer server.Close()
+	m := sourceTestManager(t)
+	m.saved.DownloadMode = SubscriptionDownloadDirect
+	for i := 0; i < 1024; i++ {
+		raw := fmt.Sprintf("http://fixture-%d:test-password@localhost:1080", i)
+		node, err := dynamicProxyNode(raw)
+		require.NoError(t, err)
+		m.saved.DynamicProxies = append(m.saved.DynamicProxies, raw)
+		m.saved.Nodes = append(m.saved.Nodes, node)
+	}
+	original := append([]string{}, m.saved.DynamicProxies...)
+	require.NoError(t, m.SubmitSourceManagement("subscription_add", []string{server.URL}, nil, false, "Test subscription"))
+	status := waitSourceOperation(t, m)
+	require.Empty(t, status.Error)
+	require.Equal(t, 1, status.Subscriptions)
+	require.Equal(t, 1024, status.DynamicProxies)
+	require.Equal(t, 1025, status.Nodes)
+	for _, action := range []string{"subscription_refresh", "subscription_disable", "subscription_enable", "subscription_remove"} {
+		require.NoError(t, m.Submit(action+"/"+subscriptionID(server.URL), nil, false))
+		status = waitSourceOperation(t, m)
+		require.Empty(t, status.Error, action)
+		require.Equal(t, original, m.saved.DynamicProxies, action)
+		require.Equal(t, 1024, status.DynamicProxies)
+	}
+	require.Zero(t, status.Subscriptions)
+	require.Equal(t, 1024, status.Nodes)
 }

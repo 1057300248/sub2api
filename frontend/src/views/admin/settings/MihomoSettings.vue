@@ -113,7 +113,7 @@
     </template>
     <p v-if="status && !status.installed && section !== 'kernel'" class="text-sm text-amber-700">{{ text('请先在“内核与规则”中安装内核。', 'Install the kernel in Kernel and rules first.') }}</p>
 
-    <BaseDialog :show="subscriptionDialog" :title="editing ? text('编辑订阅', 'Edit subscription') : text('添加订阅', 'Add subscription')" @close="!busy && (subscriptionDialog = false)">
+    <BaseDialog :show="subscriptionDialog" :title="editing ? text('编辑订阅', 'Edit subscription') : text('添加订阅', 'Add subscription')" @close="subscriptionDialog = false">
       <div class="space-y-4">
         <label class="block text-sm">{{ text('订阅名称（单条订阅，可选）', 'Subscription name (single source, optional)') }}<input v-model="subscriptionName" maxlength="80" class="input mt-2" data-testid="subscription-name" /></label>
         <label class="block text-sm" for="mihomo-subscriptions">{{ editing ? text('新订阅地址（留空只修改名称）', 'New URL (leave blank to rename only)') : text('机场订阅地址（每行一个）', 'Subscription URLs (one per line)') }}</label>
@@ -124,7 +124,7 @@
       </div>
       <template #footer><button type="button" class="btn btn-primary" :disabled="busy || (!subscriptions.trim() && !editing)" @click="saveSubscription">{{ text('保存并应用', 'Save and apply') }}</button></template>
     </BaseDialog>
-    <BaseDialog :show="dynamicDialog" :title="text('导入动态代理', 'Import dynamic proxies')" @close="!busy && (dynamicDialog = false)">
+    <BaseDialog :show="dynamicDialog" :title="text('导入动态代理', 'Import dynamic proxies')" @close="dynamicDialog = false">
       <div class="space-y-3">
         <label class="block text-sm" for="mihomo-dynamic-protocol">{{ text('无协议前缀时使用', 'Default protocol') }}</label>
         <select id="mihomo-dynamic-protocol" v-model="dynamicProtocol" class="input"><option value="http">HTTP</option><option value="https">HTTPS</option><option value="socks5">SOCKS5</option><option value="socks5h">SOCKS5H</option></select>
