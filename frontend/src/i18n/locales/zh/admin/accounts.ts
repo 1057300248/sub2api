@@ -110,7 +110,7 @@ export default {
         schedulerScore: '调度权值',
         status: '状态',
         schedulable: '调度',
-        todayStats: '今日统计',
+        todayStats: '整个统计',
         groups: '分组',
         usageWindows: '用量窗口',
         proxy: '代理',
@@ -1796,6 +1796,8 @@ export default {
         cost: '费用',
         requests: '请求',
         tokens: 'Token',
+        lifetimeTokens: '总计 Token',
+        lifetimeCost: '总计费用',
         highestCostDay: '最高费用日',
         highestRequestDay: '最高请求日',
         date: '日期',
@@ -1808,7 +1810,7 @@ export default {
         recentActivity: '最近统计',
         todayRequests: '今日请求',
         todayTokens: '今日 Token',
-        todayCost: '今日费用',
+        todayCost: '今日计费',
         usageTrend: '30天费用与请求趋势',
         noData: '该账号暂无使用数据'
       }
