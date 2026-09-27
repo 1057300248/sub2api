@@ -11,6 +11,7 @@ func (h *SystemHandler) GetMihomo(c *gin.Context) { response.Success(c, h.kernel
 func (h *SystemHandler) ManageMihomo(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 256<<10)
 	var req struct {
+		Name           string                `json:"name"`
 		Action         string                `json:"action"`
 		Subscriptions  []string              `json:"subscriptions"`
 		DynamicProxies []string              `json:"dynamic_proxies"`
@@ -21,7 +22,7 @@ func (h *SystemHandler) ManageMihomo(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "Invalid kernel request")
 		return
 	}
-	if err := h.kernel.SubmitWithDynamicProxies(req.Action, req.Subscriptions, req.DynamicProxies, req.Append, req.CountryFilter); err != nil {
+	if err := h.kernel.SubmitSourceManagement(req.Action, req.Subscriptions, req.DynamicProxies, req.Append, req.Name, req.CountryFilter); err != nil {
 		response.Error(c, http.StatusConflict, err.Error())
 		return
 	}

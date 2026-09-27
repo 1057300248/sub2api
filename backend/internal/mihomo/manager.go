@@ -43,26 +43,28 @@ func CloseAll() {
 }
 
 type Status struct {
-	CountryFilter    CountryFilter `json:"country_filter"`
-	CountryCodes     []string      `json:"country_codes"`
-	EligibleNodes    int           `json:"eligible_nodes"`
-	CountryExcluded  int           `json:"country_excluded"`
-	UnknownCountries int           `json:"unknown_countries"`
-	UseOnce          bool          `json:"use_once"`
-	Installed        bool          `json:"installed"`
-	Running          bool          `json:"running"`
-	Busy             bool          `json:"busy"`
-	Phase            string        `json:"phase"`
-	Error            string        `json:"error,omitempty"`
-	Subscriptions    int           `json:"subscriptions"`
-	DynamicProxies   int           `json:"dynamic_proxies"`
-	Nodes            int           `json:"nodes"`
-	Endpoint         string        `json:"endpoint"`
-	Supported        bool          `json:"supported"`
-	NodeStates       []NodeStatus  `json:"node_states"`
+	SubscriptionItems []SubscriptionStatus `json:"subscription_items"`
+	CountryFilter     CountryFilter        `json:"country_filter"`
+	CountryCodes      []string             `json:"country_codes"`
+	EligibleNodes     int                  `json:"eligible_nodes"`
+	CountryExcluded   int                  `json:"country_excluded"`
+	UnknownCountries  int                  `json:"unknown_countries"`
+	UseOnce           bool                 `json:"use_once"`
+	Installed         bool                 `json:"installed"`
+	Running           bool                 `json:"running"`
+	Busy              bool                 `json:"busy"`
+	Phase             string               `json:"phase"`
+	Error             string               `json:"error,omitempty"`
+	Subscriptions     int                  `json:"subscriptions"`
+	DynamicProxies    int                  `json:"dynamic_proxies"`
+	Nodes             int                  `json:"nodes"`
+	Endpoint          string               `json:"endpoint"`
+	Supported         bool                 `json:"supported"`
+	NodeStates        []NodeStatus         `json:"node_states"`
 }
 
 type NodeStatus struct {
+	SubscriptionIDs  []string   `json:"subscription_ids,omitempty"`
 	Dynamic          bool       `json:"dynamic"`
 	CountryCode      string     `json:"country_code,omitempty"`
 	CountryCheckedAt *time.Time `json:"country_checked_at,omitempty"`
@@ -74,15 +76,18 @@ type NodeStatus struct {
 }
 
 type saved struct {
-	CountryFilter  CountryFilter                 `json:"country_filter"`
-	Countries      map[string]CountryObservation `json:"countries,omitempty"`
-	UseOnce        bool                          `json:"use_once,omitempty"`
-	URLs           []string                      `json:"urls"`
-	DynamicProxies []string                      `json:"dynamic_proxies,omitempty"`
-	Nodes          []map[string]any              `json:"nodes"`
-	NodeNames      map[string]string             `json:"node_names,omitempty"`
-	Secret         string                        `json:"secret"`
-	Disabled       map[string]string             `json:"disabled,omitempty"`
+	SubscriptionCache     map[string]subscriptionCache  `json:"subscription_cache,omitempty"`
+	DisabledSubscriptions map[string]bool               `json:"disabled_subscriptions,omitempty"`
+	SubscriptionLabels    map[string]string             `json:"subscription_labels,omitempty"`
+	CountryFilter         CountryFilter                 `json:"country_filter"`
+	Countries             map[string]CountryObservation `json:"countries,omitempty"`
+	UseOnce               bool                          `json:"use_once,omitempty"`
+	URLs                  []string                      `json:"urls"`
+	DynamicProxies        []string                      `json:"dynamic_proxies,omitempty"`
+	Nodes                 []map[string]any              `json:"nodes"`
+	NodeNames             map[string]string             `json:"node_names,omitempty"`
+	Secret                string                        `json:"secret"`
+	Disabled              map[string]string             `json:"disabled,omitempty"`
 }
 
 type Manager struct {
@@ -140,8 +145,10 @@ func (m *Manager) Status() Status {
 	s.CountryCodes = countryCodes()
 	s.UseOnce = m.saved.UseOnce
 	s.Subscriptions = len(m.saved.URLs)
+	s.SubscriptionItems = subscriptionStatuses(m.saved)
 	s.DynamicProxies = len(m.saved.DynamicProxies)
 	s.Nodes = len(m.saved.Nodes)
+	sources := subscriptionNodeSourceIndex(m.saved)
 	for _, n := range m.saved.Nodes {
 		if name, ok := n["name"].(string); ok {
 			state := "enabled"
@@ -165,7 +172,7 @@ func (m *Manager) Status() Status {
 			} else if state == "enabled" {
 				s.EligibleNodes++
 			}
-			node := NodeStatus{Dynamic: dynamic, Name: name, DisplayName: m.saved.NodeNames[name], State: state, CountryCode: observation.Code, CountryError: observation.Error, CountryBlocked: blocked}
+			node := NodeStatus{SubscriptionIDs: sources[name], Dynamic: dynamic, Name: name, DisplayName: m.saved.NodeNames[name], State: state, CountryCode: observation.Code, CountryError: observation.Error, CountryBlocked: blocked}
 			if !observation.CheckedAt.IsZero() {
 				checked := observation.CheckedAt
 				node.CountryCheckedAt = &checked
@@ -185,11 +192,26 @@ func (m *Manager) Submit(action string, urls []string, appendURLs bool, filters 
 // Clash/Mihomo subscriptions. The legacy Submit method remains unchanged for
 // callers that do not use the dynamic source.
 func (m *Manager) SubmitWithDynamicProxies(action string, urls, dynamicProxies []string, appendURLs bool, filters ...*CountryFilter) error {
+	return m.SubmitSourceManagement(action, urls, dynamicProxies, appendURLs, "", filters...)
+}
+
+// SubmitSourceManagement keeps subscription labels separate from secret URLs.
+func (m *Manager) SubmitSourceManagement(action string, urls, dynamicProxies []string, appendURLs bool, label string, filters ...*CountryFilter) error {
 	op, node, hasNode := strings.Cut(action, "/")
-	if op != "install" && op != "apply" && op != "apply_dynamic" && op != "start" && op != "disable" && op != "recover" && op != "probe" && op != "once_on" && op != "once_off" && op != "country_filter" && op != "country_scan" && op != "country_probe" {
+	label = strings.TrimSpace(label)
+	if op == "subscription_rename" && label == "" {
+		return errors.New("subscription name is required")
+	}
+	if len([]rune(label)) > 80 || strings.ContainsAny(label, "\r\n") || strings.Contains(label, "://") {
+		return errors.New("subscription name must be plain text, at most 80 characters, without a URL")
+	}
+	if label != "" && op != "subscription_add" && op != "subscription_update" && op != "subscription_rename" {
+		return errors.New("subscription name is not supported for this operation")
+	}
+	if !sourceOperation(op) && op != "install" && op != "apply" && op != "apply_dynamic" && op != "start" && op != "disable" && op != "recover" && op != "probe" && op != "once_on" && op != "once_off" && op != "country_filter" && op != "country_scan" && op != "country_probe" {
 		return errors.New("unknown operation")
 	}
-	if (op == "disable" || op == "recover" || op == "probe" || op == "country_probe") != hasNode || (hasNode && (node == "" || strings.Contains(node, "/"))) {
+	if (op == "disable" || op == "recover" || op == "probe" || op == "country_probe" || sourceTargetRequired(op)) != hasNode || (hasNode && (node == "" || strings.Contains(node, "/"))) {
 		return errors.New("invalid operation target")
 	}
 	clean, err := normalizeURLs(urls)
@@ -220,6 +242,22 @@ func (m *Manager) SubmitWithDynamicProxies(action string, urls, dynamicProxies [
 		return errors.New("requires Linux amd64 or arm64")
 	}
 	next := m.saved
+	if sourceOperation(op) {
+		next, err = prepareSourceChange(next, op, node, clean, cleanDynamic)
+		if err == nil && label != "" {
+			if op == "subscription_rename" {
+				next.SubscriptionLabels[node] = label
+			} else if len(clean) == 1 {
+				next.SubscriptionLabels[subscriptionID(clean[0])] = label
+			} else {
+				err = errors.New("name requires exactly one subscription")
+			}
+		}
+		if err != nil {
+			m.mu.Unlock()
+			return err
+		}
+	}
 	if op == "country_filter" {
 		next.CountryFilter = filter
 	}
@@ -345,35 +383,28 @@ func (m *Manager) run(ctx context.Context, action string, next saved) error {
 	if !installed {
 		return errors.New("install the kernel first")
 	}
-	if action == "apply" || action == "apply_dynamic" {
-		var nodes []map[string]any
-		var names map[string]string
-		if len(next.URLs) > 0 {
-			var err error
-			nodes, names, err = m.fetchNodes(ctx, next.URLs)
-			if err != nil {
-				return err
-			}
-		} else {
-			nodes, names = []map[string]any{}, map[string]string{}
+	op, _, _ := strings.Cut(action, "/")
+	if op == "subscription_rename" {
+		b, _ := json.Marshal(next)
+		if err := atomicWrite(filepath.Join(m.dir, "settings.json"), b, 0600); err != nil {
+			return errors.New("cannot save subscription name")
 		}
-		if len(next.DynamicProxies) > 0 {
-			dynamicNodes, dynamicNames, err := dynamicProxyNodes(next.DynamicProxies)
-			if err != nil {
-				return err
-			}
-			nodes = append(nodes, dynamicNodes...)
-			for name, display := range dynamicNames {
-				names[name] = display
-			}
+		m.mu.Lock()
+		m.saved = next
+		m.mu.Unlock()
+		return nil
+	}
+	if action == "apply" || action == "apply_dynamic" || sourceOperation(op) {
+		if err := m.resolveSources(ctx, &next, action == "apply" || action == "apply_dynamic"); err != nil {
+			return err
 		}
-		if len(nodes) == 0 {
+		if len(next.Nodes) == 0 && !sourceOperation(op) {
 			return errors.New("save a valid subscription or dynamic proxy first")
 		}
-		next.Nodes = nodes
-		next.NodeNames = names
 	}
-	if len(next.Nodes) == 0 {
+	// Removing the last source installs a REJECT-only configuration so stale
+	// exits cannot remain active and traffic cannot fall back to direct access.
+	if len(next.Nodes) == 0 && !sourceOperation(op) {
 		return errors.New("save a valid subscription first")
 	}
 	if action == "country_scan" || strings.HasPrefix(action, "country_probe/") {
@@ -393,7 +424,7 @@ func (m *Manager) run(ctx context.Context, action string, next saved) error {
 	if action == "once_off" {
 		next.UseOnce = false
 	}
-	if op, name, ok := strings.Cut(action, "/"); ok {
+	if op, name, ok := strings.Cut(action, "/"); ok && !sourceOperation(op) {
 		found := false
 		for _, n := range next.Nodes {
 			if n["name"] == name {
