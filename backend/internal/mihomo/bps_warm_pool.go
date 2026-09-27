@@ -54,12 +54,14 @@ func (m *Manager) acquireBPSLease(ctx context.Context, scope string, excluded ma
 
 // BPSWarmStatus exposes counts only, never supplier credentials or identities.
 type BPSWarmStatus struct {
-	FailureReasons map[string]int `json:"failure_reasons"`
-	Target         int            `json:"target"`
-	Ready          int            `json:"ready"`
-	Eligible       int            `json:"eligible"`
-	Checking       int            `json:"checking"`
-	Cooling        int            `json:"cooling"`
+	ReadySubscription int            `json:"ready_subscription"`
+	ReadyDynamic      int            `json:"ready_dynamic"`
+	FailureReasons    map[string]int `json:"failure_reasons"`
+	Target            int            `json:"target"`
+	Ready             int            `json:"ready"`
+	Eligible          int            `json:"eligible"`
+	Checking          int            `json:"checking"`
+	Cooling           int            `json:"cooling"`
 }
 
 func (m *Manager) BPSWarmStatus() BPSWarmStatus {
@@ -84,6 +86,13 @@ func (m *Manager) BPSWarmStatus() BPSWarmStatus {
 		}
 		if eligible[node] && now.Before(h.verifiedUntil) {
 			s.Ready++
+			if !m.bpsStaticMode {
+				if m.bpsDynamic[node] {
+					s.ReadyDynamic++
+				} else {
+					s.ReadySubscription++
+				}
+			}
 		}
 	}
 	return s
@@ -125,11 +134,16 @@ func (m *Manager) warmBPSPool(ctx context.Context, target int) {
 			if !m.bpsStaticMode {
 				proxy = fmt.Sprintf("http://127.0.0.1:%d", m.bpsPorts[node])
 			}
-			readyNodes = append(readyNodes, refreshCandidate{bpsCandidate: bpsCandidate{node: node, proxy: proxy, lastProbe: h.verifiedUntil, score: m.bpsQualityScoreLocked(node, activeLoads[node], loads[node], now)}, active: activeLoads[node]})
+			readyNodes = append(readyNodes, refreshCandidate{bpsCandidate: bpsCandidate{subscription: !m.bpsStaticMode && !m.bpsDynamic[node], node: node, proxy: proxy, lastProbe: h.verifiedUntil, score: m.bpsQualityScoreLocked(node, activeLoads[node], loads[node], now)}, active: activeLoads[node]})
 		}
 	}
 	m.bpsMu.Unlock()
-	sort.Slice(readyNodes, func(i, j int) bool { return readyNodes[i].score > readyNodes[j].score })
+	sort.Slice(readyNodes, func(i, j int) bool {
+		if readyNodes[i].subscription != readyNodes[j].subscription {
+			return readyNodes[i].subscription
+		}
+		return readyNodes[i].score > readyNodes[j].score
+	})
 	due := make([]bpsCandidate, 0)
 	for i, c := range readyNodes {
 		if (i < target || c.active > 0) && !now.Add(30*time.Second).Before(c.lastProbe) {
@@ -152,14 +166,29 @@ func (m *Manager) warmBPSPool(ctx context.Context, target int) {
 		eligible, err := m.bpsEligibleNodesLocked(now, nil)
 		excluded := make(map[string]bool)
 		ready := 0
+		readySubscriptions, subscriptions := 0, 0
 		for node := range eligible {
+			if !m.bpsStaticMode && !m.bpsDynamic[node] {
+				subscriptions++
+			}
 			if now.Before(m.bpsHealthAtLocked(node, now).verifiedUntil) {
 				excluded[node] = true
 				ready++
+				if !m.bpsStaticMode && !m.bpsDynamic[node] {
+					readySubscriptions++
+				}
+			}
+		}
+		subscriptionTarget := min(target, subscriptions)
+		if readySubscriptions < subscriptionTarget {
+			for node := range eligible {
+				if m.bpsDynamic[node] {
+					excluded[node] = true
+				}
 			}
 		}
 		m.bpsMu.Unlock()
-		if err != nil || ready >= target || len(excluded) >= len(eligible) {
+		if err != nil || (ready >= target && readySubscriptions >= subscriptionTarget) || len(excluded) >= len(eligible) {
 			break
 		}
 		scope := fmt.Sprintf("warm:%d", time.Now().UnixNano())

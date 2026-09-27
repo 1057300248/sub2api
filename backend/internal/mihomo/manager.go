@@ -22,8 +22,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 const Version = "v1.19.31"
@@ -43,26 +41,27 @@ func CloseAll() {
 }
 
 type Status struct {
-	SubscriptionItems []SubscriptionStatus `json:"subscription_items"`
-	CountryFilter     CountryFilter        `json:"country_filter"`
-	CountryCodes      []string             `json:"country_codes"`
-	EligibleNodes     int                  `json:"eligible_nodes"`
-	CountryExcluded   int                  `json:"country_excluded"`
-	UnknownCountries  int                  `json:"unknown_countries"`
-	UseOnce           bool                 `json:"use_once"`
-	Installed         bool                 `json:"installed"`
-	Running           bool                 `json:"running"`
-	Busy              bool                 `json:"busy"`
-	Phase             string               `json:"phase"`
-	Error             string               `json:"error,omitempty"`
-	Subscriptions     int                  `json:"subscriptions"`
-	DynamicProxies    int                  `json:"dynamic_proxies"`
-	Nodes             int                  `json:"nodes"`
-	Endpoint          string               `json:"endpoint"`
-	Supported         bool                 `json:"supported"`
-	NodeStates        []NodeStatus         `json:"node_states"`
-	BPSWarmPool       BPSWarmStatus        `json:"bps_warm_pool"`
-	BPSIPWarmPool     BPSWarmStatus        `json:"bps_ip_warm_pool"`
+	DownloadMode      SubscriptionDownloadMode `json:"subscription_download_mode"`
+	SubscriptionItems []SubscriptionStatus     `json:"subscription_items"`
+	CountryFilter     CountryFilter            `json:"country_filter"`
+	CountryCodes      []string                 `json:"country_codes"`
+	EligibleNodes     int                      `json:"eligible_nodes"`
+	CountryExcluded   int                      `json:"country_excluded"`
+	UnknownCountries  int                      `json:"unknown_countries"`
+	UseOnce           bool                     `json:"use_once"`
+	Installed         bool                     `json:"installed"`
+	Running           bool                     `json:"running"`
+	Busy              bool                     `json:"busy"`
+	Phase             string                   `json:"phase"`
+	Error             string                   `json:"error,omitempty"`
+	Subscriptions     int                      `json:"subscriptions"`
+	DynamicProxies    int                      `json:"dynamic_proxies"`
+	Nodes             int                      `json:"nodes"`
+	Endpoint          string                   `json:"endpoint"`
+	Supported         bool                     `json:"supported"`
+	NodeStates        []NodeStatus             `json:"node_states"`
+	BPSWarmPool       BPSWarmStatus            `json:"bps_warm_pool"`
+	BPSIPWarmPool     BPSWarmStatus            `json:"bps_ip_warm_pool"`
 }
 
 type NodeStatus struct {
@@ -78,6 +77,7 @@ type NodeStatus struct {
 }
 
 type saved struct {
+	DownloadMode          SubscriptionDownloadMode      `json:"subscription_download_mode"`
 	SubscriptionCache     map[string]subscriptionCache  `json:"subscription_cache,omitempty"`
 	DisabledSubscriptions map[string]bool               `json:"disabled_subscriptions,omitempty"`
 	SubscriptionLabels    map[string]string             `json:"subscription_labels,omitempty"`
@@ -147,6 +147,10 @@ func (m *Manager) baseStatus() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.state
+	s.DownloadMode = m.saved.DownloadMode
+	if s.DownloadMode == "" {
+		s.DownloadMode = SubscriptionDownloadAuto
+	}
 	s.CountryFilter = m.saved.CountryFilter
 	if s.CountryFilter.Mode == "" {
 		s.CountryFilter.Mode = "off"
@@ -650,40 +654,27 @@ func (m *Manager) fetchNodes(ctx context.Context, urls []string) ([]map[string]a
 	seen := map[string]bool{}
 	proxy := ""
 	m.mu.Lock()
-	if m.state.Running {
+	mode, modeErr := normalizeSubscriptionDownloadMode(m.saved.DownloadMode)
+	running := m.state.Running
+	if running && mode != SubscriptionDownloadDirect {
 		proxy = m.subscriptionProxyURL
 		if proxy == "" {
 			proxy = Endpoint
 		}
 	}
 	m.mu.Unlock()
+	if modeErr != nil {
+		return nil, nil, modeErr
+	}
+	if mode == SubscriptionDownloadProxy && !running {
+		return nil, nil, errors.New("subscription proxy is not running")
+	}
 	for _, address := range urls {
-		var b []byte
-		var err error
-		if proxy != "" {
-			b, err = m.getViaProxy(ctx, address, 4<<20, "clash.meta", proxy)
-			if err != nil && ctx.Err() == nil {
-				// Subscription retrieval must work even when the current exit is
-				// broken. This fallback never applies to harvest/model traffic.
-				proxyErr := err
-				b, err = m.getViaProxy(ctx, address, 4<<20, "clash.meta", "")
-				if err != nil {
-					err = fmt.Errorf("subscription download failed via proxy (%v) and direct (%v)", proxyErr, err)
-				}
-			}
-		} else {
-			b, err = m.getViaProxy(ctx, address, 4<<20, "clash.meta", "")
-		}
+		imported, err := m.downloadSubscriptionNodes(ctx, address, mode, proxy)
 		if err != nil {
 			return nil, nil, err
 		}
-		var doc struct {
-			Proxies []map[string]any `yaml:"proxies"`
-		}
-		if yaml.Unmarshal(b, &doc) != nil || len(doc.Proxies) == 0 {
-			return nil, nil, errors.New("subscription must contain Clash/Mihomo YAML proxies")
-		}
-		for _, node := range doc.Proxies {
+		for _, node := range imported {
 			// Only outbound entries are imported; never accept a provider's listeners,
 			// rules, external controller or executable configuration.
 			kind, _ := node["type"].(string)

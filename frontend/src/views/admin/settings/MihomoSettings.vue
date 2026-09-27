@@ -11,6 +11,7 @@
       <div v-for="pool in warmPools" :key="pool.source" class="rounded-xl border border-gray-200 p-3 text-xs dark:border-dark-600" data-testid="bps-warm-pool">
         <p class="font-medium">{{ pool.source }} · Warm IP pool</p>
         <p class="mt-2">{{ text('就绪', 'Ready') }} {{ pool.ready }} / {{ text('目标', 'Target') }} {{ pool.target }} · {{ text('探测中', 'Checking') }} {{ pool.checking }} · {{ text('冷却中', 'Cooling') }} {{ pool.cooling }}</p>
+        <p v-if="pool.source === 'Mihomo' && pool.ready_subscription !== undefined" class="mt-1">{{ text('订阅就绪', 'Ready subscription exits') }} {{ pool.ready_subscription }} · {{ text('动态就绪', 'Ready dynamic exits') }} {{ pool.ready_dynamic || 0 }}</p>
         <p class="mt-1 text-gray-500">{{ text('目标按已启用账号的并发数汇总；不足时复用就绪出口，用户请求不探测冷节点。', 'Targets follow enabled account concurrency. Ready exits are reused when scarce; requests never probe cold nodes.') }}</p>
         <p v-for="(count, reason) in pool.failure_reasons" :key="reason">{{ reason }}: {{ count }}</p>
         <p v-if="pool.target > 0 && pool.ready === 0" class="mt-1 text-amber-700">{{ text('后台正在预热；不会退回直连。', 'Background warming continues; direct fallback is disabled.') }}</p>
@@ -24,6 +25,18 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div><h2 class="font-semibold">{{ text('Mihomo 订阅', 'Mihomo subscriptions') }}</h2><p class="mt-1 text-xs text-gray-500">{{ text('按订阅管理来源；地址和令牌不回显。添加订阅不会替换其他来源。', 'Manage each source independently. URLs and tokens stay hidden; adding a subscription preserves other sources.') }}</p></div>
         <button type="button" class="btn btn-primary" :disabled="busy || !status?.installed" @click="openSubscription()">{{ text('添加订阅', 'Add subscription') }}</button>
+      </div>
+      <div class="rounded-xl border border-gray-200 p-3 dark:border-dark-600">
+        <div class="flex flex-wrap items-center gap-3">
+          <label for="subscription-download-mode" class="text-sm font-medium">{{ text('订阅下载模式', 'Subscription download mode') }}</label>
+          <select id="subscription-download-mode" v-model="downloadMode" class="input w-auto" :disabled="busy" @change="downloadModeDirty = true">
+            <option value="auto">{{ text('自动：代理失败后直连', 'Auto: proxy with direct fallback') }}</option>
+            <option value="proxy">{{ text('仅通过 Mihomo', 'Mihomo proxy only') }}</option>
+            <option value="direct">{{ text('仅直连', 'Direct only') }}</option>
+          </select>
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="busy || !downloadModeDirty" @click="saveDownloadMode">{{ text('保存下载模式', 'Save download mode') }}</button>
+        </div>
+        <p class="mt-2 text-xs text-gray-500">{{ text('仅影响订阅文件下载，不改变打票或账号业务出口。自动模式在代理下载失败或内容无效时尝试直连；仅代理模式不会回退直连。', 'Only affects subscription downloads, not ticket or account traffic. Auto retries direct after a failed or invalid proxy response; proxy-only never falls back to direct.') }}</p>
       </div>
       <div class="flex flex-wrap gap-3">
         <input v-model="search" type="search" class="input sm:max-w-xs" :placeholder="text('搜索订阅名称', 'Search subscription names')" :aria-label="text('搜索订阅', 'Search subscriptions')" />
@@ -143,10 +156,11 @@ import type { CountryFilter, CountryNode } from './mihomoCountry'
 const props = withDefaults(defineProps<{ section?: 'subscriptions' | 'dynamic' | 'nodes' | 'kernel' }>(), { section: 'subscriptions' })
 const { locale } = useI18n()
 const text = (zh: string, en: string) => locale.value.startsWith('zh') ? zh : en
-interface WarmPoolStatus { target: number; ready: number; checking: number; cooling: number; failure_reasons?: Record<string, number> }
+type SubscriptionDownloadMode = 'auto' | 'proxy' | 'direct'
+interface WarmPoolStatus { ready_subscription?: number; ready_dynamic?: number; target: number; ready: number; checking: number; cooling: number; failure_reasons?: Record<string, number> }
 interface Subscription { id: string; label: string; enabled: boolean; nodes: number; cached: boolean; updated_at?: string }
 interface ManagedNode extends CountryNode { subscription_ids?: string[] }
-interface Status { bps_warm_pool?: WarmPoolStatus; bps_ip_warm_pool?: WarmPoolStatus; installed: boolean; running: boolean; busy: boolean; supported: boolean; phase: string; error?: string; nodes: number; subscriptions: number; subscription_items?: Subscription[]; dynamic_proxies?: number; endpoint: string; use_once?: boolean; node_states?: ManagedNode[]; country_filter?: CountryFilter; country_codes?: string[] }
+interface Status { subscription_download_mode?: SubscriptionDownloadMode; bps_warm_pool?: WarmPoolStatus; bps_ip_warm_pool?: WarmPoolStatus; installed: boolean; running: boolean; busy: boolean; supported: boolean; phase: string; error?: string; nodes: number; subscriptions: number; subscription_items?: Subscription[]; dynamic_proxies?: number; endpoint: string; use_once?: boolean; node_states?: ManagedNode[]; country_filter?: CountryFilter; country_codes?: string[] }
 interface Payload { subscriptions?: string[]; dynamic_proxies?: string[]; country_filter?: CountryFilter; name?: string }
 const status = ref<Status>()
 const loading = ref(true)
@@ -157,6 +171,9 @@ const success = ref('')
 const subscriptions = ref('')
 const subscriptionName = ref('')
 const subscriptionDialog = ref(false)
+const downloadMode = ref<SubscriptionDownloadMode>('auto')
+const downloadModeDirty = ref(false)
+watch(() => status.value?.subscription_download_mode, mode => { if (!downloadModeDirty.value) downloadMode.value = mode || 'auto' })
 const editing = ref<Subscription>()
 const dynamicDialog = ref(false)
 const dynamicProxies = ref('')
@@ -228,6 +245,18 @@ async function operate(action: string, payload: Payload = {}): Promise<boolean> 
   } catch (cause: unknown) {
     error.value = (cause as { message?: string })?.message || text('操作未完成，请重试', 'Operation failed. Please retry.')
     return false
+  } finally { pending.value = false; scheduleRefresh() }
+}
+async function saveDownloadMode() {
+  pending.value = true; error.value = ''; success.value = ''
+  if (timer) clearTimeout(timer)
+  try {
+    status.value = (await apiClient.put<Status>('/admin/system/mihomo/download-mode', { mode: downloadMode.value })).data
+    downloadModeDirty.value = false
+    downloadMode.value = status.value.subscription_download_mode || 'auto'
+    success.value = text('下载模式已保存', 'Download mode saved')
+  } catch (cause: unknown) {
+    error.value = (cause as { message?: string })?.message || text('无法保存下载模式', 'Cannot save download mode')
   } finally { pending.value = false; scheduleRefresh() }
 }
 function openSubscription(source?: Subscription) {

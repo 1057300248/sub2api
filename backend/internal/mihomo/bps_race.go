@@ -11,11 +11,12 @@ import (
 )
 
 type bpsCandidate struct {
-	node, proxy string
-	generation  uint64
-	score       float64
-	lastProbe   time.Time
-	verified    bool
+	node, proxy  string
+	generation   uint64
+	score        float64
+	lastProbe    time.Time
+	verified     bool
+	subscription bool
 }
 
 // Probe candidates without creating session leases. Only the winning exit is
@@ -53,7 +54,7 @@ func (m *Manager) bpsProbeCandidates(scope string, excluded map[string]bool) ([]
 			proxy = fmt.Sprintf("http://127.0.0.1:%d", port)
 		}
 		h := m.bpsHealthAtLocked(node, now)
-		candidate := bpsCandidate{lastProbe: h.lastProbe, node: node, proxy: proxy, generation: h.generation, score: m.bpsQualityScoreLocked(node, activeLoads[node], loads[node], now), verified: now.Before(h.verifiedUntil)}
+		candidate := bpsCandidate{subscription: !m.bpsStaticMode && !m.bpsDynamic[node], lastProbe: h.lastProbe, node: node, proxy: proxy, generation: h.generation, score: m.bpsQualityScoreLocked(node, activeLoads[node], loads[node], now), verified: now.Before(h.verifiedUntil)}
 		if binding != nil && binding.node == node && !binding.failed && (binding.active > 0 || candidate.verified) {
 			// Preserve a verified affinity and all in-flight requests. An idle,
 			// unverified binding may compete with alternative candidates.
@@ -64,6 +65,12 @@ func (m *Manager) bpsProbeCandidates(scope string, excluded map[string]bool) ([]
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].verified != candidates[j].verified {
 			return candidates[i].verified
+		}
+		if !candidates[i].verified && candidates[i].lastProbe.IsZero() != candidates[j].lastProbe.IsZero() {
+			return candidates[i].lastProbe.IsZero()
+		}
+		if candidates[i].subscription != candidates[j].subscription {
+			return candidates[i].subscription
 		}
 		if !candidates[i].verified && !candidates[i].lastProbe.Equal(candidates[j].lastProbe) {
 			return candidates[i].lastProbe.Before(candidates[j].lastProbe)
@@ -130,6 +137,15 @@ func (m *Manager) probeBPSLease(ctx context.Context, scope string, excluded map[
 			m.logBPSLeaseSelected(ctx, key, previous, lease)
 			return lease, nil
 		}
+	}
+	// Qualify the leading source tier first; do not spend spare lanes on
+	// dynamic exits while an untested subscription tier is being evaluated.
+	if !m.bpsStaticMode && len(candidates) > 0 && candidates[0].subscription {
+		end := 0
+		for end < len(candidates) && candidates[end].subscription {
+			end++
+		}
+		candidates = candidates[:end]
 	}
 	probeCtx, cancelProbes := context.WithCancel(ctx)
 	var wg sync.WaitGroup

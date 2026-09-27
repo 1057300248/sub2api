@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"github.com/Wei-Shaw/sub2api/internal/mihomo"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/gin-gonic/gin"
@@ -24,6 +25,28 @@ func (h *SystemHandler) ManageMihomo(c *gin.Context) {
 	}
 	if err := h.kernel.SubmitSourceManagement(req.Action, req.Subscriptions, req.DynamicProxies, req.Append, req.Name, req.CountryFilter); err != nil {
 		response.Error(c, http.StatusConflict, err.Error())
+		return
+	}
+	response.Success(c, h.kernel.Status())
+}
+
+// SetMihomoDownloadMode configures only subscription retrieval. Both the old
+// settings screen and IP management use this stable backend contract.
+func (h *SystemHandler) SetMihomoDownloadMode(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	var req struct {
+		Mode *mihomo.SubscriptionDownloadMode `json:"mode"`
+	}
+	if c.ShouldBindJSON(&req) != nil || req.Mode == nil {
+		response.Error(c, http.StatusBadRequest, "download mode is required")
+		return
+	}
+	if err := h.kernel.SetSubscriptionDownloadMode(c.Request.Context(), *req.Mode); err != nil {
+		status := http.StatusConflict
+		if errors.Is(err, mihomo.ErrSubscriptionDownloadMode) {
+			status = http.StatusBadRequest
+		}
+		response.Error(c, status, err.Error())
 		return
 	}
 	response.Success(c, h.kernel.Status())

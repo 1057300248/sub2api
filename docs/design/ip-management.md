@@ -40,3 +40,25 @@ Mihomo 管理页上方保留紧凑的运行状态及本地出口；后端有 War
 ## 验收
 
 验证逐条更新、改名、启停、移除、动态代理共存、共享节点保留、最后来源移除、旧配置兼容、敏感字段脱敏及失败回滚。前端验证异步失败保留草稿、移除确认、千级节点分页、来源筛选与打票设置跳转。所有运行测试使用 mock/本地 HTTP，不访问真实订阅或修改生产代理。
+
+
+## 2026-09-27 后端封装整合
+
+- IP 管理基础改动：dec0cfc67；warm pool 来源为 3682f20461a2315f49b8507aeeb2eddb0b3f824b，通过 cherry-pick -x 引入，并保留现有管理布局。
+- 订阅优先与下载封装来自 fix/bps-eof-diagnostics-20260927 工作树的未提交改动，原工作树保持不变；复用 bps.go / bps_race.go / bps_warm_pool.go 的已有改动、subscription_download_mode.go 和 subscription_download.go。
+- 后端后续已将下载设置封装为 SetSubscriptionDownloadMode 和 PUT /admin/system/mihomo/download-mode，前端直接调用 {mode}；移除临时 Operation 扩展，保留现有订阅管理 POST /admin/system/mihomo。
+- 下载模式使用 subscription_download_mode：auto / proxy / direct；仅控制订阅下载，不改变模型请求选路。复用后端 proxy 模式下内核不可用时拒绝下载的边界，禁止静默直连。
+- 新会话选就绪订阅节点优先；仍保留动态出口的已绑定会话，订阅不可用时可选就绪动态节点。warm pool 就绪来源计数直接由后端提供，前端不计算选路或预热策略。
+
+
+## 本地验证记录
+
+- 内核管理、订阅维护、下载模式、订阅优先和 warm pool：Go race 测试通过，使用本地 HTTP/代理 mock。
+- 前端已有关键测试及新增订阅管理测试通过；生产前端构建通过。
+- 浏览器验证采用本地模拟数据，检查 1440px 桌面、390px 手机、添加订阅弹窗及 1024 节点的每页 50 条分页。手机页面与弹窗 scrollWidth 均为 390px，没有横向溢出；未连接生产管理后台。
+- 未推送、合并生产分支或部署。后端来源工作树仍由原任务维护，本次只将固定快照整合到当前独立工作树。
+
+后端文件来源与固定快照摘要见 ip-management-backend-sources.json；包括后端原有下载模式、选路优先级与 Handler 契约测试。
+
+
+整合时原后端自带 TestBPSWarmSubscriptionTierBeforeDynamic 检出边界：先胜出的订阅探测取消同批未完成探测后，已尝试订阅可能排到未探测动态节点后面。沿用原 warm pool 排除候选机制，仅将排除动态节点的条件从“总就绪已达目标且订阅不足”修正为“订阅不足”；使有合格订阅待补充时继续优先订阅。后端来源原文件未改，修正在整合分支追加。

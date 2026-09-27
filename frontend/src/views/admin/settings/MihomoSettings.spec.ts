@@ -1,8 +1,8 @@
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import MihomoSettings from './MihomoSettings.vue'
-const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
-vi.mock('@/api/client', () => ({ apiClient: { get, post } }))
+const { get, post, put } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn() }))
+vi.mock('@/api/client', () => ({ apiClient: { get, post, put } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'zh' }, t: (key: string) => key }) }))
 const base = { installed: true, supported: true, running: true, busy: false, nodes: 1, subscriptions: 1, phase: 'running', endpoint: 'http://127.0.0.1:3101', dynamic_proxies: 1, subscription_items: [{ id: 'source-one', label: '机场 A', enabled: true, cached: true, nodes: 1 }], node_states: [{ name: 'node-one', display_name: '东京节点', state: 'enabled', subscription_ids: ['source-one'], country_code: 'JP' }] }
 let wrapper: VueWrapper
@@ -19,7 +19,7 @@ async function click(label: string) {
   expect(button, label).toBeDefined()
   await button!.trigger('click'); await flushPromises()
 }
-beforeEach(() => { vi.resetAllMocks(); get.mockResolvedValue({ data: base }); post.mockResolvedValue({ data: base }) })
+beforeEach(() => { vi.resetAllMocks(); get.mockResolvedValue({ data: base }); post.mockResolvedValue({ data: base }); put.mockResolvedValue({ data: { ...base, subscription_download_mode: 'proxy' } }) })
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers() })
 describe('Mihomo IP management', () => {
   it('loads a redacted subscription list without mutating configuration', async () => {
@@ -109,6 +109,33 @@ describe('Mihomo IP management', () => {
     wrapper = mountPanel(); await flushPromises(); expect(wrapper.find('[data-testid="bps-warm-pool"]').exists()).toBe(false)
     get.mockResolvedValue({ data: { ...base, bps_warm_pool: { ready: 0, target: 0, checking: 0, cooling: 0 }, bps_ip_warm_pool: { ready: 2, target: 0, checking: 0, cooling: 0 } } })
     await click('检测状态'); expect(wrapper.findAll('[data-testid="bps-warm-pool"]')).toHaveLength(2)
+  })
+  it('loads and saves the mode through the existing dedicated backend endpoint', async () => {
+    get.mockResolvedValue({ data: { ...base, subscription_download_mode: 'direct' } })
+    wrapper = mountPanel(); await flushPromises()
+    expect(wrapper.get<HTMLSelectElement>('#subscription-download-mode').element.value).toBe('direct')
+    await wrapper.get('#subscription-download-mode').setValue('proxy')
+    await click('保存下载模式')
+    expect(put).toHaveBeenCalledWith('/admin/system/mihomo/download-mode', { mode: 'proxy' })
+    expect(post).not.toHaveBeenCalled()
+  })
+  it('keeps an unsaved download mode while polling status', async () => {
+    wrapper = mountPanel(); await flushPromises()
+    await wrapper.get('#subscription-download-mode').setValue('proxy')
+    get.mockResolvedValue({ data: { ...base, subscription_download_mode: 'direct' } })
+    await click('检测状态')
+    expect(wrapper.get<HTMLSelectElement>('#subscription-download-mode').element.value).toBe('proxy')
+    put.mockRejectedValue({ message: 'cannot save subscription settings' })
+    await click('保存下载模式')
+    expect(wrapper.get<HTMLSelectElement>('#subscription-download-mode').element.value).toBe('proxy')
+    expect(wrapper.text()).toContain('cannot save subscription settings')
+  })
+  it('renders source readiness from backend counters without client-side inference', async () => {
+    get.mockResolvedValue({ data: { ...base, bps_warm_pool: { ready: 7, target: 0, checking: 0, cooling: 1, ready_subscription: 5, ready_dynamic: 2 } } })
+    wrapper = mountPanel(); await flushPromises()
+    const pool = wrapper.get('[data-testid="bps-warm-pool"]')
+    expect(pool.text()).toContain('订阅就绪 5')
+    expect(pool.text()).toContain('动态就绪 2')
   })
   it('does not offer installation when status loading fails', async () => {
     get.mockRejectedValue(new Error('network'))

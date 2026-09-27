@@ -1,0 +1,20 @@
+{
+  "date": "2026-09-27",
+  "source_worktree": "/home/ranxi/projects/.worktrees/sub2api-bps-eof-fix",
+  "base_commit": "d83e7268e",
+  "warm_pool_commit": "3682f20461a2315f49b8507aeeb2eddb0b3f824b",
+  "note": "Existing backend implementation and tests copied verbatim from a fixed local snapshot; the source worktree was not modified by this integration. Handler method and fetchNodes were integrated without replacing subscription management.",
+  "files_sha256": {
+    "backend/internal/mihomo/subscription_download_mode.go": "37ef409d89e476cd58f5548a50d77479c1542c75504f4c619675035a510dbca4",
+    "backend/internal/mihomo/subscription_download.go": "cfab4c7c634702b65bca9106b90e7d8e8a6b117334b72ec8a24039d5882c8b3e",
+    "backend/internal/mihomo/subscription_download_mode_test.go": "319b80cbd40ed1aa918e47b74f4366911df26ce8916e95184aeac3d082a10dc8",
+    "backend/internal/mihomo/bps_subscription_priority_test.go": "0bd7da11428663da33830ade3061d5775c55784ee63985c823001c28e5a07916",
+    "backend/internal/handler/admin/system_mihomo_download_test.go": "935cfbfef057547daccc175b21b650d9eb0aa20d510636b3b539c389c5a0be30",
+    "backend/internal/mihomo/bps.go": "5c08ee3e0da0b14185903fcb68afaba02e0343b8ddf0fb845f49e8ad2ed6c6be",
+    "backend/internal/mihomo/bps_race.go": "0705235e7540600bf35243ef82bd91a38846b960ffa6075ad484233250119e74",
+    "backend/internal/mihomo/bps_warm_pool.go": "c1615299208bb6cff5cdfbb1e28dcca9d73e6f9a79d6bf703f6b06933c80729b"
+  },
+  "integration_adjustments": {
+    "backend/internal/mihomo/bps_warm_pool.go": "One-condition fix: exclude dynamic candidates whenever readySubscriptions < subscriptionTarget; required by the source backend TestBPSWarmSubscriptionTierBeforeDynamic regression."
+  }
+}
