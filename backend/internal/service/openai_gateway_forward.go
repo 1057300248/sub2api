@@ -84,12 +84,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, errors.New("bps probe path is unavailable")
 	}
 	if account.IsExcelBPSEnabledForModel(modelForBPS) {
-		reason := basispoints.NativeFallbackReason(body)
-		if reason == "" {
-			return s.forwardExcelBPS(ctx, c, account, body, startTime)
-		}
-		c.Header("X-Codex2API-Upstream", "codex")
-		c.Header("X-Codex2API-Basispoints-Bypass", reason)
+		return s.forwardExcelBPS(ctx, c, account, body, startTime)
 	}
 
 	// The SDK adapter owns Lite declarations, custom tools, replay item IDs,

@@ -6,9 +6,9 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// NativeFallbackReason reports capabilities that must stay on the native Codex
-// channel because Basispoints cannot execute them. Empty means the request can
-// use the BPS bridge.
+// NativeFallbackReason reports capabilities that the BPS probe cannot execute.
+// Normal BPS-enabled requests are still forced through the BPS bridge; this
+// helper only rejects unsupported probe payloads before they are dispatched.
 func NativeFallbackReason(body []byte) string {
 	if !gjson.ValidBytes(body) {
 		return ""
