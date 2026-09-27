@@ -9,7 +9,7 @@ let wrapper: VueWrapper
 const mountPanel = (section: 'subscriptions' | 'dynamic' | 'nodes' | 'kernel' = 'subscriptions') => mount(MihomoSettings, {
   props: { section },
   global: { stubs: {
-    BaseDialog: { props: ['show'], template: '<div v-if="show" role="dialog"><slot /><slot name="footer" /></div>' },
+    BaseDialog: { props: ['show'], emits: ['close'], template: '<div v-if="show" role="dialog"><button aria-label="Close modal" @click="$emit(\'close\')">关闭</button><slot /><slot name="footer" /></div>' },
     ConfirmDialog: { props: ['show', 'message'], emits: ['confirm', 'cancel'], template: '<div v-if="show" data-test="confirm"><p>{{ message }}</p><button @click="$emit(\'confirm\')">确认</button><button @click="$emit(\'cancel\')">取消</button></div>' },
     DataTable: { props: ['columns', 'data', 'selectedKeys'], emits: ['update:selectedKeys'], template: '<div data-test="table"><button v-if="selectedKeys" @click="$emit(\'update:selectedKeys\', data.map(row => row.id))">全选</button><div v-for="row in data" :key="row.id || row.name" data-test="row"><template v-for="column in columns" :key="column.key"><slot :name="\'cell-\' + column.key" :row="row" :value="row[column.key]">{{ row[column.key] }}</slot></template></div><slot v-if="!data.length" name="empty" /></div>' }
   } }
@@ -136,6 +136,32 @@ describe('Mihomo IP management', () => {
     const pool = wrapper.get('[data-testid="bps-warm-pool"]')
     expect(pool.text()).toContain('订阅就绪 5')
     expect(pool.text()).toContain('动态就绪 2')
+  })
+  it.each(['subscriptions', 'dynamic'] as const)('closes %s after polling fails while backend status remains busy', async section => {
+    vi.useFakeTimers()
+    wrapper = mountPanel(section); await flushPromises()
+    await click(section === 'subscriptions' ? '添加订阅' : '导入动态代理')
+    const input = section === 'subscriptions' ? '#mihomo-subscriptions' : '#mihomo-dynamic-proxies'
+    await wrapper.get(input).setValue(section === 'subscriptions' ? 'https://example.org/test-subscription' : 'user:pass@localhost:1080')
+    post.mockResolvedValue({ data: { ...base, busy: true } })
+    get.mockRejectedValue(new Error('polling unavailable'))
+    await click(section === 'subscriptions' ? '保存并应用' : '应用动态代理')
+    await vi.advanceTimersByTimeAsync(1500); await flushPromises()
+    expect(wrapper.text()).toContain('polling unavailable')
+    await wrapper.get('[aria-label="Close modal"]').trigger('click')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(post).toHaveBeenCalledTimes(1)
+  })
+  it('closes the subscription dialog while its submitted operation is still pending', async () => {
+    let complete!: (value: unknown) => void
+    post.mockImplementation(() => new Promise(resolve => { complete = resolve }))
+    wrapper = mountPanel(); await flushPromises(); await click('添加订阅')
+    await wrapper.get('#mihomo-subscriptions').setValue('https://example.org/test-subscription')
+    await click('保存并应用')
+    await wrapper.get('[aria-label="Close modal"]').trigger('click')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    complete({ data: base }); await flushPromises()
+    expect(post).toHaveBeenCalledTimes(1)
   })
   it('does not offer installation when status loading fails', async () => {
     get.mockRejectedValue(new Error('network'))
