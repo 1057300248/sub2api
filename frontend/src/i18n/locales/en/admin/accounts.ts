@@ -641,6 +641,8 @@ export default {
         excelBPS403BadgeDisabled: '{time} turned off the Excel / BPS protocol; clears when the protocol is turned back on',
         excelBPS403BadgeMoved: '{time} moved to group “{group}”; clears when the account’s groups change',
         excelBPS403BadgeLeftGroups: '{time} left all groups; clears when the account’s groups change',
+        excelBPSIgnoreEncryptedContent: 'Ignore encrypted content in history',
+        excelBPSIgnoreEncryptedContentDesc: 'Disabled by default. Old Codex conversations that used multi-agent collaboration carry sub-agent messages as ciphertext that only the native Codex channel can read. BPS cannot forward it, so the whole conversation fails on every turn with an encrypted_content error. When enabled, encrypted parts of messages and tool results are replaced with a fixed omission notice before forwarding, keeping the remaining text, message order and tool call pairing so the conversation can continue. The model cannot see omitted content; plaintext messages, such as a sub-agent’s final answer, and reasoning items are not affected.',
         excelBPSCacheCreationAsInputDesc: 'Disabled by default. Bill BPS cache creation tokens as regular input and report zero cache creation usage downstream. Total input and cache reads stay unchanged. This does not disable upstream caching.',
         excelBPSDesc: 'Forward Responses through Excel using this account’s existing ChatGPT OAuth credentials. No GitHub login or sidecar. Disable to restore Codex routing.',
         excelBPSAllModels: 'Enable for all models (legacy behavior)',
