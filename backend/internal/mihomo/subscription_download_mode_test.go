@@ -75,6 +75,10 @@ func TestSubscriptionDownloadModePersistsWithoutChangingSources(t *testing.T) {
 	m.saved.DynamicProxies = []string{"http://user:private-proxy@localhost:9000"}
 	m.saved.Secret = "private-controller"
 	m.saved.Disabled = map[string]string{"keep": "disabled"}
+	id := subscriptionID(m.saved.URLs[0])
+	m.saved.SubscriptionLabels = map[string]string{id: "preserve-source"}
+	m.saved.DisabledSubscriptions = map[string]bool{id: true}
+	m.saved.SubscriptionCache = map[string]subscriptionCache{id: {Nodes: []map[string]any{{"name": "cached-node", "type": "http", "server": "example.test", "port": 8080}}, Names: map[string]string{"cached-node": "cached label"}}}
 	require.NoError(t, m.SetSubscriptionDownloadMode(context.Background(), SubscriptionDownloadDirect))
 	require.Equal(t, SubscriptionDownloadDirect, m.Status().DownloadMode)
 	require.False(t, m.Status().Running)
@@ -88,6 +92,9 @@ func TestSubscriptionDownloadModePersistsWithoutChangingSources(t *testing.T) {
 	require.Equal(t, m.saved.DynamicProxies, restored.saved.DynamicProxies)
 	require.Equal(t, m.saved.Secret, restored.saved.Secret)
 	require.Equal(t, m.saved.Disabled, restored.saved.Disabled)
+	require.Equal(t, m.saved.SubscriptionLabels, restored.saved.SubscriptionLabels)
+	require.Equal(t, m.saved.DisabledSubscriptions, restored.saved.DisabledSubscriptions)
+	require.Len(t, restored.saved.SubscriptionCache[id].Nodes, 1)
 	info, err := os.Stat(filepath.Join(dir, "settings.json"))
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0600), info.Mode().Perm())

@@ -42,23 +42,20 @@ Mihomo 管理页上方保留紧凑的运行状态及本地出口；后端有 War
 验证逐条更新、改名、启停、移除、动态代理共存、共享节点保留、最后来源移除、旧配置兼容、敏感字段脱敏及失败回滚。前端验证异步失败保留草稿、移除确认、千级节点分页、来源筛选与打票设置跳转。所有运行测试使用 mock/本地 HTTP，不访问真实订阅或修改生产代理。
 
 
-## 2026-09-27 后端封装整合
+## 后端依赖与合入顺序
 
-- IP 管理基础改动：dec0cfc67；warm pool 来源为 3682f20461a2315f49b8507aeeb2eddb0b3f824b，通过 cherry-pick -x 引入，并保留现有管理布局。
-- 订阅优先与下载封装来自 fix/bps-eof-diagnostics-20260927 工作树的未提交改动，原工作树保持不变；复用 bps.go / bps_race.go / bps_warm_pool.go 的已有改动、subscription_download_mode.go 和 subscription_download.go。
-- 后端后续已将下载设置封装为 SetSubscriptionDownloadMode 和 PUT /admin/system/mihomo/download-mode，前端直接调用 {mode}；移除临时 Operation 扩展，保留现有订阅管理 POST /admin/system/mihomo。
-- 下载模式使用 subscription_download_mode：auto / proxy / direct；仅控制订阅下载，不改变模型请求选路。复用后端 proxy 模式下内核不可用时拒绝下载的边界，禁止静默直连。
-- 新会话选就绪订阅节点优先；仍保留动态出口的已绑定会话，订阅不可用时可选就绪动态节点。warm pool 就绪来源计数直接由后端提供，前端不计算选路或预热策略。
+#142 的目标分支为 #143 的 feat/mihomo-management-backend。通用来源管理、订阅下载模式、管理员路由及其 Go 回归均归 #143；本 PR 相对该基线只包含前端和接入说明。
 
+前端沿用 GET /admin/system/mihomo、POST /admin/system/mihomo，下载模式独立调用 PUT /admin/system/mihomo/download-mode，正文示例为 {"mode":"direct"}，可选值为 auto / proxy / direct。接口行为见 mihomo-backend-api.md，路径中的 /api/v1 由 API client 添加。
 
-## 本地验证记录
+先审查并合入 #143，再将 #142 的目标分支改回 production，核对前端差异后合入。原提交历史保留，通过追加整合提交收敛最终文件差异，不重写远端分支历史。
 
-- 内核管理、订阅维护、下载模式、订阅优先和 warm pool：Go race 测试通过，使用本地 HTTP/代理 mock。
-- 前端已有关键测试及新增订阅管理测试通过；生产前端构建通过。
-- 浏览器验证采用本地模拟数据，检查 1440px 桌面、390px 手机、添加订阅弹窗及 1024 节点的每页 50 条分页。手机页面与弹窗 scrollWidth 均为 390px，没有横向溢出；未连接生产管理后台。
-- 未推送、合并生产分支或部署。后端来源工作树仍由原任务维护，本次只将固定快照整合到当前独立工作树。
+BPS warm pool、订阅优先策略和转发逻辑继续由 #133 维护。本页面兼容可选的 bps_warm_pool / bps_ip_warm_pool 状态：#143 未提供这些字段时隐藏对应卡片，不伪造计数、不发起预热；服务提供字段时直接显示就绪数与来源计数。
 
-后端文件来源与固定快照摘要见 ip-management-backend-sources.json；包括后端原有下载模式、选路优先级与 Handler 契约测试。
+原 73f560495 中的 BPS 实现及其回归保留在该提交历史中，包括订阅候选被同批取消后的优先级修正；本次将它们从前端最终差异移除，没有修改或推送 #133。后续整合 BPS 时需核对该修正与 #133 的对应实现。
 
+## 验证边界
 
-整合时原后端自带 TestBPSWarmSubscriptionTierBeforeDynamic 检出边界：先胜出的订阅探测取消同批未完成探测后，已尝试订阅可能排到未探测动态节点后面。沿用原 warm pool 排除候选机制，仅将排除动态节点的条件从“总就绪已达目标且订阅不足”修正为“订阅不足”；使有合格订阅待补充时继续优先订阅。后端来源原文件未改，修正在整合分支追加。
+接口回归使用本地 HTTP/代理 mock，前端使用模拟管理员响应。验证范围为来源管理、下载模式、异步失败保留草稿、分页筛选，以及预热字段存在或缺失时的兼容显示；不以这些测试推断真实供应商连通性或模型成功率。
+
+后端依赖和可选扩展记录在 ip-management-backend-sources.json；没有数据库迁移或生产配置变更。

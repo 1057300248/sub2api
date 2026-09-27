@@ -157,9 +157,7 @@ func (m *Manager) acquireBPSPreferredSession(scope string, now time.Time, exclud
 				continue
 			}
 			score := m.bpsQualityScoreLocked(id, activeLoads[id], loads[id], now)
-			subscription := !m.bpsStaticMode && !m.bpsDynamic[id]
-			bestSubscription := !m.bpsStaticMode && !m.bpsDynamic[node]
-			if node == "" || (subscription && !bestSubscription) || (subscription == bestSubscription && (score > bestScore || (score == bestScore && id < node))) {
+			if node == "" || score > bestScore || (score == bestScore && id < node) {
 				node, bestScore = id, score
 			}
 		}

@@ -60,8 +60,6 @@ type Status struct {
 	Endpoint          string                   `json:"endpoint"`
 	Supported         bool                     `json:"supported"`
 	NodeStates        []NodeStatus             `json:"node_states"`
-	BPSWarmPool       BPSWarmStatus            `json:"bps_warm_pool"`
-	BPSIPWarmPool     BPSWarmStatus            `json:"bps_ip_warm_pool"`
 }
 
 type NodeStatus struct {
@@ -93,8 +91,6 @@ type saved struct {
 }
 
 type Manager struct {
-	bpsWarmMu     sync.Mutex
-	bpsWarmTarget int
 	bpsMu         sync.Mutex
 	bpsPorts      map[string]int
 	bpsSessions   map[string]*bpsSession
@@ -138,12 +134,6 @@ func New(dir string) *Manager {
 }
 
 func (m *Manager) Status() Status {
-	s := m.baseStatus()
-	s.BPSWarmPool = m.BPSWarmStatus()
-	s.BPSIPWarmPool = bpsStaticManager.BPSWarmStatus()
-	return s
-}
-func (m *Manager) baseStatus() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.state

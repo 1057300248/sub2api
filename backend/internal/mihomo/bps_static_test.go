@@ -45,7 +45,6 @@ func TestBPSStaticPoolExcludesFailedExitAndEmptyPoolFails(t *testing.T) {
 	a := "http://a.example.com:8080"
 	b := "http://b.example.com:8080"
 	SetBPSStaticProxies([]string{a, b})
-	bpsStaticManager.warmBPSPool(t.Context(), 2)
 
 	lease, err := AcquireBPSStaticTransientLease(context.Background(), "request:1", a)
 	require.NoError(t, err)
@@ -78,7 +77,6 @@ func TestBPSStaticPoolSkipsUnreachableExit(t *testing.T) {
 		return nil
 	})
 	SetBPSStaticProxies([]string{bad, good})
-	bpsStaticManager.warmBPSPool(t.Context(), 2)
 
 	for i := 0; i < 4; i++ {
 		lease, err := AcquireBPSStaticTransientLease(context.Background(), fmt.Sprintf("request:%d", i))
@@ -96,14 +94,12 @@ func TestBPSStaticPoolRebindsAfterExitRemoved(t *testing.T) {
 	a := "http://a.example.com:8080"
 	b := "http://b.example.com:8080"
 	SetBPSStaticProxies([]string{a})
-	bpsStaticManager.warmBPSPool(t.Context(), 1)
 	lease, err := AcquireBPSStaticLease(context.Background(), "account:1/thread:a")
 	require.NoError(t, err)
 	require.Equal(t, a, lease.ProxyURL)
 	lease.Release()
 
 	SetBPSStaticProxies([]string{b})
-	bpsStaticManager.warmBPSPool(t.Context(), 1)
 	moved, err := AcquireBPSStaticLease(context.Background(), "account:1/thread:a")
 	require.NoError(t, err)
 	require.Equal(t, b, moved.ProxyURL)
