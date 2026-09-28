@@ -2548,6 +2548,7 @@ export interface QualityBPSPolicy {
   ignore_images: boolean
   ignore_encrypted_content: boolean
   auto_disable_on_403: boolean
+  auto_recover_on_403?: boolean
   auto_move_on_403: boolean
   target_group_id: number
   session_proxy: boolean
