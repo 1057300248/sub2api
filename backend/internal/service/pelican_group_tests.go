@@ -430,8 +430,11 @@ func (s *PelicanGroupTestService) runSample(ctx context.Context, plan *PelicanGr
 			result.AccountID, result.AccountName, result.Attempts = last.AccountID, last.AccountName, attempts[:len(attempts)-1]
 			return result
 		}
-		sample, err := s.runAccount(ctx, route.account.ID, route.model, plan.PelicanConfig)
-		route.release()
+		var sample *ScheduledTestResult
+		func() {
+			defer route.release()
+			sample, err = s.runAccount(ctx, route.account.ID, route.model, plan.PelicanConfig)
+		}()
 		if err != nil || sample == nil {
 			sample = &ScheduledTestResult{Status: "failed", ErrorMessage: fmt.Sprint(err)}
 			if err == nil {
