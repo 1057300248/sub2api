@@ -145,6 +145,7 @@ docs/*
 !docs/request-capture.md
 !docs/codex-credits.md
 !docs/account-token-guard.md
+!docs/priority-scheduling.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/
