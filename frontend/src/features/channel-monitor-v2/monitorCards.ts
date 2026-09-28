@@ -4,6 +4,19 @@ export function hasMonitorSamples(metric: MonitorMetric): boolean {
   return metric.has_samples === true || metric.request_count > 0
 }
 
+export function monitorRefreshSeconds(configSeconds: number | undefined, rows: readonly MonitorMatrixRow[], bootstrap: boolean): number {
+  if (bootstrap) return 10
+  let seconds = configSeconds && Number.isFinite(configSeconds) && configSeconds > 0 ? configSeconds : 300
+  for (const row of rows) {
+    const interval = row.candy?.interval_minutes
+    if (interval && Number.isFinite(interval) && interval > 0) {
+      seconds = Math.min(seconds, interval * 60)
+    }
+  }
+  // Refresh before a healthy minute probe can appear stale in a five-minute snapshot.
+  return Math.max(60, seconds)
+}
+
 // Keep real time gaps. Each bar summarizes observed health in one of 18 equal
 // time windows, never interpolating a successful request into missing history.
 export function monitorCardTimeline(row: MonitorMatrixRow, coverage: MonitorCoverage | undefined) {

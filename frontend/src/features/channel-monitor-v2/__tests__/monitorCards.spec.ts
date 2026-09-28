@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { candyDisplayState, hasMonitorSamples, monitorCardTimeline } from '../monitorCards'
+import { candyDisplayState, hasMonitorSamples, monitorCardTimeline, monitorRefreshSeconds } from '../monitorCards'
 import type { MonitorCandyHistory, MonitorCoverage, MonitorMatrixRow, MonitorMetric } from '@/api/channelMonitorV2'
 
 describe('monitor card data semantics', () => {
+  it('refreshes at the fastest visible probe interval without slowing configured polling or bootstrap', () => {
+    const row = (minutes: number) => ({ candy: { interval_minutes: minutes } }) as MonitorMatrixRow
+    expect(monitorRefreshSeconds(300, [], false)).toBe(300)
+    expect(monitorRefreshSeconds(60, [], false)).toBe(60)
+    expect(monitorRefreshSeconds(undefined, [], false)).toBe(300)
+    expect(monitorRefreshSeconds(300, [row(1)], false)).toBe(60)
+    expect(monitorRefreshSeconds(300, [row(2)], false)).toBe(120)
+    expect(monitorRefreshSeconds(300, [row(5), row(10)], false)).toBe(300)
+    expect(monitorRefreshSeconds(300, [row(5), row(1)], false)).toBe(60)
+    expect(monitorRefreshSeconds(60, [row(2)], false)).toBe(60)
+    expect(monitorRefreshSeconds(300, [row(0), row(Number.NaN)], false)).toBe(300)
+    expect(monitorRefreshSeconds(30, [row(0.5)], false)).toBe(60)
+    expect(monitorRefreshSeconds(300, [row(1)], true)).toBe(10)
+  })
   it('does not infer successful traffic from redacted zero counters', () => {
     expect(hasMonitorSamples({ request_count: 0, has_samples: false } as MonitorMetric)).toBe(false)
     expect(hasMonitorSamples({ request_count: 0, has_samples: true } as MonitorMetric)).toBe(true)
