@@ -138,27 +138,6 @@ func cleanJSONSchemaRecursive(value any) any {
 		delete(schemaMap, "prefixItems")
 	}
 
-	// Gemini's enum representation supports strings. Preserve string constants
-	// before the allowlist removes const, including schemas with no explicit type.
-	if constant, ok := schemaMap["const"].(string); ok {
-		values := []any{constant}
-		if existing, ok := schemaMap["enum"].([]any); ok {
-			// Both constraints apply: retain their intersection, not a wider enum.
-			values = []any{}
-			for _, value := range existing {
-				if text, ok := value.(string); ok && text == constant {
-					values = append(values, constant)
-					break
-				}
-			}
-		}
-		schemaMap["enum"] = values
-		if _, exists := schemaMap["type"]; !exists {
-			schemaMap["type"] = "string"
-		}
-		delete(schemaMap, "const")
-	}
-
 	// 1. [CRITICAL] 深度递归处理子项
 	if props, ok := schemaMap["properties"].(map[string]any); ok {
 		for _, v := range props {
@@ -279,6 +258,18 @@ func cleanJSONSchemaRecursive(value any) any {
 		if constVal, exists := schemaMap["const"]; exists {
 			if _, hasEnum := schemaMap["enum"]; !hasEnum {
 				schemaMap["enum"] = []any{constVal}
+			} else if constant, ok := constVal.(string); ok {
+				if existing, ok := schemaMap["enum"].([]any); ok {
+					// Both constraints apply; preserve their intersection before dropping const.
+					values := []any{}
+					for _, value := range existing {
+						if text, ok := value.(string); ok && text == constant {
+							values = append(values, constant)
+							break
+						}
+					}
+					schemaMap["enum"] = values
+				}
 			}
 			if _, hasType := schemaMap["type"]; !hasType {
 				switch constVal.(type) {
