@@ -42,7 +42,7 @@ export default {
         "interval": "Interval (minutes)",
         "selectGroup": "Choose a group",
         "addGroup": "Add group check",
-        "ruleHint": "Accepts clear answers such as 21, 21 candies or the answer is 21. Other answers fail. Transport failures are shown separately and never disable accounts. Save to apply. Public results expose status and time only; records are retained for 24 hours. A single test does not establish permanent model capability."
+        "ruleHint": "Accepts clear answers such as 21, 21 candies or the answer is 21. Other answers fail. Transport failures are shown separately. Wrong answers do not disable accounts. Save to apply. Public results expose status and time only; records are retained for 24 hours. A single test does not establish permanent model capability."
     },
     title: 'Channel Monitor',
     updating: 'Updating data',

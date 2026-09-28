@@ -113,7 +113,9 @@ func (s *ChannelMonitorV2CandyService) validateGroups(ctx context.Context, probe
 // RunDue uses the same group scheduler, model mapping, account concurrency and
 // failover policy as /admin/pelican-tests. A wrong answer is retained and never
 // retried on another account to obtain a passing sample. It does not bill a user,
-// publish a showcase item, mutate account state, or enter passive usage totals.
+// publish a showcase item, apply answer-based account actions, or enter passive
+// usage totals. Authentication/rate-limit health handling remains in the shared
+// account-test and gateway paths.
 func (s *ChannelMonitorV2CandyService) RunDue(ctx context.Context, now time.Time) {
 	if s == nil || !s.tick.TryLock() {
 		return
