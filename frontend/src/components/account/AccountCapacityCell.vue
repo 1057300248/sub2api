@@ -7,7 +7,7 @@
       </svg>
     </CapacityBadge>
 
-    <AccountConcurrencyProgress :account="account" />
+    <AccountConcurrencyProgress v-if="concurrencyUpgradeEnabled" :account="account" />
 
     <!-- 5h窗口费用限制 -->
     <CapacityBadge v-if="showWindowCost" :color-class="windowCostClass" :tooltip="windowCostTooltip" :current="'$' + formatCost(currentWindowCost)" :max="'$' + formatCost(account.window_cost_limit)">
@@ -47,6 +47,7 @@ import QuotaBadge from '@/components/account/QuotaBadge.vue'
 
 const props = defineProps<{
   account: Account
+  concurrencyUpgradeEnabled?: boolean
 }>()
 
 const { t } = useI18n()
