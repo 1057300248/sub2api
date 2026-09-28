@@ -154,6 +154,7 @@ docs/screenshots/*
 !docs/screenshots/codex-referral-dialog.png
 !docs/screenshots/codex-referral-success.png
 !docs/screenshots/bps403-recovery/
+!docs/screenshots/account-cost-multiplier/
 .serena/
 .codex/
 frontend/coverage/
