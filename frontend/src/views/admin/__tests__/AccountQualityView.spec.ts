@@ -210,7 +210,11 @@ describe('quality operations', () => {
       { id: 4, account_id: 1, enabled: false, pelican_config: { quality: { action: 'remove_groups', remove_group_ids: [21] } } },
       { id: 5, account_id: 2, enabled: false, pelican_config: { quality: { action: 'enable_bps', remove_group_ids: [] } } }
     ] as any)
-    vi.mocked(accountsAPI.list).mockResolvedValue({ items: [{ id: 1, name: 'Group rule' }, { id: 2, name: 'BPS rule' }, { id: 3, name: 'New' }], total: 3 } as any)
+    vi.mocked(accountsAPI.list).mockResolvedValue({ items: [
+      { id: 1, name: 'Group rule', platform: 'openai', type: 'oauth', extra: {} },
+      { id: 2, name: 'BPS rule', platform: 'openai', type: 'oauth', extra: {} },
+      { id: 3, name: 'New', platform: 'openai', type: 'oauth', extra: {} }
+    ], total: 3 } as any)
     const wrapper = mountView(); await flushPromises(); const vm = wrapper.vm as any
     vm.newPlan(); await flushPromises()
     await wrapper.get('[data-testid="quality-select-page"]').trigger('click')
