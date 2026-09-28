@@ -168,3 +168,6 @@ issues/
 /plugins/
 
 !docs/codex-ticket-pinning.md
+
+!docs/account-auto-config.md
+!docs/screenshots/auto-config/
