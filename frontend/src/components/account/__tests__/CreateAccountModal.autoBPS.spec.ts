@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   importCodexSession: vi.fn(),
   createOpenAICodexPAT: vi.fn(),
   createPlan: vi.fn(),
+  createCredentialOperations: vi.fn(),
   showError: vi.fn(),
   showWarning: vi.fn(),
   showInfo: vi.fn()
@@ -44,6 +45,10 @@ vi.mock('@/api/admin', () => ({
 
 vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn().mockResolvedValue([])
+}))
+
+vi.mock('@/api/admin/accountTokenGuardV2', () => ({
+  createTokenGuardV2Account: mocks.createCredentialOperations,
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -172,7 +177,8 @@ describe('CreateAccountModal auto BPS switch', () => {
     mocks.importCodexSession.mockResolvedValue(importResult([{ action: 'created', account_id: 93 }]))
     const wrapper = await openOAuthStep({ twoFA: true })
     const importer = wrapper.getComponent(OpenAITwoFAImport)
-    await expect(importer.props('importCredential')({ access_token: 'at', refresh_token: 'rt', account_id: 'ws' }, 'user@example.com')).resolves.toBe('created')
+    const login = { email: 'user@example.com', password: 'test-password', mfa_secret: 'test-secret' }
+    await expect(importer.props('importCredential')({ access_token: 'at', refresh_token: 'rt', account_id: 'ws' }, login.email, login)).resolves.toBe('created')
     expect(mocks.createPlan).toHaveBeenCalledTimes(1)
     expect(mocks.createPlan.mock.calls[0][0].account_id).toBe(93)
   })
