@@ -354,6 +354,7 @@ func TestPelicanGroupTestSampleSurvivesAccountTestFailures(t *testing.T) {
 	result := svc.runSample(context.Background(), groupTestPlan(1), &Group{ID: 4})
 	require.Equal(t, "failed", result.Status)
 	require.Equal(t, "pelican_group_test_panic: sample failed", result.ErrorMessage)
+	require.Equal(t, []int64{11}, router.released, "panic must release the account concurrency slot")
 
 	router = &groupTestRouterFake{steps: []routeStep{{account: account(11, "a")}, {account: account(12, "b")}}}
 	calls := 0
