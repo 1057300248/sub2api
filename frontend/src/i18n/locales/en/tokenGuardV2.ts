@@ -1,5 +1,5 @@
 export default {
-  title: 'Credential Guard V2',
+  title: 'Credential Operations',
   description: 'Stores a login method per OpenAI OAuth parent account, probes tokens automatically, and queues re-login after repeated authentication failures.',
   refresh: 'Refresh',
   addAccount: 'Add account',
@@ -11,7 +11,7 @@ export default {
   enabledCount: '{count} accounts enabled',
   failureThreshold: 'Re-login after {count} authentication failures',
   workerHint: 'Processed asynchronously by the re-login worker',
-  pageTabs: 'Credential Guard V2 sections',
+  pageTabs: 'Credential Operations sections',
   accountsTab: 'Monitored accounts',
   rulesTab: 'Probe rules',
   statusFilter: 'Account status filter',
@@ -57,7 +57,7 @@ export default {
   ruleScopeTitle: 'Probe scope',
   ruleScopeHint: 'Only added and enabled OpenAI OAuth parent accounts are probed. Shadow accounts, PAT accounts, and agent identities are excluded.',
   ruleHealthyTitle: 'Healthy result',
-  ruleHealthyHint: 'The guard requests the OpenAI models list through the account proxy. An accepted credential clears the failure streak.',
+  ruleHealthyHint: 'The probe requests the OpenAI models list through the account proxy. An accepted credential clears the failure streak.',
   ruleAuthTitle: 'Authentication failure',
   ruleAuthHint: 'A missing access token, upstream 401/403, invalid token, token expired, invalid_grant, or requires re-login response counts as an authentication failure.',
   ruleTransientTitle: 'Transient failure',
@@ -102,7 +102,7 @@ export default {
   pausedNotice: 'Paused {account}',
   resumedNotice: 'Resumed {account}',
   removedNotice: 'Removed {account}',
-  removeConfirm: 'Remove {account} from Credential Guard V2? Its login configuration remains available to the existing re-login flow.',
+  removeConfirm: 'Remove {account} from Credential Operations? Its login configuration remains available to the existing re-login flow.',
   error: 'The operation failed. Try again later.',
   probeStates: {
     pending: 'Pending',

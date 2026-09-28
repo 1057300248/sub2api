@@ -291,6 +291,7 @@ const SmartOpsIcon = { render: () => h(Icon, { name: 'cpu' }) }
 const QualityOpsIcon = { render: () => h(Icon, { name: 'badge', size: 'sm' }) }
 const AccountOpsIcon = { render: () => h(Icon, { name: 'userCog', size: 'sm' }) }
 const TokenGuardIcon = { render: () => h(Icon, { name: 'shieldKey', size: 'sm' }) }
+const CredentialOpsIcon = { render: () => h(Icon, { name: 'credentialOps', size: 'sm' }) }
 const PelicanTestsIcon = { render: () => h(Icon, { name: 'beaker', size: 'sm' }) }
 
 const DashboardIcon = {
@@ -847,7 +848,7 @@ const adminNavItems = computed((): NavItem[] => {
       { path: '/admin/account-ops', label: t('accountOps.title'), icon: AccountOpsIcon },
       { path: '/admin/token-guard', label: t('tokenGuard.title'), icon: TokenGuardIcon },
       { path: '/admin/pelican-tests', label: t('pelicanTests.title'), icon: PelicanTestsIcon },
-      { path: '/admin/token-guard-v2', label: t('tokenGuardV2.title'), icon: TokenGuardIcon },
+      { path: '/admin/token-guard-v2', label: t('tokenGuardV2.title'), icon: CredentialOpsIcon },
     ] },
     { path: '/admin/harvest-flow', label: t('nav.harvestFlow'), icon: FlowIcon },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },

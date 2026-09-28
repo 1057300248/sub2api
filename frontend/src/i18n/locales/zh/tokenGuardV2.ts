@@ -1,5 +1,5 @@
 export default {
-  title: '凭证守护 V2',
+  title: '凭证运营',
   description: '为指定 OpenAI OAuth 母账号独立保存登录方式，自动巡检令牌并在连续鉴权失败后排队重登。',
   refresh: '刷新',
   addAccount: '添加巡检账号',
@@ -11,7 +11,7 @@ export default {
   enabledCount: '{count} 个账号已启用',
   failureThreshold: '连续 {count} 次鉴权失败后重登',
   workerHint: '由重登 Worker 异步处理',
-  pageTabs: '凭证守护 V2 页面',
+  pageTabs: '凭证运营 页面',
   accountsTab: '巡检账号',
   rulesTab: '巡检规则',
   statusFilter: '账号状态筛选',
@@ -55,7 +55,7 @@ export default {
   minutes: '分钟',
   times: '次',
   ruleScopeTitle: '巡检范围',
-  ruleScopeHint: '仅巡检已添加且启用的 OpenAI OAuth 母账号；影子账号、PAT 和 Agent 身份不会进入 V2。',
+  ruleScopeHint: '仅巡检已添加且启用的 OpenAI OAuth 母账号；影子账号、PAT 和 Agent 身份不纳入凭证运营巡检。',
   ruleHealthyTitle: '正常判定',
   ruleHealthyHint: '使用账号现有代理请求 OpenAI 模型列表，凭证被接受即清零连续失败次数。',
   ruleAuthTitle: '鉴权失败判定',
@@ -102,7 +102,7 @@ export default {
   pausedNotice: '已暂停 {account}',
   resumedNotice: '已恢复 {account}',
   removedNotice: '已移除 {account}',
-  removeConfirm: '确认从凭证守护 V2 移除 {account}？登录配置仍会保留供现有重登流程使用。',
+  removeConfirm: '确认从凭证运营 移除 {account}？登录配置仍会保留供现有重登流程使用。',
   error: '操作失败，请稍后重试',
   probeStates: {
     pending: '待巡检',
