@@ -79,6 +79,8 @@
         <div v-if="editsField('test')" class="space-y-2">
           <label class="block space-y-1"><span>{{ t('qualityOps.questionKind') }}</span><select v-model="form.pelican_config.question_kind" class="input" data-testid="quality-question-kind" @change="selectQuestionKind"><option value="candy">{{ t('qualityOps.questionCandy') }}</option><option :value="STATE_PROBE_QUESTION">{{ t('qualityOps.questionStateProbe') }}</option></select></label>
           <p v-if="isProbe" class="text-sm text-gray-500" data-testid="quality-probe-hint">{{ t('qualityOps.probeHint') }}</p>
+          <label v-else class="block space-y-1"><span>{{ t('qualityOps.testChannel') }}</span><select v-model="form.pelican_config.test_channel" class="input" data-testid="quality-test-channel" @change="selectTestChannel"><option value="account">{{ t('qualityOps.accountChannel') }}</option><option value="bps">{{ t('qualityOps.bpsChannel') }}</option></select></label>
+          <p v-if="form.pelican_config.test_channel === 'bps'" class="text-sm text-gray-500" data-testid="quality-bps-observation-hint">{{ t('qualityOps.bpsObservationHint') }}</p>
         </div>
         <div class="grid gap-4 sm:grid-cols-2">
           <label v-if="editsField('model')" class="space-y-1"><span>{{ t('qualityOps.model') }}</span><input v-model.trim="form.model_id" required maxlength="100" class="input" placeholder="gpt-6-astra" /></label>
@@ -112,8 +114,9 @@
           <p class="text-sm text-gray-500">{{ t('qualityOps.grading') }}</p>
         </fieldset>
         </template>
-        <fieldset v-if="editsField('action')" class="space-y-3 rounded-lg border p-4 dark:border-dark-600">
+        <fieldset v-if="editsField('action') && form.pelican_config.test_channel !== 'bps'" class="space-y-3 rounded-lg border p-4 dark:border-dark-600">
           <legend class="px-2 font-medium">{{ t(isProbe ? 'qualityOps.probeFailureAction' : 'qualityOps.failureAction') }}</legend>
+          <label class="flex items-center gap-2"><input v-model="form.pelican_config.quality.action" type="radio" value="observe_only" data-testid="quality-action-observe-only" />{{ t('qualityOps.observeOnly') }}</label>
           <label class="flex items-center gap-2"><input v-model="form.pelican_config.quality.action" type="radio" value="remove_groups" />{{ t('qualityOps.removeGroups') }}</label>
           <div v-if="form.pelican_config.quality.action === 'remove_groups'" class="grid max-h-40 gap-2 overflow-auto pl-6 sm:grid-cols-2">
             <label v-for="group in groups" :key="group.id" class="flex items-center gap-2 text-sm"><input v-model="form.pelican_config.quality.remove_group_ids" type="checkbox" :value="group.id" />{{ group.name }} #{{ group.id }}</label>
@@ -124,7 +127,7 @@
             <QualityBPSSettings v-if="form.pelican_config.quality.action === 'enable_bps'" v-model:bps="form.pelican_config.quality.bps" v-model:auto-restore="form.pelican_config.quality.auto_restore" class="pl-6" :target-groups="bpsTargetGroups" :show-auto-restore="editsField('restore')" />
           </template>
         </fieldset>
-        <template v-if="editsField('restore') && !bpsSettingsShown">
+        <template v-if="editsField('restore') && !bpsSettingsShown && form.pelican_config.quality.action !== 'observe_only'">
           <QualityBPSRestoreOptions v-if="form.pelican_config.quality.action === 'enable_bps'" v-model:bps="form.pelican_config.quality.bps" v-model:auto-restore="form.pelican_config.quality.auto_restore" class="text-sm" always-show-hold />
           <template v-else><label class="flex items-center gap-2"><input v-model="form.pelican_config.quality.auto_restore" type="checkbox" data-testid="quality-auto-restore" />{{ t('qualityOps.autoRestore') }}</label><p class="text-sm text-gray-500">{{ t('qualityOps.restoreHelp') }}</p></template>
         </template>
@@ -199,8 +202,10 @@ const accountNames = computed(() => {
 const accounts = ref<AccountListItem[]>([]), accountsLoading = ref(false)
 const search = ref(''), accountPage = ref(1), accountPages = ref(1)
 const accountGroup = ref(''), accountType = ref(''), accountsError = ref(''), selectingAccounts = ref(false)
+function ruleScope(action?: QualityPolicy['action']) { return action === 'enable_bps' ? 'bps' : action === 'observe_only' ? 'observation' : 'quarantine' }
+const bulkSourceScope = ref('quarantine')
 const existingAccountIds = computed(() => new Set(plans.value.filter(plan =>
-  (plan.pelican_config?.quality?.action === 'enable_bps') === (form.value.pelican_config.quality.action === 'enable_bps')
+  ruleScope(plan.pelican_config?.quality?.action) === (bulkEditing.value ? bulkSourceScope.value : ruleScope(form.value.pelican_config.quality.action))
 ).map(plan => plan.account_id)))
 const selectableAccounts = computed(() => accounts.value.filter(account => !accountDisabledReason(account)))
 let accountSelectionRequest = 0
@@ -301,6 +306,7 @@ function bpsTrigger(policy?: QualityBPSPolicy) {
   return parts.join(policy?.require_all ? ' + ' : ' / ')
 }
 function policyTarget(quality?: QualityPolicy) {
+  if (quality?.action === 'observe_only') return t('qualityOps.observeOnly')
   if (quality?.action === 'remove_groups') return quality.remove_group_ids.map(id => groupNames.value[id] || `#${id}`).join(' / ')
   if (quality?.action !== 'enable_bps') return t('qualityOps.disableSchedulingShort')
   const trigger = bpsTrigger(quality.bps)
@@ -360,7 +366,7 @@ function resultTone(result: ScheduledTestResult) {
 }
 function defaults() {
   return { model_id: 'gpt-6-astra', cron_expression: '*/30 * * * *', enabled: true, max_results: 100, auto_recover: false,
-    pelican_config: { question_kind: 'candy' as 'candy' | typeof STATE_PROBE_QUESTION, prompt: CANDY_PROMPT, reasoning_effort: 'high', parallel_count: 1,
+    pelican_config: { question_kind: 'candy' as 'candy' | typeof STATE_PROBE_QUESTION, test_channel: 'account' as 'account' | 'bps', prompt: CANDY_PROMPT, reasoning_effort: 'high', parallel_count: 1,
       quality: { expected_answer: '21', action: 'remove_groups' as QualityPolicy['action'], remove_group_ids: [] as number[], auto_restore: false, judge: { group_id: 0, model_id: '', prompt: t('qualityOps.defaultJudgePrompt') }, bps: defaultQualityBPS() } } }
 }
 const form = ref(defaults())
@@ -434,6 +440,7 @@ function editSelectedRules() {
   // until explicitly checked. The request builder preserves each other value.
   if (selected.length) edit(selected[0])
   else newPlan()
+  bulkSourceScope.value = ruleScope(form.value.pelican_config.quality.action)
   editing.value = null; bulkEditing.value = true
   bulkRuleIds.value = selected.map(plan => plan.id)
   search.value = ''; accountGroup.value = ''; accountType.value = ''
@@ -448,8 +455,9 @@ function closeForm() {
 // 新建规则选「开启 BPS」时默认勾上满血后自动关闭，改回其它处理方式时回到默认不勾（移出分组等仍需手动开启恢复）；
 // 编辑已有规则或批量修改时保留原值。sync：打开表单时的替换在记录 initialForm 前就处理完。
 watch(() => form.value.pelican_config.quality.action, (next, prev) => {
-  if (editing.value || bulkEditing.value || (next !== 'enable_bps' && prev !== 'enable_bps')) return
-  form.value.pelican_config.quality.auto_restore = next === 'enable_bps'
+  if (editing.value || bulkEditing.value) return
+  if (next === 'enable_bps' || prev === 'enable_bps') form.value.pelican_config.quality.auto_restore = next === 'enable_bps'
+  if (next === 'observe_only') form.value.pelican_config.quality.auto_restore = false
   selectedAccounts.value = selectedAccounts.value.filter(id => !existingAccountIds.value.has(id))
 }, { flush: 'sync' })
 function useCandy() { form.value.pelican_config.prompt = CANDY_PROMPT; form.value.pelican_config.quality.expected_answer = '21' }
@@ -457,21 +465,30 @@ function selectQuestionKind() {
   accountSelectionRequest++; selectingAccounts.value = false
   const config = form.value.pelican_config
   if (config.question_kind === STATE_PROBE_QUESTION) {
+    config.test_channel = 'account'
     config.parallel_count = 1
     if (!editing.value && !bulkEditing.value && form.value.cron_expression === defaults().cron_expression) form.value.cron_expression = DEFAULT_STATE_PROBE_CRON
     if (!editing.value && !bulkEditing.value) selectedAccounts.value = selectedAccounts.value.filter(id => { const account = knownAccounts.get(id); return account && supportsStateProbeAccount(account) })
     return
   }
-  // 开 BPS 只认探针结论：切回糖果题时退回默认处理方式。
-  if (config.quality.action === 'enable_bps') config.quality.action = 'remove_groups'
+  // Switching auto-BPS rules to candy means observing BPS, not controlling it.
+  const hadBPSAction = config.quality.action === 'enable_bps' || (bulkEditing.value && !bulkFields.value.includes('action') && plans.value.some(plan => bulkRuleIds.value.includes(plan.id) && plan.pelican_config?.quality?.action === 'enable_bps'))
+  if (hadBPSAction) { config.test_channel = 'bps'; selectTestChannel() }
   config.quality.judge ||= defaults().pelican_config.quality.judge
   if (!config.prompt.trim()) useCandy()
+}
+function selectTestChannel() {
+  if (form.value.pelican_config.test_channel !== 'bps') return
+  form.value.pelican_config.quality.action = 'observe_only'
+  form.value.pelican_config.quality.auto_restore = false
+  if (bulkEditing.value) bulkFields.value = [...new Set<QualityRuleField>([...bulkFields.value, 'action', 'restore'])]
 }
 // 探针规则不发题目、不走判题模型：提交前去掉题目、参考答案和判题配置，并行固定为 1。
 // BPS 设置只随「开启 BPS」提交。
 function payload() {
   const quality = form.value.pelican_config.quality
-  if (!isProbe.value) return { ...form.value, pelican_config: { ...form.value.pelican_config, quality: { ...quality, bps: undefined } } }
+  if (!isProbe.value) return { ...form.value, pelican_config: { ...form.value.pelican_config, quality: { ...quality, bps: undefined,
+    remove_group_ids: quality.action === 'remove_groups' ? [...quality.remove_group_ids] : [], auto_restore: quality.action === 'observe_only' ? false : quality.auto_restore } } }
   const { action, remove_group_ids, auto_restore } = quality
   return { ...form.value, pelican_config: { ...form.value.pelican_config, prompt: '', parallel_count: 1,
     quality: { expected_answer: '', action, remove_group_ids: action === 'remove_groups' ? [...remove_group_ids] : [], auto_restore,
@@ -524,7 +541,12 @@ async function saveBulkRules() {
     const requests = ids.map(id => {
       const plan = plans.value.find(item => item.id === id)
       if (!plan) throw new Error(t('qualityOps.ruleUnavailable', { id }))
-      return { id, body: buildQualityRulePatch(plan, form.value, bulkFields.value) }
+      try {
+        return { id, body: buildQualityRulePatch(plan, form.value, bulkFields.value) }
+      } catch (e) {
+        const detail = message(e)
+        throw new Error(`${t('qualityOps.rule')} #${id}: ${te(detail) ? t(detail) : detail}`)
+      }
     })
     for (const { id, body } of requests) {
       if (!alive || scope !== identity()) return
