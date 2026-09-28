@@ -483,6 +483,7 @@ func TestPelicanGroupTestCleanupAndHistoryPaging(t *testing.T) {
 	items, total, err = svc.ListResults(ctx, 0, 4, 3)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
+	require.EqualValues(t, 10, total, "the last page still reports the full total")
 	require.EqualValues(t, 1, items[0].ID)
 	items, total, err = svc.ListResults(ctx, 0, 5, 3)
 	require.NoError(t, err)
