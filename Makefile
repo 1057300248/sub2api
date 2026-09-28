@@ -5,6 +5,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/features/channel-monitor-v2/__tests__/MonitorStatusCards.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorCards.spec.ts \
 	src/views/admin/__tests__/AccountQualityView.spec.ts \
+	src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts \
 	src/utils/__tests__/qualityRulePatch.spec.ts \
 	src/utils/__tests__/accountAutoBPS.spec.ts \
 	src/components/admin/operations/__tests__/QualityProbeSchedule.spec.ts \
