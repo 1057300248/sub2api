@@ -2768,7 +2768,7 @@
             <input
               v-model.number="autoResetCredit5hThreshold"
               type="number"
-              min="0.1"
+              min="0"
               max="100"
               step="0.1"
               class="input"
@@ -2781,7 +2781,7 @@
             <input
               v-model.number="autoResetCredit7dThreshold"
               type="number"
-              min="0.1"
+              min="0"
               max="100"
               step="0.1"
               class="input"
@@ -5398,7 +5398,7 @@ const handleSubmit = async () => {
   }
 	if (autoResetCreditEnabled.value) {
 		const thresholds = [autoResetCredit5hThreshold.value, autoResetCredit7dThreshold.value]
-		if (thresholds.some((value) => !Number.isFinite(value) || value < 0.1 || value > 100)) {
+		if (thresholds.some((value) => !Number.isFinite(value) || (value !== 0 && value < 0.1) || value > 100)) {
 			appStore.showError(t('admin.accounts.autoResetCredit.thresholdInvalid'))
 			return
 		}
