@@ -6,9 +6,11 @@ on:
       - codex/ranxi-production-cline-cas-20260925
       - codex/ranxi-v2.8.17-cline-cas-20260926
       - codex/ranxi-latest-patches-20260929
+      - codex/ranxi-v2.9.3-patches-20260929
   pull_request:
     paths:
       - 'backend/**'
+      - 'frontend/**'
       - '.github/workflows/cline-cas-validation.yml'
       - 'tools/verify_custom_patch_alignment.py'
   workflow_dispatch:
@@ -18,7 +20,6 @@ permissions:
 
 jobs:
   patch-inventory:
-    if: github.ref == 'refs/heads/codex/ranxi-latest-patches-20260929'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -26,22 +27,31 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Record exact upstream and customization ancestry
+      - name: Verify exact upstream and complete previous customization ancestry
         env:
-          UPSTREAM_SHA: 468061e082a0fcc1ef6a9c8f8b0ef1f773d26652
+          UPSTREAM_SHA: faf58e440b1bddb07429f74ed63b570c11d1c0f8
+          PREVIOUS_CUSTOM_SHA: 6793a84770efbcef9b37878ba35b5f66d7f45a18
           CLINE_SHA: 94ce53353ecc501c26308ddaef36d1f8bcec78e0
-          LEGACY_SHA: ee7cfaf3f4b927e0e557c649cecc275abb00458e
+          PREVIOUS_UPSTREAM_SHA: 468061e082a0fcc1ef6a9c8f8b0ef1f773d26652
         run: |
           set -euo pipefail
           git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD
+          git merge-base --is-ancestor "$PREVIOUS_CUSTOM_SHA" HEAD
           git merge-base --is-ancestor "$CLINE_SHA" HEAD
+          test "$(cat backend/cmd/server/VERSION)" = '2.9.3'
+          git diff --check "$UPSTREAM_SHA" HEAD
           mkdir -p "$RUNNER_TEMP/patch-inventory"
           {
             git rev-parse HEAD
-            git log --no-merges --right-only --cherry-pick --format='%H %s' "$UPSTREAM_SHA...$LEGACY_SHA"
+            printf 'upstream=%s\nprevious_custom=%s\n' "$UPSTREAM_SHA" "$PREVIOUS_CUSTOM_SHA"
+            git rev-list --count "$PREVIOUS_UPSTREAM_SHA..$UPSTREAM_SHA"
+            git log --no-merges --format='%H %s' "$PREVIOUS_UPSTREAM_SHA..$UPSTREAM_SHA"
             git diff --stat "$UPSTREAM_SHA" HEAD
             git ls-files '*AGENTS.md'
           } | tee "$RUNNER_TEMP/patch-inventory/inventory.txt"
+          git diff "$PREVIOUS_UPSTREAM_SHA" "$UPSTREAM_SHA" > "$RUNNER_TEMP/patch-inventory/upstream.patch"
+          git diff "$UPSTREAM_SHA" HEAD > "$RUNNER_TEMP/patch-inventory/custom.patch"
+          git archive --format=tar HEAD > "$RUNNER_TEMP/patch-inventory/source.tar"
       - uses: actions/upload-artifact@v6
         with:
           name: patch-inventory-${{ github.sha }}
@@ -104,12 +114,23 @@ jobs:
               events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP']) / filename).read_text().splitlines() if line.strip()]
               passed = {event.get('Test') for event in events if event.get('Action') == 'pass'}
               missing = expected - passed
-              if missing:
-                  raise SystemExit(f'{filename}: required tests did not pass: {sorted(missing)}')
-              print(f'{filename}: all {len(expected)} required tests passed')
+              failed = [event.get('Test', 'package') for event in events if event.get('Action') == 'fail']
+              skipped = [event.get('Test', 'package') for event in events if event.get('Action') == 'skip']
+              if missing or failed or skipped:
+                  raise SystemExit(f'{filename}: missing={sorted(missing)} failed={failed} skipped={skipped}')
+              print(f'{filename}: all {len(expected)} required tests passed; no skips')
           PY
       - name: Build backend
         run: go build ./cmd/server
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: cline-results-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/cline-unit.jsonl
+            ${{ runner.temp }}/cline-postgres.jsonl
+          if-no-files-found: error
+          retention-days: 7
   legacy-patch-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -131,5 +152,58 @@ jobs:
         with:
           name: custom-patch-regressions-${{ github.sha }}
           path: ${{ runner.temp }}/custom-patch-results/
+          if-no-files-found: error
+          retention-days: 7
+  frontend-upgrade-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - name: Verify newly added credential and operations UI regressions
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          pnpm exec vitest run \
+            src/components/account/__tests__/CredentialEncryptionSetup.spec.ts \
+            src/components/account/__tests__/OpenAITwoFAImport.spec.ts \
+            src/components/account/__tests__/CreateAccountModal.spec.ts \
+            src/components/admin/operations/__tests__/AutoConfigHistory.spec.ts \
+            src/composables/__tests__/useExcelBPSDefaults.spec.ts \
+            src/views/admin/__tests__/AutoConfigView.spec.ts \
+            src/views/admin/__tests__/AccountsView.lite.spec.ts \
+            src/views/admin/ops/__tests__/TokenGuardView.spec.ts \
+            src/views/admin/ops/__tests__/TokenGuardV2View.spec.ts \
+            src/views/admin/ops/components/__tests__/OpsErrorLogTable.spec.ts \
+            src/views/admin/ops/utils/__tests__/balanceError.spec.ts \
+            --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/frontend-upgrade.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          result = json.loads((Path(os.environ['RUNNER_TEMP']) / 'frontend-upgrade.json').read_text())
+          files = result.get('testResults', [])
+          if len(files) != 11 or not result.get('success'):
+              raise SystemExit('All 11 selected frontend test files must execute successfully')
+          for suite in files:
+              tests = suite.get('assertionResults', [])
+              if not tests or any(test.get('status') != 'passed' for test in tests):
+                  raise SystemExit(f"Missing, failed or skipped assertions in {suite.get('name')}")
+          print(f"All 11 upgrade test files and {sum(len(s['assertionResults']) for s in files)} assertions passed; no skips")
+          PY
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: frontend-upgrade-${{ github.sha }}
+          path: ${{ runner.temp }}/frontend-upgrade.json
           if-no-files-found: error
           retention-days: 7
