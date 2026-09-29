@@ -124,8 +124,12 @@ func TestOAuthModelMappingEmptyCredentialsAndIsolation(t *testing.T) {
 	second := &CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	require.True(t, applyOAuthModelMappings(first, rules))
 	require.True(t, applyOAuthModelMappings(second, rules))
-	first.Credentials["model_mapping"].(map[string]any)["gpt-5.4"] = "changed"
-	require.Equal(t, "gpt-5.5", second.Credentials["model_mapping"].(map[string]any)["gpt-5.4"])
+	firstMapping, ok := first.Credentials["model_mapping"].(map[string]any)
+	require.True(t, ok)
+	secondMapping, ok := second.Credentials["model_mapping"].(map[string]any)
+	require.True(t, ok)
+	firstMapping["gpt-5.4"] = "changed"
+	require.Equal(t, "gpt-5.5", secondMapping["gpt-5.4"])
 	require.Equal(t, "gpt-5.5", rules[0].To)
 }
 
