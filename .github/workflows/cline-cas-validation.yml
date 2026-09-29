@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
       - name: Verify exact upstream and complete previous customization ancestry
         env:
-          UPSTREAM_SHA: faf58e440b1bddb07429f74ed63b570c11d1c0f8
+          UPSTREAM_SHA: 412b2225a357b9bb5ee2295603253fec362dbd0f
           PREVIOUS_CUSTOM_SHA: 6793a84770efbcef9b37878ba35b5f66d7f45a18
           CLINE_SHA: 94ce53353ecc501c26308ddaef36d1f8bcec78e0
           PREVIOUS_UPSTREAM_SHA: 468061e082a0fcc1ef6a9c8f8b0ef1f773d26652
@@ -86,6 +86,10 @@ jobs:
         run: |
           set -o pipefail
           go test -tags=integration ./internal/repository -run '^(TestAccountRepoSuite|TestListSchedulableAccountLoadsMatchesListSchedulable)$/^TestSetRateLimitedIfLaterDoesNotShortenReset$' -count=1 -json | tee "$RUNNER_TEMP/cline-postgres.jsonl"
+      - name: Verify latest upstream monitor history persistence and active-config isolation
+        run: |
+          set -o pipefail
+          go test -tags=integration ./internal/repository -run '^TestChannelMonitorV2Candy(PersistenceAndClaims|Latest100PerActiveConfig)$' -count=1 -json | tee "$RUNNER_TEMP/monitor-postgres.jsonl"
       - name: Require selected tests to execute and pass
         run: |
           python3 - <<'PY'
@@ -109,6 +113,10 @@ jobs:
                   'TestAccountRepoSuite/TestSetRateLimitedIfLaterDoesNotShortenReset',
                   'TestListSchedulableAccountLoadsMatchesListSchedulable',
               },
+              'monitor-postgres.jsonl': {
+                  'TestChannelMonitorV2CandyPersistenceAndClaims',
+                  'TestChannelMonitorV2CandyLatest100PerActiveConfig',
+              },
           }
           for filename, expected in required.items():
               events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP']) / filename).read_text().splitlines() if line.strip()]
@@ -129,6 +137,7 @@ jobs:
           path: |
             ${{ runner.temp }}/cline-unit.jsonl
             ${{ runner.temp }}/cline-postgres.jsonl
+            ${{ runner.temp }}/monitor-postgres.jsonl
           if-no-files-found: error
           retention-days: 7
   legacy-patch-regression:
@@ -185,6 +194,8 @@ jobs:
             src/views/admin/ops/__tests__/TokenGuardV2View.spec.ts \
             src/views/admin/ops/components/__tests__/OpsErrorLogTable.spec.ts \
             src/views/admin/ops/utils/__tests__/balanceError.spec.ts \
+            src/features/channel-monitor-v2/__tests__/MonitorStatusCards.spec.ts \
+            src/features/channel-monitor-v2/__tests__/monitorCards.spec.ts \
             --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/frontend-upgrade.json"
           python3 - <<'PY'
           import json
@@ -192,13 +203,13 @@ jobs:
           from pathlib import Path
           result = json.loads((Path(os.environ['RUNNER_TEMP']) / 'frontend-upgrade.json').read_text())
           files = result.get('testResults', [])
-          if len(files) != 11 or not result.get('success'):
-              raise SystemExit('All 11 selected frontend test files must execute successfully')
+          if len(files) != 13 or not result.get('success'):
+              raise SystemExit('All 13 selected frontend test files must execute successfully')
           for suite in files:
               tests = suite.get('assertionResults', [])
               if not tests or any(test.get('status') != 'passed' for test in tests):
                   raise SystemExit(f"Missing, failed or skipped assertions in {suite.get('name')}")
-          print(f"All 11 upgrade test files and {sum(len(s['assertionResults']) for s in files)} assertions passed; no skips")
+          print(f"All 13 upgrade test files and {sum(len(s['assertionResults']) for s in files)} assertions passed; no skips")
           PY
       - uses: actions/upload-artifact@v6
         if: always()
