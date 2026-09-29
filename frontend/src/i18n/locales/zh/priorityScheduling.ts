@@ -3,6 +3,7 @@ export default {
   profit: '近期利润 / 利润率',
   economics: { usage: '使用记录', rate: '倍率估算', unknown: '利润样本不足' },
   priority: '优先级',
+  selectionWeight: '分流权重', boundGroups: '绑定分组', explorationEligible: '可参与少量探索流量',
 
   title: '优先调度',
   description: '先满足体验目标，再平衡质量、延迟、并发与成本。',
@@ -17,12 +18,12 @@ export default {
   window_minutes: '使用记录窗口（分钟）', min_samples: '延迟 / 利润最少样本数', quality_max_age_hours: '质量结果有效期（小时）',
   groupIds: '生效分组 ID', groupHint: '逗号分隔；留空表示所有分组。',
   models: '生效模型', modelHint: '每行一个请求模型名，精确匹配；留空表示所有模型。',
-  rule: '排序顺序：体验达标 → 数据不足 → 体验未达标；同档先按优先级（越小越先），再按策略评分。拥堵或质量不佳时，低倍率不会越过体验分档。',
+  rule: '体验分档和账号优先级保持生效；同档同优先级按实际剩余并发、额度与评分加权分流，OAuth 绑定分组越少，获得的容量偏好越高。未知新号有约 10% 的探索机会，已知不达标账号不会借此插队。可迁移会话负载明显不均时临时分流，保留原绑定；不设专属池或闲置容量配额。',
   costHint: '利润＝用户扣费−估算成本；估算成本＝同分组、同模型的（账号统计定价或基础费用）合计 × 账号当前成本倍率。成本倍率在账号编辑中设置，默认 0.1；开启跟随时，有效上游探测会更新该值；关闭跟随后使用手填成本，失败或过期时保留已保存值。独立于账号计费和用户扣费；修改后重估近期利润，不改历史账单。利润率＝利润÷用户扣费。',
   save: '保存配置', saving: '保存中…', saved: '配置已保存', loading: '加载中…', retry: '重试', error: '读取或保存失败，请重试', invalid: '请检查分组 ID 和参数范围',
   recent: '最近一次候选评分', refresh: '刷新评分', empty: '暂无评分。启用后，符合范围且需要自由选路的请求会生成评分。',
   historyPending: '历史统计尚未就绪，当前使用原有评分；后台每 30 秒刷新统计。',
-  snapshotHint: '仅展示当前服务实例最近一次候选池，最多 100 个账号。分数用于同一协议与订阅优先池内排序，不代表最终选中；实时并发可能继续变化。',
+  snapshotHint: '仅展示当前实例最近一次候选池，最多 100 个账号。分流权重在同一协议、订阅分池及同档同优先级内比较；分数和表格顺序不是最终选择，也不是固定流量比例。实时并发、额度及绑定分组数会影响分流。',
   model: '模型', group: '分组', account: '账号', score: '得分', tier: '状态', latency: 'P90 首 token', load: '并发占用', rate: '成本倍率', quality: '质量通过', samples: '条样本', unknown: '未知',
   tiers: { eligible: '体验达标', insufficient: '数据不足', degraded: '体验未达标' },
   reasons: { quality_below_target: '质量低于目标', quality_unknown: '无有效质量结果', latency_above_target: '延迟超过目标', latency_insufficient: '延迟样本不足', busy: '并发偏高或有排队', load_unknown: '并发数据未知', cost_unknown: '成本未知', recent_errors: '近期错误偏多', historical_loss: '近期用户扣费低于理论成本', profit_insufficient: '利润样本不足' }

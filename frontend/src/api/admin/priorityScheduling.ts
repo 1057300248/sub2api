@@ -16,6 +16,9 @@ export interface PrioritySchedulingConfig {
   cost_weight: number
 }
 export interface PriorityCandidate {
+  selection_weight?: number
+  exploration_eligible?: boolean
+  bound_groups?: number
   profit: number | null
   margin: number | null
   economics_source: 'usage' | 'rate' | 'unknown'
@@ -39,6 +42,7 @@ export interface PriorityCandidate {
   quality_samples: number
 }
 export interface PrioritySnapshot {
+  selection_policy?: string
   at: string
   model: string
   group_id: number | null
