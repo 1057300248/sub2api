@@ -31,6 +31,7 @@ func TestModelBillingDefaultsPersistenceAndLegacy(t *testing.T) {
 	require.False(t, c.ModelBilling.Enabled)
 	require.Equal(t, 10.0, c.ModelBilling.Rules[0].Multiplier)
 	c.ModelBilling.Enabled = true
+	c.ModelMappings = []OAuthModelMappingRule{{From: "gpt-5.4", To: "gpt-6-luna"}}
 	c.ModelBilling.Rules = append(c.ModelBilling.Rules, ModelBillingRule{Model: "custom-mini", Multiplier: 2.5})
 	svc := NewAccountOpsService(repo, nil, nil)
 	svc.autoGroups = autoConfigGroups{}
@@ -39,6 +40,7 @@ func TestModelBillingDefaultsPersistenceAndLegacy(t *testing.T) {
 	loaded, err := GetOAuthAutoConfig(t.Context(), repo)
 	require.NoError(t, err)
 	require.Equal(t, c.ModelBilling, loaded.ModelBilling)
+	require.Equal(t, c.ModelMappings, loaded.ModelMappings)
 	require.False(t, loaded.Enabled)
 	require.False(t, loaded.UpgradeEnabled)
 }
