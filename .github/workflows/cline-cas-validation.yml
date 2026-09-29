@@ -5,6 +5,7 @@ on:
     branches:
       - codex/ranxi-production-cline-cas-20260925
       - codex/ranxi-v2.8.17-cline-cas-20260926
+      - codex/ranxi-latest-patches-20260929
   pull_request:
     paths:
       - 'backend/**'
@@ -15,6 +16,38 @@ permissions:
   contents: read
 
 jobs:
+  patch-inventory:
+    if: github.ref == 'refs/heads/codex/ranxi-latest-patches-20260929'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record exact upstream and customization ancestry
+        env:
+          UPSTREAM_SHA: 468061e082a0fcc1ef6a9c8f8b0ef1f773d26652
+          CLINE_SHA: 94ce53353ecc501c26308ddaef36d1f8bcec78e0
+          LEGACY_SHA: ee7cfaf3f4b927e0e557c649cecc275abb00458e
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD
+          git merge-base --is-ancestor "$CLINE_SHA" HEAD
+          mkdir -p "$RUNNER_TEMP/patch-inventory"
+          {
+            git rev-parse HEAD
+            git log --no-merges --right-only --cherry-pick --format='%H %s' "$UPSTREAM_SHA...$LEGACY_SHA"
+            git diff --stat "$UPSTREAM_SHA" HEAD
+            git ls-files '*AGENTS.md'
+          } | tee "$RUNNER_TEMP/patch-inventory/inventory.txt"
+          git diff b36a040d893e082a792846303a78b3444646a37d^ "$LEGACY_SHA" > "$RUNNER_TEMP/patch-inventory/legacy-cookie-ttl.patch"
+          git archive --format=tar HEAD > "$RUNNER_TEMP/patch-inventory/source.tar"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: patch-inventory-${{ github.sha }}
+          path: ${{ runner.temp }}/patch-inventory/
+          retention-days: 7
   cline-cas:
     runs-on: ubuntu-latest
     timeout-minutes: 25
