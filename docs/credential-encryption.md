@@ -23,3 +23,11 @@
 - `POST /api/v1/admin/account-ops/token-guard-v2/encryption/initialize`：首次启用，幂等。
 
 两个接口均返回 `Cache-Control: no-store`。前端在状态未知或未启用时禁用保存、2FA 导入；后端在面向凭证运营的 2FA 登录任务开始前再次校验，避免缺失加密配置时先登录、建号，最后登记失败。既有旧守护客户端保持原约定。
+
+## 界面验证
+
+以下截图来自本地浏览器与模拟 API，账号数据为虚构值，不代表生产部署状态。验证了未启用时禁止添加、一键启用后可继续添加，以及账号 2FA 输入说明。
+
+- [未启用凭据加密](screenshots/credential-encryption/unconfigured.png)
+- [启用后允许添加账号](screenshots/credential-encryption/enabled.png)
+- [账号 2FA 与自动巡检表单](screenshots/credential-encryption/account-editor.png)

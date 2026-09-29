@@ -178,3 +178,4 @@ issues/
 **/credential-operations.key
 **/.credential-key-*
 !docs/credential-encryption.md
+!docs/screenshots/credential-encryption/
