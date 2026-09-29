@@ -141,8 +141,10 @@ func TestPriorityCostMultiplierRecomputesUpstreamPeakAndExpiry(t *testing.T) {
 	item := priorityCandidate(1, 7, 20)
 	item.account.Extra = upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.14, now, time.Hour).Extra
 	item.account.Extra[AccountCostMultiplierExtraKey] = 0.1
-	snapshot := item.account.Extra[UpstreamBillingProbeExtraKey].(map[string]any)
-	data := snapshot["data"].(map[string]any)
+	snapshot, ok := item.account.Extra[UpstreamBillingProbeExtraKey].(map[string]any)
+	require.True(t, ok)
+	data, ok := snapshot["data"].(map[string]any)
+	require.True(t, ok)
 	data["peak_rate_enabled"] = true
 	data["peak_start"] = "09:00"
 	data["peak_end"] = "18:00"
