@@ -1722,7 +1722,17 @@
           </div>
         </div>
         <div>
-          <label class="input-label" for="account-cost-multiplier">{{ t('admin.accounts.costMultiplier') }}</label>
+          <div class="mb-2 flex items-center justify-between gap-1">
+            <label class="input-label mb-0" for="account-cost-multiplier">{{ t('admin.accounts.costMultiplier') }}</label>
+            <div v-if="account?.type === 'apikey'" class="flex shrink-0 items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+              <span>{{ t('admin.accounts.costMultiplierAutoSync') }}</span>
+              <Toggle
+                v-model="costMultiplierAutoSync"
+                data-testid="account-cost-auto-sync"
+                :aria-label="t('admin.accounts.costMultiplierAutoSync')"
+              />
+            </div>
+          </div>
           <input
             id="account-cost-multiplier"
             v-model.number="costMultiplier"
@@ -4255,6 +4265,7 @@ const mixedChannelWarningMessageText = computed(() => {
 })
 
 const costMultiplier = ref(DEFAULT_ACCOUNT_COST_MULTIPLIER)
+const costMultiplierAutoSync = ref(true)
 
 const form = reactive({
   name: '',
@@ -4373,6 +4384,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
   costMultiplier.value = readAccountCostMultiplier(newAccount.extra)
+  costMultiplierAutoSync.value = newAccount.extra?.cost_multiplier_auto_sync !== false
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
   form.group_rate_multiplier = newAccount.group_rate_multiplier ?? 1
   form.status = (newAccount.status === 'active' || newAccount.status === 'inactive' || newAccount.status === 'error')
@@ -6275,6 +6287,11 @@ const handleSubmit = async () => {
       costExtra.cost_multiplier = costMultiplier.value
     } else {
       delete costExtra.cost_multiplier
+    }
+    if (props.account.type === 'apikey' && costMultiplierAutoSync.value !== (props.account.extra?.cost_multiplier_auto_sync !== false)) {
+      costExtra.cost_multiplier_auto_sync = costMultiplierAutoSync.value
+    } else {
+      delete costExtra.cost_multiplier_auto_sync
     }
     updatePayload.extra = costExtra
 
