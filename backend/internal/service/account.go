@@ -936,6 +936,9 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 	if normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized) {
 		return true
 	}
+	if a.IsOpenAIModelMappingAliases() {
+		return isOpenAIOAuthServableModel(requestedModel)
+	}
 	_, fallback := a.resolveGrokMediaFallbackModel(requestedModel)
 	return fallback
 }

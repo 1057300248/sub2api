@@ -1,5 +1,6 @@
 import { apiClient } from '../client'
 export interface PrioritySchedulingConfig {
+  balance_protocols?: boolean
   enabled: boolean
   mode: 'experience' | 'balanced' | 'profit' | 'custom'
   group_ids: number[]
@@ -16,6 +17,7 @@ export interface PrioritySchedulingConfig {
   cost_weight: number
 }
 export interface PriorityCandidate {
+  capacity_band?: number
   selection_weight?: number
   exploration_eligible?: boolean
   bound_groups?: number

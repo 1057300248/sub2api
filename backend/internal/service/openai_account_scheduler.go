@@ -583,7 +583,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	// A sticky binding created before BPS was enabled may still point at a
 	// native account. Do not let that old binding bypass the explicit BPS route
 	// while an eligible BPS account is available for this model.
-	if req.Platform == PlatformOpenAI && strings.TrimSpace(req.RequestedModel) != "" && !account.IsExcelBPSEnabledForModel(req.RequestedModel) {
+	if req.Platform == PlatformOpenAI && strings.TrimSpace(req.RequestedModel) != "" && !account.IsExcelBPSEnabledForModel(req.RequestedModel) && !s.service.balancesPriorityProtocols(req) {
 		if candidates, listErr := s.service.listSchedulableAccountsForRequest(ctx, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.ExcludedIDs); listErr == nil {
 			for i := range candidates {
 				if candidates[i].ID != account.ID && candidates[i].IsExcelBPSEnabledForModel(req.RequestedModel) {
@@ -726,18 +726,20 @@ func (s *defaultOpenAIAccountScheduler) shouldEscapeStickyAccountAt(accountID in
 }
 
 type openAIAccountCandidateScore struct {
-	priorityExploration bool
-	account             *Account
-	loadInfo            *AccountLoadInfo
-	loadKnown           bool
-	score               float64
-	priority            int
-	errorRate           float64
-	ttft                float64
-	hasTTFT             bool
-	rpmCurrent          int
-	rpmLimit            int
-	rpmEnabled          bool
+	priorityLatencyFactor float64
+	priorityUnhealthy     bool
+	priorityExploration   bool
+	account               *Account
+	loadInfo              *AccountLoadInfo
+	loadKnown             bool
+	score                 float64
+	priority              int
+	errorRate             float64
+	ttft                  float64
+	hasTTFT               bool
+	rpmCurrent            int
+	rpmLimit              int
+	rpmEnabled            bool
 }
 
 type openAIAccountCandidateHeap []openAIAccountCandidateScore
@@ -1221,6 +1223,9 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 	// acquired; Forward still enforces BPS whenever the selected account has it
 	// enabled.
 	buildBPSPreferredOrder := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+		if s.service.balancesPriorityProtocols(req) {
+			return buildSelectionOrder(pool)
+		}
 		if req.Platform != PlatformOpenAI || strings.TrimSpace(req.RequestedModel) == "" || len(pool) < 2 {
 			return buildSelectionOrder(pool)
 		}
@@ -1663,7 +1668,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 
 	// Preserve BPS preference across subscription/compact priority partitions,
 	// but try native capacity before committing a request to a BPS wait plan.
-	if req.Platform == PlatformOpenAI && strings.TrimSpace(req.RequestedModel) != "" {
+	if req.Platform == PlatformOpenAI && strings.TrimSpace(req.RequestedModel) != "" && !s.service.balancesPriorityProtocols(req) {
 		var bps, native []*Account
 		for _, account := range filtered {
 			if account.IsExcelBPSEnabledForModel(req.RequestedModel) {
