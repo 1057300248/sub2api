@@ -122,3 +122,29 @@ func TestStopCancelsPreparationAndCannotRestart(t *testing.T) {
 	m.Ensure()
 	require.False(t, m.started)
 }
+
+func TestManagedProcessGetsOnlyWorkerEnvironmentAndStops(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux process supervision")
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "1.2.3-linux-"+runtime.GOARCH)
+	require.NoError(t, os.MkdirAll(dir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ready"), []byte("cached"), 0600))
+	script := "#!/bin/sh\nprintf '%s' \"$OPENAI_REAUTH_WORKER_TOKEN\" > worker-token\nprintf '%s' \"$DATABASE_PASSWORD\" > unrelated-secret\nexec /bin/sleep 60\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "python"), []byte(script), 0700))
+	t.Setenv("DATABASE_PASSWORD", "must-not-inherit")
+	m := New(root, "1.2.3", "http://127.0.0.1:4040", "synthetic-worker-token")
+	m.Ensure()
+	defer m.Stop()
+	require.Eventually(t, func() bool { _, err := os.Stat(filepath.Join(dir, "unrelated-secret")); return err == nil }, time.Second, 10*time.Millisecond)
+	require.Equal(t, "running", m.Status().State)
+	got, err := os.ReadFile(filepath.Join(dir, "worker-token"))
+	require.NoError(t, err)
+	require.Equal(t, "synthetic-worker-token", string(got))
+	got, err = os.ReadFile(filepath.Join(dir, "unrelated-secret"))
+	require.NoError(t, err)
+	require.Empty(t, got)
+	m.Stop()
+	require.Equal(t, "stopped", m.Status().State)
+}

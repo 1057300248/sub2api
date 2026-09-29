@@ -26,5 +26,14 @@ RUN OPENAI_REAUTH_WORKER_TOKEN=00000000000000000000000000000000 \
     /out/python /out/worker.py --check \
     && /out/python -c 'import curl_cffi; from ssl import SSLContext' \
     && /out/node -e 'require("/out/tosub2/node_modules/jsdom")'
+# Validate on the same libc family as the main Alpine image, with no
+# system Python or Node available to mask missing bundled dependencies.
+FROM alpine:3.21 AS portable-test
+COPY --from=runtime /out/ /runtime/
+COPY tools/reauth-runtime/smoke.mjs /smoke.mjs
+RUN NODE_EXECUTABLE=/runtime/node TOSUB2_PYTHON=/runtime/python /runtime/node /smoke.mjs \
+    && touch /verified
+
 FROM scratch AS artifact
 COPY --from=runtime /out/ /
+COPY --from=portable-test /verified /portable-verified
