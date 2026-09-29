@@ -76,8 +76,9 @@
           <p v-if="bulkProgress" role="status">{{ bulkProgress }}</p>
         </div>
         <QualityAccountSelector v-if="!editing" v-model="pickerAccountIds" v-model:search="search" v-model:group="accountGroup" v-model:type="accountType"
+          v-model:statuses="accountStatuses" v-model:scope="accountScope"
           :accounts="accounts" :groups="groups" :accounts-loading="accountsLoading" :selecting-accounts="selectingAccounts" :accounts-error="accountsError"
-          :account-page="accountPage" :account-pages="accountPages" :bulk="bulkEditing" :disabled-reason="accountDisabledReason"
+          :account-page="accountPage" :account-pages="accountPages" :accounts-total="accountsTotal" :bulk="bulkEditing" :disabled-reason="accountDisabledReason"
           @search="searchAccounts" @select-page="selectCurrentPage" @select-all="selectMatchingAccounts" @clear="clearAccountSelection" />
         <div v-if="editsField('test')" class="space-y-2">
           <label class="block space-y-1"><span>{{ t('qualityOps.questionKind') }}</span><select v-model="form.pelican_config.question_kind" class="input" data-testid="quality-question-kind" @change="selectQuestionKind"><option value="candy">{{ t('qualityOps.questionCandy') }}</option><option :value="STATE_PROBE_QUESTION">{{ t('qualityOps.questionStateProbe') }}</option></select></label>
@@ -136,7 +137,7 @@
         </template>
         <label v-if="editsField('enabled')" class="flex items-center gap-2"><input v-model="form.enabled" type="checkbox" />{{ t('qualityOps.enabled') }}</label>
       </fieldset></form>
-      <template #footer><div class="editor-footer"><button v-if="editing || bulkEditing" type="button" class="delete-rule" data-testid="quality-editor-delete" :disabled="busy || selectingAccounts || (bulkEditing && !bulkRuleIds.length)" @click="requestDelete(bulkEditing ? bulkRuleIds : editing ? [editing] : [])">{{ bulkEditing ? t('qualityOps.bulkDelete') : t('qualityOps.delete') }}</button><span class="flex-1" /><button class="btn btn-secondary" :disabled="busy" @click="closeForm">{{ t('qualityOps.cancel') }}</button><button form="quality-rule-form" type="submit" class="btn btn-primary" :disabled="busy || selectingAccounts || (bulkEditing ? !bulkFields.length || !bulkRuleIds.length : !editing && !selectedAccounts.length)">{{ busy ? t('qualityOps.saving') : bulkEditing ? t('qualityOps.applyToRules', { count: bulkRuleIds.length }) : t('qualityOps.save') }}</button></div></template>
+      <template #footer><div class="editor-footer"><button v-if="editing || bulkEditing" type="button" class="delete-rule" data-testid="quality-editor-delete" :disabled="busy || selectingAccounts || (bulkEditing && !bulkRuleIds.length)" @click="requestDelete(bulkEditing ? bulkRuleIds : editing ? [editing] : [])">{{ bulkEditing ? t('qualityOps.bulkDelete') : t('qualityOps.delete') }}</button><span class="flex-1" /><button class="btn btn-secondary" :disabled="busy" @click="closeForm">{{ t('qualityOps.cancel') }}</button><button form="quality-rule-form" type="submit" class="btn btn-primary" :disabled="busy || selectingAccounts || (bulkEditing ? !bulkFields.length || !bulkRuleIds.length : !editing && (accountScope === 'all' ? !accountsTotal : !selectedAccounts.length))">{{ busy ? t('qualityOps.saving') : bulkEditing ? t('qualityOps.applyToRules', { count: bulkRuleIds.length }) : t('qualityOps.save') }}</button></div></template>
     </BaseDialog>
     <BaseDialog :show="!!historyPlan" :title="detailOperation ? t('qualityOps.roundDetail') : t('qualityOps.history')" placement="right" width="extra-wide" close-on-click-outside @close="closeDetails">
       <template v-if="historyPlan">
@@ -211,6 +212,8 @@ const accountNames = computed(() => {
 const accounts = ref<AccountListItem[]>([]), accountsLoading = ref(false)
 const search = ref(''), accountPage = ref(1), accountPages = ref(1)
 const accountGroup = ref(''), accountType = ref(''), accountsError = ref(''), selectingAccounts = ref(false)
+// 状态筛选默认「正常」（全不勾 = 全部状态）；范围默认「所有匹配账户」，保存时按筛选自动包含。
+const accountStatuses = ref<string[]>(['active']), accountScope = ref<'all' | 'manual'>('all'), accountsTotal = ref(0)
 function ruleScope(action?: QualityPolicy['action']) { return action === 'enable_bps' ? 'bps' : action === 'observe_only' ? 'observation' : 'quarantine' }
 const bulkSourceScope = ref('quarantine')
 const existingAccountIds = computed(() => new Set(plans.value.filter(plan =>
@@ -218,13 +221,14 @@ const existingAccountIds = computed(() => new Set(plans.value.filter(plan =>
 ).map(plan => plan.account_id)))
 const selectableAccounts = computed(() => accounts.value.filter(account => !accountDisabledReason(account)))
 let accountSelectionRequest = 0
-const accountFilters = () => ({ search: search.value.trim(), group: accountGroup.value || undefined, type: accountType.value || undefined, lite: 'true', sort_by: 'id', sort_order: 'asc' as const })
+const accountFilters = () => ({ search: search.value.trim(), group: accountGroup.value || undefined, type: accountType.value || undefined,
+  status: accountStatuses.value.join(',') || undefined, lite: 'true', sort_by: 'id', sort_order: 'asc' as const })
 function invalidateAccountRequests() {
   accountRequest++; accountSelectionRequest++
   accountsLoading.value = selectingAccounts.value = false
-  accounts.value = []; accountPage.value = accountPages.value = 1; accountsError.value = ''
+  accounts.value = []; accountPage.value = accountPages.value = 1; accountsTotal.value = 0; accountsError.value = ''
 }
-watch([search, accountGroup, accountType], invalidateAccountRequests, { flush: 'sync' })
+watch([search, accountGroup, accountType, accountStatuses], invalidateAccountRequests, { flush: 'sync' })
 function showAccountPicker() { return showForm.value && !editing.value }
 
 const selectedAccounts = ref<number[]>([]), editing = ref<number | null>(null)
@@ -399,7 +403,7 @@ async function searchAccounts(page = 1) {
     const data = await accountsAPI.list(page, 50, accountFilters())
     if (!alive || request !== accountRequest) return
     rememberAccounts(data.items)
-    accounts.value = data.items; accountPage.value = page; accountPages.value = Math.max(1, Math.ceil(data.total / 50))
+    accounts.value = data.items; accountPage.value = page; accountPages.value = Math.max(1, Math.ceil(data.total / 50)); accountsTotal.value = data.total
   } catch (e) { if (alive && request === accountRequest) accountsError.value = message(e) }
   finally { if (request === accountRequest) accountsLoading.value = false }
 }
@@ -410,20 +414,27 @@ function selectCurrentPage() {
 function clearAccountSelection() {
   accountSelectionRequest++; selectingAccounts.value = false; pickerAccountIds.value = []
 }
+// 按当前筛选翻完所有页，返回没有禁用原因（已有同类规则、探针不支持等）的账号 id。
+// 中途被打断（切筛选、关弹窗）返回 null；翻页失败抛错，绝不返回半批结果。
+async function collectSelectableAccountIds(aborted: () => boolean): Promise<number[] | null> {
+  const filters = accountFilters()
+  const ids = new Set<number>()
+  for (let page = 1, pages = 1; page <= pages; page++) {
+    const data = await accountsAPI.list(page, 50, filters)
+    if (aborted()) return null
+    pages = Math.max(1, Math.ceil(data.total / 50))
+    rememberAccounts(data.items)
+    for (const account of data.items) if (!accountDisabledReason(account)) ids.add(account.id)
+  }
+  return [...ids]
+}
 async function selectMatchingAccounts() {
   if (accountsLoading.value || selectingAccounts.value || busy.value) return
-  const request = ++accountSelectionRequest, filters = accountFilters()
+  const request = ++accountSelectionRequest
   selectingAccounts.value = true; accountsError.value = ''
-  const ids = new Set<number>()
   try {
-    // Collect every matching page before changing selection so a failed page never leaves a partial batch.
-    for (let page = 1, pages = 1; page <= pages; page++) {
-      const data = await accountsAPI.list(page, 50, filters)
-      if (!alive || request !== accountSelectionRequest) return
-      pages = Math.max(1, Math.ceil(data.total / 50))
-      rememberAccounts(data.items)
-      for (const account of data.items) if (!accountDisabledReason(account)) ids.add(account.id)
-    }
+    const ids = await collectSelectableAccountIds(() => !alive || request !== accountSelectionRequest)
+    if (ids == null) return
     pickerAccountIds.value = [...new Set([...pickerAccountIds.value, ...ids])].filter(id => bulkEditing.value || !existingAccountIds.value.has(id))
   } catch (e) { if (alive && request === accountSelectionRequest) accountsError.value = message(e) }
   finally { if (request === accountSelectionRequest) selectingAccounts.value = false }
@@ -433,6 +444,7 @@ function newPlan() {
   bulkEditing.value = false; bulkRuleIds.value = []; bulkFields.value = []; bulkProgress.value = ''
   closeDetails(); invalidateAccountRequests(); error.value = ''; editing.value = null; form.value = defaults()
   selectedAccounts.value = []; search.value = ''; accountGroup.value = ''; accountType.value = ''
+  accountStatuses.value = ['active']; accountScope.value = 'all'
   showForm.value = true; initialForm.value = formSnapshot(); void searchAccounts()
   if (!groups.value.length) void store.refreshGroups()
 }
@@ -455,7 +467,7 @@ function editSelectedRules() {
   bulkSourceScope.value = ruleScope(form.value.pelican_config.quality.action)
   editing.value = null; bulkEditing.value = true
   bulkRuleIds.value = selected.map(plan => plan.id)
-  search.value = ''; accountGroup.value = ''; accountType.value = ''
+  search.value = ''; accountGroup.value = ''; accountType.value = ''; accountStatuses.value = []
   void searchAccounts()
   initialForm.value = formSnapshot()
 }
@@ -520,6 +532,13 @@ async function save() {
       if (!isProbe.value) throw new Error(t('qualityOps.bpsRequiresProbe'))
       const invalid = qualityBPSError(bps.value)
       if (invalid) throw new Error(t(invalid))
+    }
+    if (!editing.value && accountScope.value === 'all') {
+      // 「所有匹配账户」：保存时按筛选翻完所有页自动包含，已有同类规则或不支持的自动跳过。
+      const ids = await collectSelectableAccountIds(() => !alive || scope !== identity())
+      if (ids == null) return
+      if (!ids.length) throw new Error(t('qualityOps.noAccountsMatched'))
+      selectedAccounts.value = ids
     }
     if (isProbe.value && !editing.value) {
       if (!selectedAccounts.value.length || selectedAccounts.value.some(id => { const account = knownAccounts.get(id); return !account || !supportsStateProbeAccount(account) })) throw new Error(t('qualityOps.probeAccountUnsupported'))
