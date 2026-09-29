@@ -63,6 +63,9 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Frontend typecheck and critical vitest
         run: make test-frontend
+      - name: Build frontend production bundle
+        working-directory: frontend
+        run: pnpm build
 
   golangci-lint:
     runs-on: ubuntu-latest

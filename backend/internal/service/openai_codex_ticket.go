@@ -213,10 +213,10 @@ func (s *OpenAIGatewayService) openAICodexTicketConfig() config.OpenAICodexTicke
 		cfg.TargetLength = 292
 	}
 	if cfg.TTLSeconds <= 0 {
-		cfg.TTLSeconds = 3600
+		cfg.TTLSeconds = int(openAICodexCredentialTTL / time.Second)
 	}
 	if cfg.RefreshBeforeSeconds <= 0 {
-		cfg.RefreshBeforeSeconds = 600
+		cfg.RefreshBeforeSeconds = 60
 	}
 	if cfg.HarvestProbeIntervalSeconds < 30 {
 		cfg.HarvestProbeIntervalSeconds = 180
@@ -1297,9 +1297,11 @@ func (s *OpenAIGatewayService) refreshOpenAICodexTickets(ctx context.Context) {
 	}
 }
 
-// IsOpenAICodexTicketExtraKey identifies server-managed ticket material.
+// IsOpenAICodexTicketExtraKey identifies server-managed credential material.
+// The retired cookie jar stays private and write-protected during upgrades,
+// even though the new ticket-bound egress no longer reads or replays it.
 func IsOpenAICodexTicketExtraKey(key string) bool {
-	return strings.HasPrefix(key, openAICodexTicketExtraKeyPrefix)
+	return strings.TrimSpace(key) == "codex_cookie_jar" || strings.HasPrefix(key, openAICodexTicketExtraKeyPrefix)
 }
 
 // MergeOpenAICodexTicketExtra preserves only persisted tickets, never summaries or

@@ -1,0 +1,135 @@
+name: Custom patch regression
+
+on:
+  push:
+    branches:
+      - codex/ranxi-production-cline-cas-20260925
+      - codex/ranxi-v2.8.17-cline-cas-20260926
+      - codex/ranxi-latest-patches-20260929
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/cline-cas-validation.yml'
+      - 'tools/verify_custom_patch_alignment.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  patch-inventory:
+    if: github.ref == 'refs/heads/codex/ranxi-latest-patches-20260929'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record exact upstream and customization ancestry
+        env:
+          UPSTREAM_SHA: 468061e082a0fcc1ef6a9c8f8b0ef1f773d26652
+          CLINE_SHA: 94ce53353ecc501c26308ddaef36d1f8bcec78e0
+          LEGACY_SHA: ee7cfaf3f4b927e0e557c649cecc275abb00458e
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD
+          git merge-base --is-ancestor "$CLINE_SHA" HEAD
+          mkdir -p "$RUNNER_TEMP/patch-inventory"
+          {
+            git rev-parse HEAD
+            git log --no-merges --right-only --cherry-pick --format='%H %s' "$UPSTREAM_SHA...$LEGACY_SHA"
+            git diff --stat "$UPSTREAM_SHA" HEAD
+            git ls-files '*AGENTS.md'
+          } | tee "$RUNNER_TEMP/patch-inventory/inventory.txt"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: patch-inventory-${{ github.sha }}
+          path: ${{ runner.temp }}/patch-inventory/
+          retention-days: 7
+  cline-cas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUB2API_TEST_POSTGRES_IMAGE: postgres:18.6-alpine
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Check formatting of ported files
+        run: |
+          files=(internal/service/cline_ratelimit.go internal/service/cline_ratelimit_test.go internal/service/cline_ratelimit_dispatch_test.go internal/service/ratelimit_service.go)
+          unformatted="$(gofmt -l "${files[@]}")"
+          if [[ -n "$unformatted" ]]; then printf '%s\n' "$unformatted"; exit 1; fi
+      - name: Cline parsing and 429 dispatch regressions
+        run: |
+          set -o pipefail
+          go test -tags=unit ./internal/service -run '^Test(ParseCline|SetCline|Handle429Cline)' -count=1 -json | tee "$RUNNER_TEMP/cline-unit.jsonl"
+      - name: Cline race detector regressions repeated ten times
+        run: go test -race -tags=unit ./internal/service -run '^Test(ParseCline|SetCline|Handle429Cline)' -count=10
+      - name: PostgreSQL 18.6 monotonic CAS and scheduler regressions
+        run: |
+          set -o pipefail
+          go test -tags=integration ./internal/repository -run '^(TestAccountRepoSuite|TestListSchedulableAccountLoadsMatchesListSchedulable)$/^TestSetRateLimitedIfLaterDoesNotShortenReset$' -count=1 -json | tee "$RUNNER_TEMP/cline-postgres.jsonl"
+      - name: Require selected tests to execute and pass
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          required = {
+              'cline-unit.jsonl': {
+                  'TestParseClineRateLimitResetAt',
+                  'TestParseClineRateLimitResetAtRejectsOtherUpstream',
+                  'TestSetClineRateLimitedPrefersAtomicExtension',
+                  'TestSetClineRateLimitedDoesNotFallbackOnExtensionError',
+                  'TestSetClineRateLimitedSupportsLegacyRepository',
+                  'TestParseClineRateLimitResetAtScopesExactHostname',
+                  'TestHandle429ClineUsesParsedCooldownBeforeProviderFallback',
+                  'TestHandle429ClineCASFailureDoesNotUseRegularSetter',
+                  'TestHandle429ClinePatchPreservesOtherProviderFallback',
+              },
+              'cline-postgres.jsonl': {
+                  'TestAccountRepoSuite/TestSetRateLimitedIfLaterDoesNotShortenReset',
+                  'TestListSchedulableAccountLoadsMatchesListSchedulable',
+              },
+          }
+          for filename, expected in required.items():
+              events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP']) / filename).read_text().splitlines() if line.strip()]
+              passed = {event.get('Test') for event in events if event.get('Action') == 'pass'}
+              missing = expected - passed
+              if missing:
+                  raise SystemExit(f'{filename}: required tests did not pass: {sorted(missing)}')
+              print(f'{filename}: all {len(expected)} required tests passed')
+          PY
+      - name: Build backend
+        run: go build ./cmd/server
+  legacy-patch-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Check alignment patch formatting
+        run: |
+          files=(backend/internal/service/custom_patch_legacy_cookie_test.go backend/internal/handler/dto/custom_patch_legacy_cookie_test.go backend/internal/repository/custom_patch_legacy_cookie_test.go backend/internal/service/custom_patch_alignment_test.go backend/internal/config/custom_patch_defaults_test.go backend/internal/service/openai_codex_ticket.go backend/internal/service/openai_codex_ticket_feedback.go backend/internal/config/config.go)
+          unformatted="$(gofmt -l "${files[@]}")"
+          if [[ -n "$unformatted" ]]; then printf '%s\n' "$unformatted"; exit 1; fi
+      - name: Require inherited and ported legacy regressions to execute
+        run: python3 tools/verify_custom_patch_alignment.py
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: custom-patch-regressions-${{ github.sha }}
+          path: ${{ runner.temp }}/custom-patch-results/
+          if-no-files-found: error
+          retention-days: 7
