@@ -16,29 +16,33 @@ import (
 const SettingKeyOAuthAutoConfig = "smart_ops_oauth_auto_config"
 const AutoConfigConcurrencyExtraKey = "auto_config_concurrency"
 
-// Initial account fields, BPS defaults and concurrency upgrades are independent.
+// Initial account fields, BPS defaults, model billing and concurrency upgrades are independent.
 type OAuthAutoConfig struct {
-	ExcelBPS         ExcelBPSDefaults `json:"excel_bps"`
-	UpdatedAt        time.Time        `json:"updated_at"`
-	Enabled          bool             `json:"enabled"`
-	Platform         string           `json:"platform"`
-	Priority         int              `json:"priority"`
-	LoadFactor       int              `json:"load_factor"`
-	Concurrency      int              `json:"concurrency"`
-	GroupIDs         []int64          `json:"group_ids"`
-	UpgradeEnabled   bool             `json:"upgrade_enabled"`
-	UpgradeGroupIDs  []int64          `json:"upgrade_group_ids"`
-	SuccessesPerStep int              `json:"successes_per_step"`
-	UpgradeStep      int              `json:"upgrade_step"`
-	MaxConcurrency   int              `json:"max_concurrency"`
-	CooldownSeconds  int              `json:"cooldown_seconds"`
-	Revision         string           `json:"revision"`
+	ModelBilling     ModelBillingConfig `json:"model_billing"`
+	ExcelBPS         ExcelBPSDefaults   `json:"excel_bps"`
+	UpdatedAt        time.Time          `json:"updated_at"`
+	Enabled          bool               `json:"enabled"`
+	Platform         string             `json:"platform"`
+	Priority         int                `json:"priority"`
+	LoadFactor       int                `json:"load_factor"`
+	Concurrency      int                `json:"concurrency"`
+	GroupIDs         []int64            `json:"group_ids"`
+	UpgradeEnabled   bool               `json:"upgrade_enabled"`
+	UpgradeGroupIDs  []int64            `json:"upgrade_group_ids"`
+	SuccessesPerStep int                `json:"successes_per_step"`
+	UpgradeStep      int                `json:"upgrade_step"`
+	MaxConcurrency   int                `json:"max_concurrency"`
+	CooldownSeconds  int                `json:"cooldown_seconds"`
+	Revision         string             `json:"revision"`
 }
 
 func DefaultOAuthAutoConfig() OAuthAutoConfig {
-	return OAuthAutoConfig{ExcelBPS: DefaultExcelBPSDefaults(), Platform: PlatformOpenAI, Priority: 50, LoadFactor: 1, Concurrency: 3, GroupIDs: []int64{}, UpgradeGroupIDs: []int64{}, SuccessesPerStep: 20, UpgradeStep: 1, MaxConcurrency: 100, CooldownSeconds: 60}
+	return OAuthAutoConfig{ModelBilling: DefaultModelBillingConfig(), ExcelBPS: DefaultExcelBPSDefaults(), Platform: PlatformOpenAI, Priority: 50, LoadFactor: 1, Concurrency: 3, GroupIDs: []int64{}, UpgradeGroupIDs: []int64{}, SuccessesPerStep: 20, UpgradeStep: 1, MaxConcurrency: 100, CooldownSeconds: 60}
 }
 func ValidateOAuthAutoConfig(c OAuthAutoConfig) error {
+	if err := validateModelBillingConfig(c.ModelBilling); err != nil {
+		return err
+	}
 	if err := validateExcelBPSDefaults(c.ExcelBPS); err != nil {
 		return err
 	}

@@ -1,6 +1,8 @@
 import { apiClient } from '../client'
+import type { ModelBillingConfig } from '@/utils/modelBilling'
 import type { ExcelBPSDefaults } from '@/utils/excelBPSDefaults'
 export interface AutoConfig {
+ model_billing?: ModelBillingConfig
  excel_bps?: ExcelBPSDefaults
  enabled: boolean
  platform: string
