@@ -1199,6 +1199,18 @@ func (s *RateLimitService) handle429Cooldown(ctx context.Context, account *Accou
 		s.handleOllamaCloudUsage429(ctx, account, headers)
 		return
 	}
+	// Cline exposes its free/pass reset window only in the human-readable body
+	// ("Try again in 1h25m"), so handle it before provider-specific fallbacks.
+	if resetAt, ok := parseClineRateLimitResetAt(account, responseBody, time.Now()); ok {
+		s.notifyAccountSchedulingBlocked(account, resetAt, "cline_429")
+		if err := setClineRateLimited(ctx, s.accountRepo, account.ID, resetAt); err != nil {
+			slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
+			return
+		}
+		slog.Info("cline_account_rate_limited", "account_id", account.ID, "reset_at", resetAt, "reset_in", time.Until(resetAt).Truncate(time.Second))
+		return
+	}
+
 	// 国产供应商（kimi/zhipu/deepseek）的 429 走专用可恢复路径：余额不足 → 临时停调，
 	// Coding Plan 窗口耗尽 → 冷却到快照重置点。未命中则继续默认 429 逻辑。
 	if account.IsCNProvider() || account.IsOpenCodeGo() {
