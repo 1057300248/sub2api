@@ -72,3 +72,13 @@ No source or plugin ABI was copied. The bounded HTTP 400 reasoning recovery
 uses Sub2API's existing OAuth recovery approach and is not claimed as a feature
 of that reference release. Its v0.1.18 incremental-streaming changes do not
 justify replaying an already delivered stream.
+
+## 2026-09-29 in-band failure classification
+
+Behavioral reference: JaxsonWang/cpa-plugin-oai-basispoints v0.2.7, commit
+8960a41dacec8ceca2ae2550ce8c9515997cb7a6, for safe error-code classification
+and explicit error-status precedence. Sub2API independently applies this
+contract to its existing BPS SSE bridge and buffered JSON responses, preserves
+the actual upstream HTTP status in diagnostics, and uses its own BPS-only
+cooldown without replaying accepted generations. No CPA ABI or WS transport
+implementation is imported.
