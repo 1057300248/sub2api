@@ -121,7 +121,7 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Check alignment patch formatting
         run: |
-          files=(backend/internal/service/custom_patch_alignment_test.go backend/internal/config/custom_patch_defaults_test.go backend/internal/service/openai_codex_ticket.go backend/internal/service/openai_codex_ticket_feedback.go backend/internal/config/config.go)
+          files=(backend/internal/service/custom_patch_legacy_cookie_test.go backend/internal/handler/dto/custom_patch_legacy_cookie_test.go backend/internal/repository/custom_patch_legacy_cookie_test.go backend/internal/service/custom_patch_alignment_test.go backend/internal/config/custom_patch_defaults_test.go backend/internal/service/openai_codex_ticket.go backend/internal/service/openai_codex_ticket_feedback.go backend/internal/config/config.go)
           unformatted="$(gofmt -l "${files[@]}")"
           if [[ -n "$unformatted" ]]; then printf '%s\n' "$unformatted"; exit 1; fi
       - name: Require inherited and ported legacy regressions to execute

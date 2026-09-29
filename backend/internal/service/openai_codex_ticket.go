@@ -1297,9 +1297,11 @@ func (s *OpenAIGatewayService) refreshOpenAICodexTickets(ctx context.Context) {
 	}
 }
 
-// IsOpenAICodexTicketExtraKey identifies server-managed ticket material.
+// IsOpenAICodexTicketExtraKey identifies server-managed credential material.
+// The retired cookie jar stays private and write-protected during upgrades,
+// even though the new ticket-bound egress no longer reads or replays it.
 func IsOpenAICodexTicketExtraKey(key string) bool {
-	return strings.HasPrefix(key, openAICodexTicketExtraKeyPrefix)
+	return strings.TrimSpace(key) == "codex_cookie_jar" || strings.HasPrefix(key, openAICodexTicketExtraKeyPrefix)
 }
 
 // MergeOpenAICodexTicketExtra preserves only persisted tickets, never summaries or

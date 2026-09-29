@@ -12,6 +12,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
     "service": [
+        "TestCustomPatchLegacyCookieJarPrivacy",
+        "TestCustomPatchLegacyCookieJarWriteProtection",
         "TestCustomPatchTicketDefaultAlignment",
         "TestCustomPatchTicketExpiryDefaults",
         "TestCustomPatchTicketCookieIsolation",
@@ -39,6 +41,8 @@ REQUIRED = {
         "TestHarvestControlsFillRefreshBeforeOnLegacyJSON",
     ],
     "config": ["TestCustomPatchTicketConfigDefaults"],
+    "handler/dto": ["TestCustomPatchLegacyCookieJarRedactedFromAccountDTO"],
+    "repository": ["TestCustomPatchLegacyCookieJarUsesLockedDatabaseValue"],
 }
 
 
@@ -52,7 +56,7 @@ def main() -> int:
         passed: set[str] = set()
         failed: set[str] = set()
         skipped: set[str] = set()
-        with (output_dir / f"{package}.jsonl").open("w", encoding="utf-8") as log:
+        with (output_dir / f"{package.replace('/', '-')}.jsonl").open("w", encoding="utf-8") as log:
             with subprocess.Popen(command, cwd=ROOT / "backend", stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, text=True) as process:
                 assert process.stdout is not None
