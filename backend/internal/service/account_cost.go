@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"math"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -10,10 +11,19 @@ import (
 const AccountCostMultiplierExtraKey = "cost_multiplier"
 const DefaultAccountCostMultiplier = 0.1
 
-// CostMultiplier is an operator-maintained estimate used for profitability.
-// It is independent of account billing, user billing and upstream rate probes.
-// Keeping it in extra preserves existing account import/export and caches.
+// CostMultiplier prefers a fresh upstream rate for profitability estimates.
+// The operator-maintained value in extra is a fallback, defaulting to 0.1.
+// Neither path changes account billing, user billing or stored usage logs.
 func (a *Account) CostMultiplier() float64 {
+	return a.costMultiplierAt(time.Now())
+}
+
+func (a *Account) costMultiplierAt(now time.Time) float64 {
+	// Share freshness, token billing scope and current peak-rate semantics with
+	// upstream-aware scheduling; never persist a probe as the manual fallback.
+	if rate, ok := openAIFreshUpstreamBillingRate(a, now); ok {
+		return rate
+	}
 	if a != nil {
 		if value, ok := accountCostMultiplierNumber(a.Extra[AccountCostMultiplierExtraKey]); ok {
 			return value
@@ -45,7 +55,7 @@ func accountCostMultiplierNumber(raw any) (float64, bool) {
 	return value, !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 1000000
 }
 
-// Null removes an override and restores the default; zero is an explicit cost.
+// Null restores the default fallback; zero is an explicit zero-cost fallback.
 func ValidateAccountCostMultiplierExtra(extra map[string]any) error {
 	raw, exists := extra[AccountCostMultiplierExtraKey]
 	if !exists || raw == nil {
