@@ -1,4 +1,4 @@
-name: Cline CAS regression
+name: Custom patch regression
 
 on:
   push:
@@ -10,6 +10,7 @@ on:
     paths:
       - 'backend/**'
       - '.github/workflows/cline-cas-validation.yml'
+      - 'tools/verify_custom_patch_alignment.py'
   workflow_dispatch:
 
 permissions:
@@ -41,8 +42,6 @@ jobs:
             git diff --stat "$UPSTREAM_SHA" HEAD
             git ls-files '*AGENTS.md'
           } | tee "$RUNNER_TEMP/patch-inventory/inventory.txt"
-          git diff b36a040d893e082a792846303a78b3444646a37d^ "$LEGACY_SHA" > "$RUNNER_TEMP/patch-inventory/legacy-cookie-ttl.patch"
-          git archive --format=tar HEAD > "$RUNNER_TEMP/patch-inventory/source.tar"
       - uses: actions/upload-artifact@v6
         with:
           name: patch-inventory-${{ github.sha }}
@@ -111,3 +110,26 @@ jobs:
           PY
       - name: Build backend
         run: go build ./cmd/server
+  legacy-patch-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Check alignment patch formatting
+        run: |
+          files=(backend/internal/service/custom_patch_alignment_test.go backend/internal/config/custom_patch_defaults_test.go backend/internal/service/openai_codex_ticket.go backend/internal/service/openai_codex_ticket_feedback.go backend/internal/config/config.go)
+          unformatted="$(gofmt -l "${files[@]}")"
+          if [[ -n "$unformatted" ]]; then printf '%s\n' "$unformatted"; exit 1; fi
+      - name: Require inherited and ported legacy regressions to execute
+        run: python3 tools/verify_custom_patch_alignment.py
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: custom-patch-regressions-${{ github.sha }}
+          path: ${{ runner.temp }}/custom-patch-results/
+          if-no-files-found: error
+          retention-days: 7

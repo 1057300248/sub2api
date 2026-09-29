@@ -55,7 +55,7 @@ func openAICodexReturnedStateAcceptable(account *Account, returned string, now t
 
 func codexTicketExpiryFromShape(ttlSeconds int, shape openAICodexTicketShape, now time.Time) time.Time {
 	if ttlSeconds <= 0 {
-		ttlSeconds = 3600
+		ttlSeconds = int(openAICodexCredentialTTL / time.Second)
 	}
 	expires := now.Add(time.Duration(ttlSeconds) * time.Second)
 	if issuedExpiry := shape.IssuedAt.Add(codexTicketLifetime(4 * ((57 + 16*shape.Blocks + 2) / 3))); !shape.IssuedAt.IsZero() && issuedExpiry.Before(expires) {

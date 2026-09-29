@@ -213,10 +213,10 @@ func (s *OpenAIGatewayService) openAICodexTicketConfig() config.OpenAICodexTicke
 		cfg.TargetLength = 292
 	}
 	if cfg.TTLSeconds <= 0 {
-		cfg.TTLSeconds = 3600
+		cfg.TTLSeconds = int(openAICodexCredentialTTL / time.Second)
 	}
 	if cfg.RefreshBeforeSeconds <= 0 {
-		cfg.RefreshBeforeSeconds = 600
+		cfg.RefreshBeforeSeconds = 60
 	}
 	if cfg.HarvestProbeIntervalSeconds < 30 {
 		cfg.HarvestProbeIntervalSeconds = 180
