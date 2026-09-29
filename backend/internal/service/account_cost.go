@@ -3,7 +3,6 @@ package service
 import (
 	"encoding/json"
 	"math"
-	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -11,19 +10,10 @@ import (
 const AccountCostMultiplierExtraKey = "cost_multiplier"
 const DefaultAccountCostMultiplier = 0.1
 
-// CostMultiplier prefers a fresh upstream rate for profitability estimates.
-// The operator-maintained value in extra is a fallback, defaulting to 0.1.
-// Neither path changes account billing, user billing or stored usage logs.
+// CostMultiplier is the saved estimate used for profitability.
+// Successful upstream rate probes update this value without changing billing.
+// Keeping it in extra preserves existing account import/export and caches.
 func (a *Account) CostMultiplier() float64 {
-	return a.costMultiplierAt(time.Now())
-}
-
-func (a *Account) costMultiplierAt(now time.Time) float64 {
-	// Share freshness, token billing scope and current peak-rate semantics with
-	// upstream-aware scheduling; never persist a probe as the manual fallback.
-	if rate, ok := openAIFreshUpstreamBillingRate(a, now); ok {
-		return rate
-	}
 	if a != nil {
 		if value, ok := accountCostMultiplierNumber(a.Extra[AccountCostMultiplierExtraKey]); ok {
 			return value
@@ -55,7 +45,7 @@ func accountCostMultiplierNumber(raw any) (float64, bool) {
 	return value, !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 1000000
 }
 
-// Null restores the default fallback; zero is an explicit zero-cost fallback.
+// Null removes an override and restores the default; zero is an explicit cost.
 func ValidateAccountCostMultiplierExtra(extra map[string]any) error {
 	raw, exists := extra[AccountCostMultiplierExtraKey]
 	if !exists || raw == nil {
@@ -67,4 +57,17 @@ func ValidateAccountCostMultiplierExtra(extra map[string]any) error {
 	}
 	extra[AccountCostMultiplierExtraKey] = value
 	return nil
+}
+
+// CostMultiplierToSync returns the successful probe's effective token cost.
+// A failed probe may carry old data; it must never rewrite the saved cost.
+func (s *UpstreamBillingProbeSnapshot) CostMultiplierToSync() (float64, bool) {
+	if s == nil || s.Status != UpstreamBillingProbeStatusOK || s.LastAttemptAt.IsZero() {
+		return 0, false
+	}
+	value, ok := upstreamBillingRateAt(s.Data, s.LastAttemptAt)
+	if !ok {
+		return 0, false
+	}
+	return accountCostMultiplierNumber(value)
 }

@@ -93,78 +93,45 @@ func TestPriorityConfigIgnoresRetiredPurchaseWindow(t *testing.T) {
 	require.NotContains(t, score.Reasons, "teams_window_unavailable")
 }
 
-func TestPriorityCostMultiplierPrefersFreshUpstreamRate(t *testing.T) {
+func TestUpstreamProbeCostMultiplierToSync(t *testing.T) {
 	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	for _, tt := range []struct {
-		name     string
-		status   string
-		age      time.Duration
-		upstream float64
-		fallback any
-		want     float64
+		name   string
+		status string
+		rate   any
+		want   float64
+		valid  bool
 	}{
-		{"upstream overrides saved default", UpstreamBillingProbeStatusOK, time.Minute, 0.14, 0.1, 0.14},
-		{"upstream overrides custom fallback", UpstreamBillingProbeStatusOK, time.Minute, 0.14, 0.25, 0.14},
-		{"upstream overrides zero fallback", UpstreamBillingProbeStatusOK, time.Minute, 0.14, 0.0, 0.14},
-		{"upstream without fallback", UpstreamBillingProbeStatusOK, time.Minute, 0.14, nil, 0.14},
-		{"zero upstream", UpstreamBillingProbeStatusOK, time.Minute, 0, 0.1, 0},
-		{"fresh cached success after failure", UpstreamBillingProbeStatusFailed, time.Minute, 0.14, 0.1, 0.14},
-		{"stale uses custom fallback", UpstreamBillingProbeStatusOK, 61 * time.Minute, 0.14, 0.25, 0.25},
-		{"stale uses default", UpstreamBillingProbeStatusOK, 61 * time.Minute, 0.14, nil, 0.1},
-		{"stale preserves zero fallback", UpstreamBillingProbeStatusOK, 61 * time.Minute, 0.14, 0.0, 0},
-		{"unsupported", UpstreamBillingProbeStatusUnsupported, time.Minute, 0.14, 0.1, 0.1},
-		{"future snapshot", UpstreamBillingProbeStatusOK, -time.Minute, 0.14, 0.1, 0.1},
-		{"invalid upstream", UpstreamBillingProbeStatusOK, time.Minute, -0.14, 0.1, 0.1},
+		{"success", UpstreamBillingProbeStatusOK, 0.14, 0.14, true},
+		{"zero", UpstreamBillingProbeStatusOK, 0.0, 0, true},
+		{"failed with cached data", UpstreamBillingProbeStatusFailed, 0.14, 0, false},
+		{"unsupported with cached data", UpstreamBillingProbeStatusUnsupported, 0.14, 0, false},
+		{"negative", UpstreamBillingProbeStatusOK, -1.0, 0, false},
+		{"out of range", UpstreamBillingProbeStatusOK, 1000001.0, 1000001, false},
+		{"missing", UpstreamBillingProbeStatusOK, nil, 0, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			item := priorityCandidate(1, 7, 20)
-			item.account.Extra = upstreamCostTestAccount(1, tt.status, tt.upstream, now.Add(-tt.age), 30*time.Minute).Extra
-			item.account.Extra[AccountCostMultiplierExtraKey] = tt.fallback
-			signal := PrioritySchedulingSignal{ProfitSamples: 20, Revenue: 20, BaseCost: 100}
-			before, err := json.Marshal(item.account.Extra)
-			require.NoError(t, err)
-			score := scorePriorityCandidate(DefaultPrioritySchedulingConfig(), item, signal, now)
-			require.Equal(t, tt.want, *score.Rate)
-			require.InDelta(t, 100*tt.want, score.TheoreticalCost, 1e-9)
-			require.InDelta(t, 20-100*tt.want, *score.Profit, 1e-9)
-			require.Equal(t, 7.0, item.account.BillingRateMultiplier())
-			require.Equal(t, 100.0, signal.BaseCost)
-			after, err := json.Marshal(item.account.Extra)
-			require.NoError(t, err)
-			require.Equal(t, string(before), string(after), "scoring must not persist the upstream rate as a fallback")
+			snapshot := &UpstreamBillingProbeSnapshot{Status: tt.status, LastAttemptAt: now, Data: map[string]any{
+				"billing_scope": "token", "resolved_rate_multiplier": tt.rate, "peak_rate_enabled": false,
+			}}
+			value, ok := snapshot.CostMultiplierToSync()
+			require.Equal(t, tt.valid, ok)
+			if ok {
+				require.Equal(t, tt.want, value)
+			}
 		})
 	}
-}
-
-func TestPriorityCostMultiplierRecomputesUpstreamPeakAndExpiry(t *testing.T) {
-	now := time.Date(2026, 9, 29, 17, 30, 0, 0, time.UTC)
+	snapshot := &UpstreamBillingProbeSnapshot{Status: UpstreamBillingProbeStatusOK, LastAttemptAt: now, Data: map[string]any{
+		"billing_scope": "token", "resolved_rate_multiplier": 0.14, "peak_rate_enabled": true,
+		"peak_start": "09:00", "peak_end": "18:00", "peak_rate_multiplier": 2.0, "timezone": "UTC",
+	}}
+	value, ok := snapshot.CostMultiplierToSync()
+	require.True(t, ok)
+	require.InDelta(t, 0.28, value, 1e-9)
+	// Profit reads only the saved cost; expiry must not restore the old default.
 	item := priorityCandidate(1, 7, 20)
-	item.account.Extra = upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.14, now, time.Hour).Extra
-	item.account.Extra[AccountCostMultiplierExtraKey] = 0.1
-	snapshot, ok := item.account.Extra[UpstreamBillingProbeExtraKey].(map[string]any)
-	require.True(t, ok)
-	data, ok := snapshot["data"].(map[string]any)
-	require.True(t, ok)
-	data["peak_rate_enabled"] = true
-	data["peak_start"] = "09:00"
-	data["peak_end"] = "18:00"
-	data["peak_rate_multiplier"] = 2.0
-	data["timezone"] = "UTC"
-	signal := PrioritySchedulingSignal{ProfitSamples: 20, Revenue: 10, BaseCost: 100}
-	for _, tt := range []struct {
-		at   time.Time
-		want float64
-	}{
-		{now, 0.28},
-		{now.Add(time.Hour), 0.14},
-		{now.Add(3 * time.Hour), 0.1},
-	} {
-		score := scorePriorityCandidate(DefaultPrioritySchedulingConfig(), item, signal, tt.at)
-		require.InDelta(t, tt.want, *score.Rate, 1e-9)
-		require.InDelta(t, 100*tt.want, score.TheoreticalCost, 1e-9)
-	}
-	// OAuth accounts cannot use an API-key probe left in imported metadata.
-	item.account.Type = AccountTypeOAuth
-	score := scorePriorityCandidate(DefaultPrioritySchedulingConfig(), item, signal, now)
-	require.Equal(t, 0.1, *score.Rate)
+	item.account.Extra = map[string]any{AccountCostMultiplierExtraKey: value, UpstreamBillingProbeExtraKey: snapshot}
+	score := scorePriorityCandidate(DefaultPrioritySchedulingConfig(), item, PrioritySchedulingSignal{ProfitSamples: 20, Revenue: 50, BaseCost: 100}, now.Add(24*time.Hour))
+	require.InDelta(t, 28, score.TheoreticalCost, 1e-9)
+	require.Equal(t, 7.0, item.account.BillingRateMultiplier())
 }
