@@ -20,11 +20,12 @@ type Lifecycle struct {
 	active   int
 	idle     chan struct{}
 	checks   []func(context.Context) error
-	probe    chan struct{}
+	probeMu  sync.Mutex
+	probe    *readinessProbe
 }
 
 func NewLifecycle(checks ...func(context.Context) error) *Lifecycle {
-	return &Lifecycle{idle: make(chan struct{}), checks: checks, probe: make(chan struct{}, 1)}
+	return &Lifecycle{idle: make(chan struct{}), checks: checks}
 }
 
 func ProvideLifecycle(db *sql.DB, cache *redis.Client) *Lifecycle {
@@ -147,23 +148,34 @@ func SetupHandler(next http.Handler) http.Handler {
 }
 
 // Some dependency clients use their own socket deadlines rather than ctx.
-// Bound the HTTP probe to its context and allow at most one underlying check
-// per process, so a slow dependency cannot accumulate probe goroutines.
+// Share one bounded check across overlapping probes. A caller's cancellation
+// must neither create another stuck goroutine nor cancel its peers' check.
+type readinessProbe struct {
+	done chan struct{}
+	err  error
+}
+
 func (l *Lifecycle) checkWithinBudget(ctx context.Context) error {
-	select {
-	case l.probe <- struct{}{}:
-	default:
-		return errors.New("readiness check already in progress")
+	l.probeMu.Lock()
+	probe := l.probe
+	if probe == nil {
+		probe = &readinessProbe{done: make(chan struct{})}
+		l.probe = probe
+		go func() {
+			probeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			err := l.checkDependencies(probeCtx)
+			l.probeMu.Lock()
+			probe.err = err
+			l.probe = nil
+			close(probe.done)
+			l.probeMu.Unlock()
+		}()
 	}
-	result := make(chan error, 1)
-	go func() {
-		err := l.checkDependencies(ctx)
-		<-l.probe
-		result <- err
-	}()
+	l.probeMu.Unlock()
 	select {
-	case err := <-result:
-		return err
+	case <-probe.done:
+		return probe.err
 	case <-ctx.Done():
 		return ctx.Err()
 	}

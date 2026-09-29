@@ -187,3 +187,28 @@ func TestLifecycleBoundsAProbeThatIgnoresCancellation(t *testing.T) {
 	require.Equal(t, int32(1), calls.Load(), "another probe must not spawn an additional stuck check")
 	unblock()
 }
+
+func TestLifecycleOverlappingProbesShareWorkAndKeepCallerDeadlines(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	finish := func() { once.Do(func() { close(release) }) }
+	defer finish()
+	var calls atomic.Int32
+	lifecycle := NewLifecycle(func(context.Context) error {
+		if calls.Add(1) == 1 {
+			close(entered)
+		}
+		<-release
+		return nil
+	})
+	first := make(chan error, 1)
+	go func() { first <- lifecycle.checkWithinBudget(context.Background()) }()
+	<-entered
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, lifecycle.checkWithinBudget(ctx), context.DeadlineExceeded, "an overlapping probe should wait for shared work rather than fail as busy")
+	finish()
+	require.NoError(t, <-first, "another caller's timeout must not cancel the shared dependency check")
+	require.Equal(t, int32(1), calls.Load())
+}
