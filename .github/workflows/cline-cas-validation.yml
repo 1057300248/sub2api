@@ -1,0 +1,19 @@
+name: Custom patch regression
+
+# Register the dispatch endpoint on the default branch. The complete workflow
+# lives on wanchuan/stable and runs from that ref, using its exact source SHA.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wrong-ref:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse to substitute old main for the stable patch tests
+        run: |
+          echo 'Dispatch cline-cas-validation.yml with --ref wanchuan/stable.' >&2
+          echo 'This default-branch registration is not regression evidence.' >&2
+          exit 1
