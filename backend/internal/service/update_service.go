@@ -33,7 +33,12 @@ const (
 	// Releases are maintained on the owner-controlled production fork. Keep the
 	// updater independent from the upstream repository so production installs
 	// see our release stream and can update to our fork's assets.
-	githubRepo = "1057300248/sub2api"
+	githubRepo         = "1057300248/sub2api"
+	upstreamGithubRepo = "ranxi2001/sub2api"
+
+	wanchuanReleaseManifestName = "wanchuan-release.json"
+	wanchuanReleaseChannel      = "wanchuan"
+	maxReleaseMetadataSize      = 2 * 1024 * 1024
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -132,6 +137,20 @@ type GitHubAsset struct {
 	Size               int64  `json:"size"`
 }
 
+type WanchuanReleaseManifest struct {
+	SchemaVersion       int      `json:"schema_version"`
+	Channel             string   `json:"channel"`
+	Version             string   `json:"version"`
+	SourceSHA           string   `json:"source_sha"`
+	ReleaseRepo         string   `json:"release_repo"`
+	UpstreamRepo        string   `json:"upstream_repo"`
+	UpstreamTag         string   `json:"upstream_tag"`
+	UpstreamSHA         string   `json:"upstream_sha"`
+	IntegrationCommit   string   `json:"integration_commit"`
+	PatchManifestSHA256 string   `json:"patch_manifest_sha256"`
+	PatchModules        []string `json:"patch_modules"`
+}
+
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
 	// Try cache first
@@ -175,24 +194,30 @@ func (s *UpdateService) PerformUpdate(ctx context.Context) error {
 		return ErrNoUpdateAvailable
 	}
 
-	return s.applyReleaseAssets(ctx, info.ReleaseInfo.Assets)
+	if info.ReleaseInfo == nil {
+		return fmt.Errorf("update release metadata is missing")
+	}
+	return s.applyReleaseAssets(ctx, info.LatestVersion, info.ReleaseInfo.Assets)
 }
 
 // applyReleaseAssets downloads the platform archive from the given release assets,
 // verifies its checksum, and atomically swaps the running binary.
 // Shared by PerformUpdate (latest) and RollbackToVersion (specific older version).
-func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []Asset) error {
-	// Find matching archive and checksum for current platform
+func (s *UpdateService) applyReleaseAssets(ctx context.Context, expectedVersion string, releaseAssets []Asset) error {
 	archiveName := s.getArchiveName()
 	var downloadURL string
 	var checksumURL string
+	var manifestURL string
 
 	for _, asset := range releaseAssets {
 		if strings.Contains(asset.Name, archiveName) && !strings.HasSuffix(asset.Name, ".txt") {
 			downloadURL = asset.DownloadURL
 		}
-		if asset.Name == "checksums.txt" {
+		switch asset.Name {
+		case "checksums.txt":
 			checksumURL = asset.DownloadURL
+		case wanchuanReleaseManifestName:
+			manifestURL = asset.DownloadURL
 		}
 	}
 
@@ -200,17 +225,48 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 		return fmt.Errorf("no compatible release found for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
-	// SECURITY: Validate download URL is from trusted domain
-	if err := validateDownloadURL(downloadURL); err != nil {
-		return fmt.Errorf("invalid download URL: %w", err)
+	expectedVersion = strings.TrimPrefix(strings.TrimSpace(expectedVersion), "v")
+	if parseWanchuanRevision(expectedVersion) < 1 {
+		return fmt.Errorf("release %q is not a Wanchuan revision", expectedVersion)
 	}
-	if checksumURL != "" {
-		if err := validateDownloadURL(checksumURL); err != nil {
-			return fmt.Errorf("invalid checksum URL: %w", err)
+	if checksumURL == "" {
+		return fmt.Errorf("release is missing required checksums.txt")
+	}
+	if manifestURL == "" {
+		return fmt.Errorf("release is missing required %s", wanchuanReleaseManifestName)
+	}
+
+	for label, rawURL := range map[string]string{
+		"download": downloadURL,
+		"checksum": checksumURL,
+		"manifest": manifestURL,
+	} {
+		if err := validateDownloadURL(rawURL); err != nil {
+			return fmt.Errorf("invalid %s URL: %w", label, err)
 		}
 	}
 
-	// Get current executable path
+	checksumData, err := s.githubClient.FetchChecksumFile(ctx, checksumURL)
+	if err != nil {
+		return fmt.Errorf("failed to download checksums: %w", err)
+	}
+	if len(checksumData) > maxReleaseMetadataSize {
+		return fmt.Errorf("checksums.txt exceeds metadata limit")
+	}
+	manifestData, err := s.githubClient.FetchChecksumFile(ctx, manifestURL)
+	if err != nil {
+		return fmt.Errorf("failed to download %s: %w", wanchuanReleaseManifestName, err)
+	}
+	if len(manifestData) > maxReleaseMetadataSize {
+		return fmt.Errorf("%s exceeds metadata limit", wanchuanReleaseManifestName)
+	}
+	if err := verifyBytesChecksum(wanchuanReleaseManifestName, manifestData, checksumData); err != nil {
+		return fmt.Errorf("release manifest checksum verification failed: %w", err)
+	}
+	if err := validateWanchuanReleaseManifest(manifestData, expectedVersion); err != nil {
+		return fmt.Errorf("release manifest validation failed: %w", err)
+	}
+
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
@@ -221,64 +277,39 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 	}
 
 	exeDir := filepath.Dir(exePath)
-
-	// Create temp directory in the SAME directory as executable
-	// This ensures os.Rename is atomic (same filesystem)
 	tempDir, err := os.MkdirTemp(exeDir, ".sub2api-update-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
-	// Download archive
 	archivePath := filepath.Join(tempDir, filepath.Base(downloadURL))
 	if err := s.downloadFile(ctx, downloadURL, archivePath); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
-
-	// Verify checksum if available
-	if checksumURL != "" {
-		if err := s.verifyChecksum(ctx, archivePath, checksumURL); err != nil {
-			return fmt.Errorf("checksum verification failed: %w", err)
-		}
+	if err := verifyFileChecksum(archivePath, checksumData); err != nil {
+		return fmt.Errorf("checksum verification failed: %w", err)
 	}
 
-	// Extract binary from archive
 	newBinaryPath := filepath.Join(tempDir, "sub2api")
 	if err := s.extractBinary(archivePath, newBinaryPath); err != nil {
 		return fmt.Errorf("extraction failed: %w", err)
 	}
-
-	// Set executable permission before replacement
 	if err := os.Chmod(newBinaryPath, 0755); err != nil {
 		return fmt.Errorf("chmod failed: %w", err)
 	}
 
-	// Atomic replacement using rename pattern:
-	// 1. Rename current -> backup (atomic on Unix)
-	// 2. Rename new -> current (atomic on Unix, same filesystem)
-	// If step 2 fails, restore backup
 	backupPath := exePath + ".backup"
-
-	// Remove old backup if exists
 	_ = os.Remove(backupPath)
-
-	// Step 1: Move current binary to backup
 	if err := os.Rename(exePath, backupPath); err != nil {
 		return fmt.Errorf("backup failed: %w", err)
 	}
-
-	// Step 2: Move new binary to target location (atomic, same filesystem)
 	if err := os.Rename(newBinaryPath, exePath); err != nil {
-		// Restore backup on failure
 		if restoreErr := os.Rename(backupPath, exePath); restoreErr != nil {
 			return fmt.Errorf("replace failed and restore failed: %w (restore error: %v)", err, restoreErr)
 		}
 		return fmt.Errorf("replace failed (restored backup): %w", err)
 	}
-
-	// Success - backup file is kept for rollback capability
-	// It will be cleaned up on next successful update
 	return nil
 }
 
@@ -360,7 +391,7 @@ func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) e
 		}
 	}
 
-	return s.applyReleaseAssets(ctx, assets)
+	return s.applyReleaseAssets(ctx, target, assets)
 }
 
 // fetchRollbackCandidates fetches recent releases and keeps the newest
@@ -379,6 +410,10 @@ func (s *UpdateService) fetchRollbackCandidates(ctx context.Context) ([]*GitHubR
 		}
 		v := strings.TrimPrefix(r.TagName, "v")
 		if v == "" || seen[v] {
+			continue
+		}
+		if parseWanchuanRevision(s.currentVersion) > 0 &&
+			(parseWanchuanRevision(v) < 1 || !hasRequiredWanchuanGitHubAssets(r.Assets)) {
 			continue
 		}
 		// Only versions strictly older than current (also excludes current itself)
@@ -409,7 +444,6 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 	}
 
 	latestVersion := strings.TrimPrefix(release.TagName, "v")
-
 	assets := make([]Asset, len(release.Assets))
 	for i, a := range release.Assets {
 		assets[i] = Asset{
@@ -419,10 +453,20 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 		}
 	}
 
+	hasUpdate := compareVersions(s.currentVersion, latestVersion) < 0
+	warning := ""
+	if parseWanchuanRevision(latestVersion) < 1 {
+		hasUpdate = false
+		warning = "Latest owner release is not a Wanchuan revision"
+	} else if !hasRequiredWanchuanAssets(assets) {
+		hasUpdate = false
+		warning = "Latest Wanchuan release is missing required manifest or checksums"
+	}
+
 	return &UpdateInfo{
 		CurrentVersion: s.currentVersion,
 		LatestVersion:  latestVersion,
-		HasUpdate:      compareVersions(s.currentVersion, latestVersion) < 0,
+		HasUpdate:      hasUpdate,
 		ReleaseInfo: &ReleaseInfo{
 			Name:        release.Name,
 			Body:        release.Body,
@@ -431,6 +475,7 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 			Assets:      assets,
 		},
 		Cached:    false,
+		Warning:   warning,
 		BuildType: s.buildType,
 	}, nil
 }
@@ -472,13 +517,55 @@ func validateDownloadURL(rawURL string) error {
 }
 
 func (s *UpdateService) verifyChecksum(ctx context.Context, filePath, checksumURL string) error {
-	// Download checksums file
 	checksumData, err := s.githubClient.FetchChecksumFile(ctx, checksumURL)
 	if err != nil {
 		return fmt.Errorf("failed to download checksums: %w", err)
 	}
+	return verifyFileChecksum(filePath, checksumData)
+}
 
-	// Calculate file hash
+func checksumForFile(checksumData []byte, fileName string) (string, error) {
+	scanner := bufio.NewScanner(strings.NewReader(string(checksumData)))
+	for scanner.Scan() {
+		parts := strings.Fields(scanner.Text())
+		if len(parts) != 2 {
+			continue
+		}
+		name := strings.TrimPrefix(strings.TrimPrefix(parts[1], "*"), "./")
+		if name != fileName {
+			continue
+		}
+		expected := strings.ToLower(parts[0])
+		decoded, err := hex.DecodeString(expected)
+		if err != nil || len(decoded) != sha256.Size {
+			return "", fmt.Errorf("invalid checksum for %s", fileName)
+		}
+		return expected, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("checksum not found for %s", fileName)
+}
+
+func verifyBytesChecksum(fileName string, data, checksumData []byte) error {
+	expected, err := checksumForFile(checksumData, fileName)
+	if err != nil {
+		return err
+	}
+	actual := sha256.Sum256(data)
+	actualHash := hex.EncodeToString(actual[:])
+	if expected != actualHash {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expected, actualHash)
+	}
+	return nil
+}
+
+func verifyFileChecksum(filePath string, checksumData []byte) error {
+	expected, err := checksumForFile(checksumData, filepath.Base(filePath))
+	if err != nil {
+		return err
+	}
 	f, err := os.Open(filePath)
 	if err != nil {
 		return err
@@ -490,22 +577,85 @@ func (s *UpdateService) verifyChecksum(ctx context.Context, filePath, checksumUR
 		return err
 	}
 	actualHash := hex.EncodeToString(h.Sum(nil))
+	if expected != actualHash {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expected, actualHash)
+	}
+	return nil
+}
 
-	// Find expected hash in checksums file
-	fileName := filepath.Base(filePath)
-	scanner := bufio.NewScanner(strings.NewReader(string(checksumData)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Fields(line)
-		if len(parts) == 2 && parts[1] == fileName {
-			if parts[0] == actualHash {
-				return nil
-			}
-			return fmt.Errorf("checksum mismatch: expected %s, got %s", parts[0], actualHash)
+func validateWanchuanReleaseManifest(data []byte, expectedVersion string) error {
+	if len(data) == 0 || len(data) > maxReleaseMetadataSize {
+		return fmt.Errorf("invalid manifest size")
+	}
+	var manifest WanchuanReleaseManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return fmt.Errorf("decode manifest: %w", err)
+	}
+	expectedVersion = strings.TrimPrefix(strings.TrimSpace(expectedVersion), "v")
+	if manifest.SchemaVersion != 1 {
+		return fmt.Errorf("unsupported manifest schema %d", manifest.SchemaVersion)
+	}
+	if manifest.Channel != wanchuanReleaseChannel {
+		return fmt.Errorf("unexpected release channel %q", manifest.Channel)
+	}
+	if manifest.Version != expectedVersion || parseWanchuanRevision(manifest.Version) < 1 {
+		return fmt.Errorf("manifest version %q does not match expected Wanchuan version %q", manifest.Version, expectedVersion)
+	}
+	if manifest.ReleaseRepo != githubRepo {
+		return fmt.Errorf("manifest release repo %q does not match %q", manifest.ReleaseRepo, githubRepo)
+	}
+	if manifest.UpstreamRepo != upstreamGithubRepo {
+		return fmt.Errorf("manifest upstream repo %q does not match %q", manifest.UpstreamRepo, upstreamGithubRepo)
+	}
+	if parseVersion(manifest.UpstreamTag) != parseVersion(manifest.Version) {
+		return fmt.Errorf("manifest upstream tag %q does not match release base version", manifest.UpstreamTag)
+	}
+	for label, value := range map[string]string{
+		"source_sha":         manifest.SourceSHA,
+		"upstream_sha":       manifest.UpstreamSHA,
+		"integration_commit": manifest.IntegrationCommit,
+	} {
+		decoded, err := hex.DecodeString(value)
+		if err != nil || len(decoded) != 20 {
+			return fmt.Errorf("manifest %s is not a full commit sha", label)
 		}
 	}
+	patchDigest, err := hex.DecodeString(manifest.PatchManifestSHA256)
+	if err != nil || len(patchDigest) != sha256.Size {
+		return fmt.Errorf("manifest patch_manifest_sha256 is invalid")
+	}
+	if len(manifest.PatchModules) == 0 {
+		return fmt.Errorf("manifest patch_modules is empty")
+	}
+	return nil
+}
 
-	return fmt.Errorf("checksum not found for %s", fileName)
+func hasRequiredWanchuanAssets(assets []Asset) bool {
+	hasChecksums := false
+	hasManifest := false
+	for _, asset := range assets {
+		switch asset.Name {
+		case "checksums.txt":
+			hasChecksums = true
+		case wanchuanReleaseManifestName:
+			hasManifest = true
+		}
+	}
+	return hasChecksums && hasManifest
+}
+
+func hasRequiredWanchuanGitHubAssets(assets []GitHubAsset) bool {
+	hasChecksums := false
+	hasManifest := false
+	for _, asset := range assets {
+		switch asset.Name {
+		case "checksums.txt":
+			hasChecksums = true
+		case wanchuanReleaseManifestName:
+			hasManifest = true
+		}
+	}
+	return hasChecksums && hasManifest
 }
 
 func (s *UpdateService) extractBinary(archivePath, destPath string) error {
@@ -615,10 +765,14 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 		return nil, fmt.Errorf("cache expired")
 	}
 
+	hasUpdate := compareVersions(s.currentVersion, cached.Latest) < 0 &&
+		parseWanchuanRevision(cached.Latest) > 0 &&
+		cached.ReleaseInfo != nil &&
+		hasRequiredWanchuanAssets(cached.ReleaseInfo.Assets)
 	return &UpdateInfo{
 		CurrentVersion: s.currentVersion,
 		LatestVersion:  cached.Latest,
-		HasUpdate:      compareVersions(s.currentVersion, cached.Latest) < 0,
+		HasUpdate:      hasUpdate,
 		ReleaseInfo:    cached.ReleaseInfo,
 		Cached:         true,
 		BuildType:      s.buildType,

@@ -26,6 +26,8 @@ type githubReleaseClientError struct {
 	err error
 }
 
+const maxGitHubReleaseMetadataBytes = 2 * 1024 * 1024
+
 // NewGitHubReleaseClient 创建 GitHub Release 客户端
 // proxyURL 为空时直连 GitHub，支持 http/https/socks5/socks5h 协议
 // 代理配置失败时行为由 allowDirectOnProxyError 控制：
@@ -242,5 +244,12 @@ func (c *githubReleaseClient) FetchChecksumFile(ctx context.Context, url string)
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxGitHubReleaseMetadataBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxGitHubReleaseMetadataBytes {
+		return nil, fmt.Errorf("release metadata exceeds %d bytes", maxGitHubReleaseMetadataBytes)
+	}
+	return data, nil
 }

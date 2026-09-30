@@ -4,7 +4,11 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -212,4 +216,77 @@ func TestCompareVersionsWanchuanRevision(t *testing.T) {
 			require.Equal(t, -tt.want, compareVersions(tt.latest, tt.current))
 		})
 	}
+}
+
+
+func TestUpdateServiceCheckUpdateRequiresWanchuanReleaseMetadata(t *testing.T) {
+	validAssets := []GitHubAsset{
+		{Name: "checksums.txt", BrowserDownloadURL: "https://github.com/1057300248/sub2api/releases/download/v2.9.6-wanchuan.1/checksums.txt"},
+		{Name: wanchuanReleaseManifestName, BrowserDownloadURL: "https://github.com/1057300248/sub2api/releases/download/v2.9.6-wanchuan.1/wanchuan-release.json"},
+	}
+	tests := []struct {
+		name        string
+		tag         string
+		assets      []GitHubAsset
+		wantUpdate  bool
+		wantWarning string
+	}{
+		{name: "verified Wanchuan metadata", tag: "v2.9.6-wanchuan.1", assets: validAssets, wantUpdate: true},
+		{name: "plain owner release rejected", tag: "v2.9.7", assets: validAssets, wantWarning: "not a Wanchuan"},
+		{name: "manifest missing", tag: "v2.9.6-wanchuan.1", assets: []GitHubAsset{{Name: "checksums.txt"}}, wantWarning: "missing required"},
+		{name: "checksums missing", tag: "v2.9.6-wanchuan.1", assets: []GitHubAsset{{Name: wanchuanReleaseManifestName}}, wantWarning: "missing required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &updateServiceGitHubClientStub{release: &GitHubRelease{TagName: tt.tag, Assets: tt.assets}}
+			svc := NewUpdateService(&updateServiceCacheStub{}, client, "2.9.6", "release")
+			info, err := svc.CheckUpdate(context.Background(), true)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantUpdate, info.HasUpdate)
+			if tt.wantWarning != "" {
+				require.Contains(t, info.Warning, tt.wantWarning)
+			} else {
+				require.Empty(t, info.Warning)
+			}
+		})
+	}
+}
+
+func TestValidateWanchuanReleaseManifest(t *testing.T) {
+	valid := WanchuanReleaseManifest{
+		SchemaVersion:       1,
+		Channel:             wanchuanReleaseChannel,
+		Version:             "2.9.6-wanchuan.1",
+		SourceSHA:           strings.Repeat("a", 40),
+		ReleaseRepo:         githubRepo,
+		UpstreamRepo:        upstreamGithubRepo,
+		UpstreamTag:         "v2.9.6",
+		UpstreamSHA:         strings.Repeat("b", 40),
+		IntegrationCommit:   strings.Repeat("c", 40),
+		PatchManifestSHA256: strings.Repeat("d", 64),
+		PatchModules:        []string{"cline-rate-limit-cas"},
+	}
+	data, err := json.Marshal(valid)
+	require.NoError(t, err)
+	require.NoError(t, validateWanchuanReleaseManifest(data, valid.Version))
+
+	bad := valid
+	bad.Version = "2.9.6-wanchuan.2"
+	data, err = json.Marshal(bad)
+	require.NoError(t, err)
+	require.Error(t, validateWanchuanReleaseManifest(data, valid.Version))
+
+	bad = valid
+	bad.ReleaseRepo = "ranxi2001/sub2api"
+	data, err = json.Marshal(bad)
+	require.NoError(t, err)
+	require.Error(t, validateWanchuanReleaseManifest(data, valid.Version))
+}
+
+func TestVerifyBytesChecksumAcceptsManifestEntry(t *testing.T) {
+	data := []byte("{\"channel\":\"wanchuan\"}")
+	digest := sha256.Sum256(data)
+	checksums := []byte(fmt.Sprintf("%x  %s\n", digest, wanchuanReleaseManifestName))
+	require.NoError(t, verifyBytesChecksum(wanchuanReleaseManifestName, data, checksums))
+	require.Error(t, verifyBytesChecksum(wanchuanReleaseManifestName, append(data, '!'), checksums))
 }
