@@ -92,6 +92,8 @@ export default {
     "subtitle": "Models and options to fill when enabling BPS with defaults in an account.",
     "scopeHint": "This page only saves the template. Accounts offer default and initial activation modes. Creating, importing or syncing an account never enables BPS automatically.",
     "models": "Default models",
+    "ws_sse_accelerationHint": "Save the default checkbox state for HTTP streaming WS acceleration. Off by default.",
+    "auto_enable_on_degradationHint": "Save the default checkbox state for enabling BPS after degradation. Off by default.",
     "options": "Preselected options",
     "reset": "Restore recommended options",
     "advanced": "More options",
