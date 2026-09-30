@@ -8,6 +8,8 @@ import (
 
 // ExcelBPSDefaults is a reusable form template. It never enables accounts by itself.
 type ExcelBPSDefaults struct {
+	WSSSEAcceleration       bool     `json:"ws_sse_acceleration"`
+	AutoEnableOnDegradation bool     `json:"auto_enable_on_degradation"`
 	AllModels               bool     `json:"all_models"`
 	Models                  []string `json:"models"`
 	OmitUnsupportedTools    bool     `json:"omit_unsupported_tools"`

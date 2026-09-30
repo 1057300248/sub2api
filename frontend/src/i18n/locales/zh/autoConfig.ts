@@ -92,6 +92,8 @@ export default {
     "subtitle": "在账号里选择“使用默认配置”开启 BPS 时，填入这里保存的模型和选项。",
     "scopeHint": "这里只保存默认模板。账号内提供“使用默认配置”和“使用初始配置”两种开启方式；新建、导入和同步账号不会自动开启 BPS。",
     "models": "默认使用的模型",
+    "ws_sse_accelerationHint": "保存 HTTP 流式 WS 加速的默认勾选状态，默认关闭。",
+    "auto_enable_on_degradationHint": "保存降智后自动开启 BPS 的默认勾选状态，默认关闭。",
     "options": "默认勾选的选项",
     "reset": "恢复推荐选项",
     "advanced": "更多选项",

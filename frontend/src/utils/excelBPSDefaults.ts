@@ -2,6 +2,8 @@ import { DEFAULT_EXCEL_BPS_MODELS } from '@/constants/account'
 import { DEFAULT_BPS_RECOVERY_INTERVAL_MINUTES, isValidBPSRecoveryInterval } from './excelBPSRecovery'
 
 export interface ExcelBPSDefaults {
+  ws_sse_acceleration: boolean
+  auto_enable_on_degradation: boolean
   all_models: boolean
   models: string[]
   omit_unsupported_tools: boolean
@@ -18,6 +20,7 @@ export interface ExcelBPSDefaults {
 
 export function defaultExcelBPSDefaults(): ExcelBPSDefaults {
   return {
+    ws_sse_acceleration: false, auto_enable_on_degradation: false,
     all_models: false, models: [...DEFAULT_EXCEL_BPS_MODELS],
     omit_unsupported_tools: false, ignore_encrypted_content: true,
     auto_disable_on_403: true, auto_recover_on_403: false,
