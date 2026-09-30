@@ -19,6 +19,9 @@ SIMPLE_CONFIG = Path('.goreleaser.simple.yaml')
 VERSION_FILE = Path('backend/cmd/server/VERSION')
 VERSION_RE = re.compile(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?')
 WANCHUAN_RELEASE_RE = re.compile(r'\d+\.\d+\.\d+-wanchuan\.[1-9]\d*')
+PATCH_MANIFEST_FILE = Path('.wanchuan/patches/manifest.json')
+UPSTREAM_LOCK_FILE = Path('.wanchuan/upstream.lock')
+WANCHUAN_RELEASE_MANIFEST = 'wanchuan-release.json'
 
 
 def config(simple=False):
@@ -53,6 +56,47 @@ def archive_name(version, target):
 def sha256(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def build_wanchuan_release_manifest(version, source_sha):
+    if not is_wanchuan_release(version):
+        raise ValueError('release manifest requires a Wanchuan revision')
+    if not re.fullmatch(r'[0-9a-f]{40}', source_sha):
+        raise ValueError('release source sha must be a full lowercase commit sha')
+    patch_manifest = json.loads(PATCH_MANIFEST_FILE.read_text())
+    upstream_lock = json.loads(UPSTREAM_LOCK_FILE.read_text())
+    for key in ('upstream_repo', 'release_repo'):
+        if not isinstance(patch_manifest.get(key), str) or not patch_manifest[key]:
+            raise ValueError(f'patch manifest missing {key}')
+    if upstream_lock.get('upstream_repo') != patch_manifest['upstream_repo']:
+        raise ValueError('upstream lock repository does not match patch manifest')
+    for key in ('sha', 'integrated_commit'):
+        if not re.fullmatch(r'[0-9a-f]{40}', str(upstream_lock.get(key, ''))):
+            raise ValueError(f'upstream lock {key} must be a full lowercase commit sha')
+    modules = sorted(
+        module['id'] for module in patch_manifest.get('modules', [])
+        if isinstance(module, dict) and isinstance(module.get('id'), str) and module['id']
+    )
+    if not modules:
+        raise ValueError('patch manifest has no modules')
+    return {
+        'schema_version': 1,
+        'channel': 'wanchuan',
+        'version': version,
+        'source_sha': source_sha,
+        'release_repo': patch_manifest['release_repo'],
+        'upstream_repo': patch_manifest['upstream_repo'],
+        'upstream_tag': upstream_lock.get('tag'),
+        'upstream_sha': upstream_lock['sha'],
+        'integration_commit': upstream_lock['integrated_commit'],
+        'patch_manifest_sha256': sha256(PATCH_MANIFEST_FILE),
+        'patch_modules': modules,
+    }
+
+
+def write_release_manifest(args):
+    manifest = build_wanchuan_release_manifest(args.version, args.sha)
+    Path(args.output).write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
 
 
 def plan(args):
@@ -110,6 +154,8 @@ def generate_config(args):
         data['builds'] = [{'id': 'sub2api', 'skip': True}]
         data['archives'] = []
         extra = [{'glob': 'release-input/sub2api_*.tar.gz'}, {'glob': 'release-input/sub2api_*.zip'}]
+        if is_wanchuan_release(os.environ.get('RELEASE_VERSION', '')):
+            extra.append({'glob': f'release-input/{WANCHUAN_RELEASE_MANIFEST}'})
         if args.simple:
             data['checksum'] = {'disable': True}
         else:
@@ -187,6 +233,10 @@ def main():
     for arg in ('version', 'sha', 'goos', 'goarch', 'output'):
         p.add_argument('--' + arg, required=True)
     p.set_defaults(run=collect)
+    p = commands.add_parser('manifest')
+    for arg in ('version', 'sha', 'output'):
+        p.add_argument('--' + arg, required=True)
+    p.set_defaults(run=write_release_manifest)
     for command, handler in [('verify', verify), ('contexts', contexts)]:
         p = commands.add_parser(command)
         for arg in ('version', 'sha', 'input'):

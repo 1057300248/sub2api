@@ -246,6 +246,31 @@ class ReleaseMatrixTest(unittest.TestCase):
         data = yaml.safe_load(Path('publisher.yaml').read_text())
         self.assertIs(data['release']['prerelease'], False)
         self.assertIs(data['release']['make_latest'], True)
+        self.assertIn({'glob': 'release-input/wanchuan-release.json'}, data['release']['extra_files'])
+        self.assertEqual(data['checksum']['extra_files'], data['release']['extra_files'])
+
+    def test_wanchuan_release_manifest_binds_source_upstream_and_patchpack(self):
+        Path('.wanchuan/patches').mkdir(parents=True)
+        shutil.copyfile(ROOT / '.wanchuan/patches/manifest.json', '.wanchuan/patches/manifest.json')
+        shutil.copyfile(ROOT / '.wanchuan/upstream.lock', '.wanchuan/upstream.lock')
+        release.write_release_manifest(argparse.Namespace(
+            version='9.8.7-wanchuan.2',
+            sha='a' * 40,
+            output='wanchuan-release.json',
+        ))
+        manifest = json.loads(Path('wanchuan-release.json').read_text())
+        patch_manifest = json.loads(Path('.wanchuan/patches/manifest.json').read_text())
+        upstream_lock = json.loads(Path('.wanchuan/upstream.lock').read_text())
+        self.assertEqual(manifest['schema_version'], 1)
+        self.assertEqual(manifest['channel'], 'wanchuan')
+        self.assertEqual(manifest['version'], '9.8.7-wanchuan.2')
+        self.assertEqual(manifest['source_sha'], 'a' * 40)
+        self.assertEqual(manifest['release_repo'], patch_manifest['release_repo'])
+        self.assertEqual(manifest['upstream_tag'], upstream_lock['tag'])
+        self.assertEqual(manifest['upstream_sha'], upstream_lock['sha'])
+        self.assertEqual(manifest['integration_commit'], upstream_lock['integrated_commit'])
+        self.assertEqual(manifest['patch_manifest_sha256'], release.sha256(Path('.wanchuan/patches/manifest.json')))
+        self.assertEqual(manifest['patch_modules'], sorted(module['id'] for module in patch_manifest['modules']))
 
     def test_wanchuan_images_advance_stable_tags(self):
         fake_bin = Path('bin-wanchuan')

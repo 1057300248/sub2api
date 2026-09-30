@@ -259,6 +259,10 @@ jobs:
           args=(--version "$RELEASE_VERSION" --sha "$RELEASE_SHA" --input release-input --output .release-context)
           if [[ "$SIMPLE_RELEASE" == true ]]; then args+=(--simple); fi
           python "$RUNNER_TEMP/release-tools/release_matrix.py" contexts "${args[@]}"
+      - name: Generate Wanchuan release manifest
+        if: ${{ needs.prepare.outputs.fork_release == 'true' }}
+        run: |
+          python "$RUNNER_TEMP/release-tools/release_matrix.py" manifest             --version "$RELEASE_VERSION"             --sha "$RELEASE_SHA"             --output release-input/wanchuan-release.json
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
