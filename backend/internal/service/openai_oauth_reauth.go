@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/reauthruntime"
 	"log/slog"
 	"net/http"
 	"net/mail"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/mihomo"
@@ -45,8 +47,11 @@ const (
 )
 
 const (
-	OpenAIOAuthReauthModeEmailOTPURL  = "email_otp_url"
-	OpenAIOAuthReauthModePasswordTOTP = "password_totp"
+	OpenAIOAuthReauthModeEmailOTPURL              = "email_otp_url"
+	OpenAIOAuthReauthModePasswordTOTP             = "password_totp"
+	OpenAIOAuthReauthEngineLocal                  = "local_worker"
+	OpenAIOAuthReauthEngineSessionStudio          = "session_studio"
+	OpenAIOAuthReauthDefaultSessionStudioEndpoint = "https://session.ameng2027.xyz/api/v1/relogin"
 )
 
 const (
@@ -68,6 +73,7 @@ type OpenAIOAuthReauthConfig struct {
 	AccountID          int64     `json:"account_id"`
 	LoginEmail         string    `json:"login_email"`
 	CredentialMode     string    `json:"credential_mode"`
+	Engine             string    `json:"engine"`
 	ProxySource        string    `json:"proxy_source"`
 	ProxyID            *int64    `json:"proxy_id,omitempty"`
 	URLMasked          string    `json:"otp_url_masked,omitempty"`
@@ -80,6 +86,7 @@ type OpenAIOAuthReauthConfig struct {
 type OpenAIOAuthReauthConfigInput struct {
 	LoginEmail     string
 	CredentialMode string
+	Engine         string
 	ProxySource    string
 	ProxyID        *int64
 	Password       string
@@ -131,6 +138,7 @@ type OpenAIOAuthReauthStoredConfig struct {
 	AccountID            int64
 	LoginEmail           string
 	CredentialMode       string
+	Engine               string
 	ProxySource          string
 	ProxyID              *int64
 	PasswordCiphertext   string
@@ -169,6 +177,10 @@ type OpenAIOAuthReauthAccountReader interface {
 }
 
 type OpenAIOAuthReauthService struct {
+	settings                AccountTokenGuardV2Settings
+	worker                  *reauthruntime.Manager
+	workerToken             string
+	workerLastSeen          atomic.Int64
 	repo                    OpenAIOAuthReauthRepository
 	accounts                OpenAIOAuthReauthAccountReader
 	credentialUpdater       OpenAIOAuthReauthCredentialUpdater
@@ -370,6 +382,16 @@ func (s *OpenAIOAuthReauthService) SaveCredentialConfig(ctx context.Context, acc
 	if err != nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_REAUTH_CONFIG_READ_FAILED", "failed to read re-login configuration")
 	}
+	engine := strings.TrimSpace(input.Engine)
+	if engine == "" && existing != nil {
+		engine = existing.Engine
+	}
+	if engine == "" {
+		engine = OpenAIOAuthReauthEngineLocal
+	}
+	if engine != OpenAIOAuthReauthEngineLocal && engine != OpenAIOAuthReauthEngineSessionStudio {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REAUTH_ENGINE_INVALID", "invalid OpenAI re-login engine")
+	}
 	proxySource := input.ProxySource
 	proxyID := input.ProxyID
 	if input.PreserveProxy && strings.TrimSpace(proxySource) == "" && proxyID == nil && existing != nil {
@@ -380,12 +402,12 @@ func (s *OpenAIOAuthReauthService) SaveCredentialConfig(ctx context.Context, acc
 	if err != nil {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REAUTH_PROXY_SOURCE_INVALID", "invalid re-login proxy source")
 	}
-	if proxySource == OpenAIOAuthReauthProxySourceManagedProxy {
+	if engine == OpenAIOAuthReauthEngineLocal && proxySource == OpenAIOAuthReauthProxySourceManagedProxy {
 		if _, err := s.reauthProxyURL(ctx, proxyID); err != nil {
 			return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REAUTH_PROXY_INVALID", "selected re-login proxy is unavailable")
 		}
 	}
-	if proxySource == OpenAIOAuthReauthProxySourceMihomo && s.acquireMihomoProxy == nil {
+	if engine == OpenAIOAuthReauthEngineLocal && proxySource == OpenAIOAuthReauthProxySourceMihomo && s.acquireMihomoProxy == nil {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REAUTH_PROXY_INVALID", "selected re-login proxy is unavailable")
 	}
 	email, err := normalizeReauthEmail(input.LoginEmail)
@@ -399,7 +421,15 @@ func (s *OpenAIOAuthReauthService) SaveCredentialConfig(ctx context.Context, acc
 	if mode != OpenAIOAuthReauthModeEmailOTPURL && mode != OpenAIOAuthReauthModePasswordTOTP {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REAUTH_MODE_INVALID", "invalid OpenAI re-login credential mode")
 	}
-	stored := &OpenAIOAuthReauthStoredConfig{AccountID: accountID, LoginEmail: email, CredentialMode: mode, ProxySource: proxySource, ProxyID: proxyID, UpdatedAt: time.Now()}
+	if engine == OpenAIOAuthReauthEngineSessionStudio && mode != OpenAIOAuthReauthModePasswordTOTP {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REAUTH_ENGINE_MODE_INVALID", "Session Studio requires password/TOTP mode")
+	}
+	if engine == OpenAIOAuthReauthEngineSessionStudio {
+		if _, _, err := s.sessionStudioConfig(ctx); err != nil {
+			return nil, err
+		}
+	}
+	stored := &OpenAIOAuthReauthStoredConfig{AccountID: accountID, LoginEmail: email, CredentialMode: mode, Engine: engine, ProxySource: proxySource, ProxyID: proxyID, UpdatedAt: time.Now()}
 	if existing != nil && existing.CredentialMode == mode {
 		stored.PasswordCiphertext = existing.PasswordCiphertext
 		stored.TOTPSecretCiphertext = existing.TOTPSecretCiphertext
@@ -467,7 +497,7 @@ func (s *OpenAIOAuthReauthService) configView(_ context.Context, stored *OpenAIO
 	}
 	view := &OpenAIOAuthReauthConfig{
 		AccountID: stored.AccountID, LoginEmail: stored.LoginEmail, CredentialMode: mode,
-		ProxySource: proxySource, ProxyID: stored.ProxyID, UpdatedAt: stored.UpdatedAt,
+		Engine: normalizedReauthEngine(stored.Engine), ProxySource: proxySource, ProxyID: stored.ProxyID, UpdatedAt: stored.UpdatedAt,
 	}
 	switch mode {
 	case OpenAIOAuthReauthModeEmailOTPURL:
@@ -495,6 +525,13 @@ func (s *OpenAIOAuthReauthService) configView(_ context.Context, stored *OpenAIO
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_REAUTH_MODE_INVALID", "saved re-login credential mode is invalid")
 	}
 	return view, nil
+}
+
+func normalizedReauthEngine(engine string) string {
+	if strings.TrimSpace(engine) == OpenAIOAuthReauthEngineSessionStudio {
+		return OpenAIOAuthReauthEngineSessionStudio
+	}
+	return OpenAIOAuthReauthEngineLocal
 }
 
 func (s *OpenAIOAuthReauthService) decryptReauthSecret(ciphertext, message string) (string, error) {
@@ -559,6 +596,9 @@ func (s *OpenAIOAuthReauthService) CreateTask(ctx context.Context, accountID int
 	if view == nil || !view.Configured {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REAUTH_CONFIG_REQUIRED", "save a complete re-login configuration first")
 	}
+	if err := s.checkWorkerMode(stored.CredentialMode); err != nil {
+		return nil, err
+	}
 	expectedCredentialsHash, err := hashReauthCredentials(account.Credentials)
 	if err != nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_REAUTH_CREDENTIAL_SNAPSHOT_FAILED", "failed to snapshot account credentials")
@@ -576,18 +616,25 @@ func (s *OpenAIOAuthReauthService) CreateTask(ctx context.Context, accountID int
 // OpenAIOAuthReauthClaim is returned only to an authenticated worker. Secret
 // fields are plaintext in this in-memory response and must never be logged.
 type OpenAIOAuthReauthClaim struct {
-	TaskID         int64  `json:"task_id"`
-	AccountID      int64  `json:"account_id"`
-	LoginEmail     string `json:"login_email"`
-	CredentialMode string `json:"credential_mode"`
-	Password       string `json:"password,omitempty"`
-	TOTPSecret     string `json:"totp_secret,omitempty"`
-	OTPURL         string `json:"otp_url,omitempty"`
-	AuthURL        string `json:"auth_url,omitempty"`
-	ProxyURL       string `json:"proxy_url,omitempty"`
+	TaskID          int64             `json:"task_id"`
+	AccountID       int64             `json:"account_id"`
+	LoginEmail      string            `json:"login_email"`
+	CredentialMode  string            `json:"credential_mode"`
+	Engine          string            `json:"engine"`
+	ReloginEndpoint string            `json:"relogin_endpoint,omitempty"`
+	ReloginHeaders  map[string]string `json:"relogin_headers,omitempty"`
+	Password        string            `json:"password,omitempty"`
+	TOTPSecret      string            `json:"totp_secret,omitempty"`
+	OTPURL          string            `json:"otp_url,omitempty"`
+	AuthURL         string            `json:"auth_url,omitempty"`
+	ProxyURL        string            `json:"proxy_url,omitempty"`
 }
 
 func (s *OpenAIOAuthReauthService) ClaimTask(ctx context.Context, workerID string) (*OpenAIOAuthReauthClaim, error) {
+	return s.ClaimTaskWithEngines(ctx, workerID, nil)
+}
+
+func (s *OpenAIOAuthReauthService) ClaimTaskWithEngines(ctx context.Context, workerID string, engines []string) (*OpenAIOAuthReauthClaim, error) {
 	if err := s.ensureReady(); err != nil {
 		return nil, err
 	}
@@ -595,7 +642,39 @@ func (s *OpenAIOAuthReauthService) ClaimTask(ctx context.Context, workerID strin
 	if workerID == "" || len(workerID) > 128 {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REAUTH_WORKER_ID_INVALID", "worker id is required")
 	}
-	record, err := s.repo.ClaimNextTask(ctx, workerID, openAIOAuthReauthStaleAfter)
+	if len(engines) == 0 {
+		engines = []string{OpenAIOAuthReauthEngineLocal}
+	}
+	if len(engines) > 2 {
+		return nil, infraerrors.BadRequest("OPENAI_REAUTH_ENGINE_INVALID", "invalid worker engines")
+	}
+	for _, engine := range engines {
+		if engine != OpenAIOAuthReauthEngineLocal && engine != OpenAIOAuthReauthEngineSessionStudio {
+			return nil, infraerrors.BadRequest("OPENAI_REAUTH_ENGINE_INVALID", "invalid worker engines")
+		}
+	}
+	s.workerLastSeen.Store(time.Now().UnixNano())
+	var record *OpenAIOAuthReauthTaskRecord
+	var err error
+	if claimer, ok := s.repo.(interface {
+		ClaimNextTaskForEngines(context.Context, string, time.Duration, string, []string) (*OpenAIOAuthReauthTaskRecord, error)
+	}); ok {
+		mode := ""
+		if s.worker != nil {
+			mode = OpenAIOAuthReauthModePasswordTOTP
+		}
+		record, err = claimer.ClaimNextTaskForEngines(ctx, workerID, openAIOAuthReauthStaleAfter, mode, engines)
+	} else if s.worker != nil {
+		claimer, ok := s.repo.(interface {
+			ClaimNextPasswordTask(context.Context, string, time.Duration) (*OpenAIOAuthReauthTaskRecord, error)
+		})
+		if !ok {
+			return nil, infraerrors.ServiceUnavailable("OPENAI_REAUTH_WORKER_UNAVAILABLE", "Managed re-login queue is unavailable")
+		}
+		record, err = claimer.ClaimNextPasswordTask(ctx, workerID, openAIOAuthReauthStaleAfter)
+	} else {
+		record, err = s.repo.ClaimNextTask(ctx, workerID, openAIOAuthReauthStaleAfter)
+	}
 	if err != nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_REAUTH_TASK_CLAIM_FAILED", "failed to claim re-login task")
 	}
@@ -619,6 +698,17 @@ func (s *OpenAIOAuthReauthService) ClaimTask(ctx context.Context, workerID strin
 	if mode == "" {
 		mode = OpenAIOAuthReauthModeEmailOTPURL
 	}
+	engine := normalizedReauthEngine(stored.Engine)
+	supported := false
+	for _, offered := range engines {
+		if offered == engine {
+			supported = true
+		}
+	}
+	if !supported || (engine == OpenAIOAuthReauthEngineSessionStudio && mode != OpenAIOAuthReauthModePasswordTOTP) {
+		_ = s.repo.MarkFailed(ctx, record.ID, workerID, "selected re-login engine is unsupported by this worker")
+		return nil, nil
+	}
 	proxySource, proxyErr := normalizeReauthProxySource(stored.ProxySource, stored.ProxyID)
 	if proxyErr != nil {
 		_ = s.repo.MarkFailed(ctx, record.ID, workerID, "configured re-login proxy source is invalid")
@@ -628,19 +718,21 @@ func (s *OpenAIOAuthReauthService) ClaimTask(ctx context.Context, workerID strin
 	proxyError := "configured re-login proxy is unavailable"
 	var proxyURL string
 	var release func()
-	switch proxySource {
-	case OpenAIOAuthReauthProxySourceAccount:
-		proxyID = account.ProxyID
-		proxyError = "configured account proxy is unavailable"
-		proxyURL, proxyErr = s.reauthProxyURL(ctx, proxyID)
-	case OpenAIOAuthReauthProxySourceManagedProxy:
-		proxyURL, proxyErr = s.reauthProxyURL(ctx, proxyID)
-	case OpenAIOAuthReauthProxySourceMihomo:
-		proxyError = "managed Mihomo proxy is unavailable"
-		if s.acquireMihomoProxy == nil {
-			proxyErr = errors.New("managed Mihomo proxy is unavailable")
-		} else {
-			proxyURL, release, proxyErr = s.acquireMihomoProxy(ctx, fmt.Sprintf("openai-reauth-task:%d", record.ID))
+	if engine == OpenAIOAuthReauthEngineLocal {
+		switch proxySource {
+		case OpenAIOAuthReauthProxySourceAccount:
+			proxyID = account.ProxyID
+			proxyError = "configured account proxy is unavailable"
+			proxyURL, proxyErr = s.reauthProxyURL(ctx, proxyID)
+		case OpenAIOAuthReauthProxySourceManagedProxy:
+			proxyURL, proxyErr = s.reauthProxyURL(ctx, proxyID)
+		case OpenAIOAuthReauthProxySourceMihomo:
+			proxyError = "managed Mihomo proxy is unavailable"
+			if s.acquireMihomoProxy == nil {
+				proxyErr = errors.New("managed Mihomo proxy is unavailable")
+			} else {
+				proxyURL, release, proxyErr = s.acquireMihomoProxy(ctx, fmt.Sprintf("openai-reauth-task:%d", record.ID))
+			}
 		}
 	}
 	leaseStored := false
@@ -657,7 +749,14 @@ func (s *OpenAIOAuthReauthService) ClaimTask(ctx context.Context, workerID strin
 	}
 	claim := &OpenAIOAuthReauthClaim{
 		TaskID: record.ID, AccountID: record.AccountID, LoginEmail: stored.LoginEmail,
-		CredentialMode: mode, ProxyURL: proxyURL,
+		CredentialMode: mode, Engine: normalizedReauthEngine(stored.Engine), ProxyURL: proxyURL,
+	}
+	if claim.Engine == OpenAIOAuthReauthEngineSessionStudio {
+		claim.ReloginEndpoint, claim.ReloginHeaders, err = s.sessionStudioConfig(ctx)
+		if err != nil {
+			_ = s.repo.MarkFailed(ctx, record.ID, workerID, "Session Studio configuration is unavailable")
+			return nil, nil
+		}
 	}
 	switch mode {
 	case OpenAIOAuthReauthModeEmailOTPURL:

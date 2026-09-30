@@ -21,6 +21,13 @@
 
       <CredentialEncryptionSetup class="mb-5" @ready="encryptionReady = $event" />
 
+      <section v-if="status.worker" class="mb-5 rounded-xl border border-gray-200 p-4 dark:border-gray-700" data-testid="reauth-runtime-status" role="status">
+        <strong>{{ t('tokenGuardV2.runtimeTitle') }}</strong>
+        <p>{{ t(`tokenGuardV2.runtimeStates.${runtimeState}`) }}</p>
+        <p v-if="runtimeReason">{{ t(`tokenGuardV2.runtimeReasons.${runtimeReason}`) }}</p>
+        <small>{{ t(status.worker.mode === 'external' ? 'tokenGuardV2.runtimeExternal' : 'tokenGuardV2.runtimeManaged') }}</small>
+      </section>
+
       <section class="summary-grid">
         <article class="summary-card"><span>{{ t('tokenGuardV2.monitored') }}</span><strong>{{ accounts.length }}</strong><small>{{ t('tokenGuardV2.intervalHint', { minutes: Math.round(status.probe_interval_seconds / 60) }) }}</small></article>
         <article class="summary-card"><span>{{ t('tokenGuardV2.healthy') }}</span><strong>{{ healthyCount }}</strong><small>{{ t('tokenGuardV2.enabledCount', { count: enabledCount }) }}</small></article>
@@ -145,7 +152,7 @@
           <div v-else class="selected-account"><span>{{ t('tokenGuardV2.account') }}</span><strong>{{ editing.account_name }} (#{{ editing.account_id }})</strong></div>
           <label class="field-label">{{ t('tokenGuardV2.loginEmail') }}<input v-model.trim="draft.login_email" class="input w-full" type="email" required /></label>
           <label class="field-label">{{ t('tokenGuardV2.loginProxy') }}
-            <select id="token-guard-v2-proxy" v-model="proxyChoice" class="input w-full">
+            <select id="token-guard-v2-proxy" v-model="proxyChoice" :disabled="draft.engine === 'session_studio'" class="input w-full">
               <option value="account">{{ t('tokenGuardV2.accountProxyDefault') }}</option>
               <option value="mihomo">{{ t('tokenGuardV2.mihomoManagedPool') }}</option>
               <option v-for="proxy in proxies" :key="proxy.id" :value="`proxy:${proxy.id}`">{{ proxyOptionLabel(proxy) }}</option>
@@ -157,6 +164,13 @@
             <label class="mode-option"><input v-model="draft.credential_mode" type="radio" value="password_totp" /><span><strong>{{ t('tokenGuardV2.passwordMode') }}</strong><small>{{ t('tokenGuardV2.passwordModeHint') }}</small></span></label>
             <label class="mode-option"><input v-model="draft.credential_mode" type="radio" value="email_otp_url" /><span><strong>{{ t('tokenGuardV2.mailboxMode') }}</strong><small>{{ t('tokenGuardV2.mailboxModeHint') }}</small></span></label>
           </fieldset>
+          <label class="field-label">{{ t('tokenGuardV2.reloginEngine') }}
+            <select id="token-guard-v2-engine" v-model="draft.engine" class="input w-full">
+              <option value="local_worker">{{ t('tokenGuardV2.localWorkerEngine') }}</option>
+              <option value="session_studio" :disabled="draft.credential_mode !== 'password_totp'">{{ t('tokenGuardV2.sessionStudioEngine') }}</option>
+            </select>
+            <small class="field-hint">{{ t(draft.engine === 'session_studio' ? 'tokenGuardV2.sessionStudioEngineHint' : 'tokenGuardV2.localWorkerEngineHint') }}</small>
+          </label>
 
           <template v-if="draft.credential_mode === 'password_totp'">
             <label class="field-label">{{ t('tokenGuardV2.password') }}<input v-model="draft.password" class="input w-full" type="password" :placeholder="editing?.login_config?.password_configured ? t('tokenGuardV2.keepSecret') : ''" :required="!editing?.login_config?.password_configured" autocomplete="new-password" /></label>
@@ -203,6 +217,7 @@ import {
   type SaveTokenGuardV2Account,
   type TokenGuardV2Account,
   type TokenGuardV2CredentialMode,
+  type TokenGuardV2Engine,
   type TokenGuardV2ProxySource,
   type TokenGuardV2Rules,
   type TokenGuardV2Status,
@@ -240,6 +255,7 @@ const blankDraft = (): SaveTokenGuardV2Account => ({
   account_id: 0,
   login_email: '',
   credential_mode: 'password_totp',
+  engine: 'local_worker',
   proxy_source: 'account',
   proxy_id: null,
   password: '',
@@ -269,6 +285,14 @@ const accountGroupNames = (account: AccountListItem) => groups.value
   .filter(group => account.group_ids?.includes(group.id))
   .map(group => group.name)
   .join(' ')
+const runtimeReason = computed(() => {
+  const reason = status.worker?.reason || ''
+  return ['unsupported_platform', 'release_required', 'runtime_install_failed', 'worker_start_failed', 'worker_exited', 'external_not_configured', 'external_offline', 'api_unreachable'].includes(reason) ? reason : ''
+})
+const runtimeState = computed(() => {
+  const state = status.worker?.state || 'idle'
+  return ['idle', 'preparing', 'running', 'unavailable', 'stopped'].includes(state) ? state : 'unavailable'
+})
 const accounts = computed(() => status.accounts)
 const enabledCount = computed(() => accounts.value.filter(item => item.enabled).length)
 const healthyCount = computed(() => accounts.value.filter(item => item.probe_state === 'ok').length)
@@ -324,6 +348,7 @@ const selectableAccounts = computed(() => {
 const message = (value: unknown) => (value as { message?: string })?.message || t('tokenGuardV2.error')
 const date = (value?: string) => value ? new Date(value).toLocaleString() : '-'
 const modeLabel = (mode?: TokenGuardV2CredentialMode) => !mode ? '-' : mode === 'password_totp' ? t('tokenGuardV2.passwordMode') : t('tokenGuardV2.mailboxMode')
+const engineLabel = (engine?: TokenGuardV2Engine) => engine === 'session_studio' ? t('tokenGuardV2.sessionStudioEngine') : t('tokenGuardV2.localWorkerEngine')
 const proxyChoice = computed({
   get: () => draft.proxy_source === 'managed_proxy' && draft.proxy_id ? `proxy:${draft.proxy_id}` : draft.proxy_source,
   set: (value: string) => {
@@ -351,7 +376,8 @@ const configurationDetail = (item: TokenGuardV2Account) => {
   const credentials = config.credential_mode === 'email_otp_url'
     ? config.otp_url_masked || '-'
     : [config.password_configured ? t('tokenGuardV2.passwordSaved') : '', config.totp_configured ? t('tokenGuardV2.totpSaved') : ''].filter(Boolean).join(' · ') || '-'
-  return `${credentials} · ${t('tokenGuardV2.loginProxy')}: ${proxyLabel(config.proxy_source, config.proxy_id)}`
+  if (config.engine === 'session_studio') return `${credentials} · ${engineLabel(config.engine)} · ${t('tokenGuardV2.remoteEngineEgress')}`
+  return `${credentials} · ${engineLabel(config.engine)} · ${t('tokenGuardV2.loginProxy')}: ${proxyLabel(config.proxy_source, config.proxy_id)}`
 }
 
 function resetDraft() { Object.assign(draft, blankDraft()) }
@@ -373,6 +399,7 @@ function openEdit(item: TokenGuardV2Account) {
     account_id: item.account_id,
     login_email: item.login_config?.login_email || '',
     credential_mode: item.login_config?.credential_mode || 'password_totp',
+    engine: item.login_config?.engine || 'local_worker',
     proxy_source: item.login_config?.proxy_source || (item.login_config?.proxy_id ? 'managed_proxy' : 'account'),
     proxy_id: item.login_config?.proxy_id ?? null,
     enabled: item.enabled,
@@ -462,6 +489,7 @@ const relogin = (item: TokenGuardV2Account) => act(item, () => reloginTokenGuard
 const toggle = (item: TokenGuardV2Account) => act(item, () => updateTokenGuardV2Account(item.account_id, {
   login_email: item.login_config?.login_email || '',
   credential_mode: item.login_config?.credential_mode || 'password_totp',
+  engine: item.login_config?.engine || 'local_worker',
   proxy_source: item.login_config?.proxy_source || (item.login_config?.proxy_id ? 'managed_proxy' : 'account'),
   proxy_id: item.login_config?.proxy_id ?? null,
   enabled: !item.enabled,
@@ -471,6 +499,8 @@ const remove = async (item: TokenGuardV2Account) => {
   if (!window.confirm(t('tokenGuardV2.removeConfirm', { account: item.account_name }))) return
   await act(item, () => deleteTokenGuardV2Account(item.account_id), 'tokenGuardV2.removedNotice')
 }
+
+watch(() => draft.credential_mode, mode => { if (mode !== 'password_totp') draft.engine = 'local_worker' })
 
 watch([accountFilter, searchQuery], () => { accountPage.value = 1 })
 watch(() => filteredAccounts.value.length, (total) => {

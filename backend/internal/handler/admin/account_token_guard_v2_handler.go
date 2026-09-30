@@ -21,6 +21,7 @@ type accountTokenGuardV2SaveRequest struct {
 	AccountID          int64  `json:"account_id"`
 	LoginEmail         string `json:"login_email" binding:"required"`
 	CredentialMode     string `json:"credential_mode" binding:"required"`
+	Engine             string `json:"engine"`
 	ProxySource        string `json:"proxy_source"`
 	ProxyID            *int64 `json:"proxy_id"`
 	Password           string `json:"password"`
@@ -43,6 +44,7 @@ func (r accountTokenGuardV2SaveRequest) input() service.AccountTokenGuardV2Accou
 	}
 	return service.AccountTokenGuardV2AccountInput{
 		LoginEmail: r.LoginEmail, CredentialMode: r.CredentialMode,
+		Engine:      r.Engine,
 		ProxySource: r.ProxySource, ProxyID: r.ProxyID,
 		Password: r.Password, TOTPSecret: r.TOTPSecret, OTPURL: r.OTPURL,
 		ClearPassword: r.ClearPassword, ClearTOTP: r.ClearTOTP,
@@ -72,6 +74,7 @@ func (h *AccountTokenGuardV2Handler) List(c *gin.Context) {
 	}
 	response.Success(c, gin.H{
 		"accounts":                 accounts,
+		"worker":                   h.service.WorkerStatus(),
 		"probe_interval_seconds":   rules.ProbeIntervalSeconds,
 		"retry_interval_seconds":   rules.RetryIntervalSeconds,
 		"relogin_cooldown_seconds": rules.ReloginCooldownSeconds,
