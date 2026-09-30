@@ -392,7 +392,7 @@ const baseSettingsResponse = {
   home_content: "",
   compact_home_enabled: false,
   excel_bps_image_mode: 'native',
-  excel_bps_image_relay_enabled: false,
+  excel_bps_image_relay_enabled: true,
   excel_bps_image_base_url: '',
   excel_bps_image_max_image_mib: 20,
   excel_bps_image_max_images: 20,
@@ -798,7 +798,7 @@ describe("admin SettingsView payment visible method controls", () => {
   });
 
   it("saves Excel BPS image relay from the feature switches tab", async () => {
-    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, excel_bps_image_mode: 'relay' });
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, excel_bps_image_mode: 'relay', excel_bps_image_relay_enabled: false });
     const wrapper = mountView();
     await flushPromises();
     const tab = wrapper.findAll('button').find((node) => node.text().includes('admin.settings.tabs.features'));
@@ -843,10 +843,11 @@ describe("admin SettingsView payment visible method controls", () => {
   it("defaults to native image uploads without a public origin and reloads the mode", async () => {
     const settings: Partial<typeof baseSettingsResponse> = { ...baseSettingsResponse };
     delete settings.excel_bps_image_mode;
+    delete settings.excel_bps_image_relay_enabled;
     getSettings.mockResolvedValueOnce(settings);
     const wrapper = mountView();
     await flushPromises();
-    await wrapper.get('#excel-bps-image-enabled').setValue(true);
+    expect((wrapper.get('#excel-bps-image-enabled').element as HTMLInputElement).checked).toBe(true);
     expect((wrapper.get('#excel-bps-image-mode').element as HTMLSelectElement).value).toBe('native');
     expect(wrapper.find('#excel-bps-image-base-url').exists()).toBe(false);
     expect(wrapper.find('#excel-bps-image-max-images').exists()).toBe(true);
@@ -865,6 +866,18 @@ describe("admin SettingsView payment visible method controls", () => {
     await loaded.get('#excel-bps-image-mode').setValue('relay');
     expect(loaded.find('#excel-bps-image-max-images').exists()).toBe(true);
     loaded.unmount();
+  });
+
+  it("preserves explicitly disabled BPS image support", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, excel_bps_image_relay_enabled: false });
+    const wrapper = mountView();
+    await flushPromises();
+    expect((wrapper.get('#excel-bps-image-enabled').element as HTMLInputElement).checked).toBe(false);
+    expect(wrapper.find('#excel-bps-image-mode').exists()).toBe(false);
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({ excel_bps_image_relay_enabled: false });
+    wrapper.unmount();
   });
 
   it("defaults the image policy off and saves auto compaction", async () => {

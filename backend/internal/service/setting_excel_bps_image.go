@@ -111,7 +111,8 @@ func (s *SettingService) GetExcelBPSImageRelaySettings(ctx context.Context) (Exc
 	if err != nil {
 		return ExcelBPSImageRelaySettings{}, infraerrors.ServiceUnavailable("EXCEL_BPS_IMAGE_SETTINGS_UNAVAILABLE", "Excel BPS image settings are unavailable")
 	}
-	settings, err := normalizeExcelBPSImageRelaySettings(values[SettingKeyExcelBPSImageRelayEnabled] == "true", values[SettingKeyExcelBPSImageBaseURL], values[SettingKeyExcelBPSImageMode])
+	enabled := values[SettingKeyExcelBPSImageRelayEnabled] == "" || values[SettingKeyExcelBPSImageRelayEnabled] == "true"
+	settings, err := normalizeExcelBPSImageRelaySettings(enabled, values[SettingKeyExcelBPSImageBaseURL], values[SettingKeyExcelBPSImageMode])
 	if err != nil {
 		return ExcelBPSImageRelaySettings{}, err
 	}

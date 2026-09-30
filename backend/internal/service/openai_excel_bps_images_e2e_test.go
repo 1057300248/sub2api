@@ -84,7 +84,7 @@ func TestExcelBPSImagesHTTPFlow(t *testing.T) {
 					defer upstream.Close()
 					target, err := url.Parse(upstream.URL)
 					require.NoError(t, err)
-					repo := &excelBPSImageSettingsRepo{values: map[string]string{}}
+					repo := &excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSImageRelayEnabled: "false"}}
 					if mode != "" {
 						repo.values[SettingKeyExcelBPSImageMode] = mode
 					}
@@ -135,7 +135,10 @@ func TestExcelBPSImagesHTTPFlow(t *testing.T) {
 					require.Len(t, forwarded, 1)
 					require.Contains(t, string(<-forwarded), "https://images.example/photo.png")
 
-					require.NoError(t, repo.SetMultiple(context.Background(), map[string]string{SettingKeyExcelBPSImageRelayEnabled: "true"}))
+					// Unset configuration enables image support by default.
+					repo.mu.Lock()
+					delete(repo.values, SettingKeyExcelBPSImageRelayEnabled)
+					repo.mu.Unlock()
 					send(history, http.StatusOK)
 					require.Len(t, forwarded, 1)
 					wire := <-forwarded

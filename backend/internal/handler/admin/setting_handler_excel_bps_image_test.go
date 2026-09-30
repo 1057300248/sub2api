@@ -89,8 +89,8 @@ func TestSettingsExcelBPSDefaultNativeModePersistsWithoutOrigin(t *testing.T) {
 	h.GetSettings(c)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, "native", gjson.Get(rec.Body.String(), "data.excel_bps_image_mode").String())
-	require.False(t, gjson.Get(rec.Body.String(), "data.excel_bps_image_relay_enabled").Bool())
-	rec = doUpdateSettings(t, h, map[string]any{"excel_bps_image_relay_enabled": true}, nil)
+	require.True(t, gjson.Get(rec.Body.String(), "data.excel_bps_image_relay_enabled").Bool())
+	rec = doUpdateSettings(t, h, map[string]any{"site_name": "save image defaults"}, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, "native", gjson.Get(rec.Body.String(), "data.excel_bps_image_mode").String())
 	require.Empty(t, repo.values[service.SettingKeyExcelBPSImageBaseURL])
@@ -106,6 +106,17 @@ func TestSettingsExcelBPSDefaultNativeModePersistsWithoutOrigin(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, service.ExcelBPSImageModeNative, settings.Mode)
 	require.True(t, settings.Enabled)
+
+	// Explicit opt-out survives unrelated saves and runtime settings reads.
+	rec = doUpdateSettings(t, h, map[string]any{"excel_bps_image_relay_enabled": false}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	rec = doUpdateSettings(t, h, map[string]any{"site_name": "preserve disabled images"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.False(t, gjson.Get(rec.Body.String(), "data.excel_bps_image_relay_enabled").Bool())
+	require.Equal(t, "false", repo.values[service.SettingKeyExcelBPSImageRelayEnabled])
+	settings, err = h.settingService.GetExcelBPSImageRelaySettings(context.Background())
+	require.NoError(t, err)
+	require.False(t, settings.Enabled)
 }
 
 func TestSettingsExcelBPSImageLimitsValidationAndPreservation(t *testing.T) {
