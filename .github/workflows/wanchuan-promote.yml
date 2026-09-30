@@ -198,7 +198,7 @@ jobs:
             fi
 
             gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/runs?per_page=100" > "$RUNNER_TEMP/release-runs.json"
-            ACTIVE_TAG="${RELEASE_TAG}" python3 - <<'PY'
+            if ACTIVE_TAG="${RELEASE_TAG}" python3 - <<'PY'
           import json
           import os
           from pathlib import Path
@@ -211,10 +211,10 @@ jobs:
           ]
           if active:
               print("release workflow already active:", active[0].get("html_url"))
-              raise SystemExit(75)
+              raise SystemExit(0)
+          raise SystemExit(1)
           PY
-            rc=$?
-            if [[ "${rc}" == "75" ]]; then
+            then
               exit 0
             fi
 
