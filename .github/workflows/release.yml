@@ -46,6 +46,7 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       version: ${{ steps.plan.outputs.version }}
       prerelease: ${{ steps.plan.outputs.prerelease }}
+      fork_release: ${{ steps.plan.outputs.fork_release }}
       date: ${{ steps.plan.outputs.date }}
       matrix: ${{ steps.plan.outputs.matrix }}
       simple: ${{ steps.plan.outputs.simple }}
@@ -420,7 +421,7 @@ jobs:
 
   sync-version-file:
     needs: [prepare, release]
-    if: ${{ needs.release.result == 'success' && needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.prerelease != 'true' }}
+    if: ${{ needs.release.result == 'success' && needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.prerelease != 'true' && needs.prepare.outputs.fork_release != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

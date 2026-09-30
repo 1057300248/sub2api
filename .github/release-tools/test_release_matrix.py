@@ -136,6 +136,7 @@ class ReleaseMatrixTest(unittest.TestCase):
             release.plan(argparse.Namespace(ref='feature/matrix', dry_run=True, simple=False))
         output = dict(line.split('=', 1) for line in Path('outputs').read_text().splitlines())
         self.assertEqual(output['dry_run'], 'true')
+        self.assertEqual(output['fork_release'], 'false')
         self.assertEqual(output['owner_lower'], 'exampleowner')
         self.assertEqual(len(json.loads(output['matrix'])['include']), 5)
 
@@ -215,6 +216,37 @@ class ReleaseMatrixTest(unittest.TestCase):
         self.assertIn("prerelease != 'true'", workflow['jobs']['sync-version-file']['if'])
         notification = next(step for step in workflow['jobs']['release']['steps'] if step.get('name') == 'Send Telegram Notification')
         self.assertIn("prerelease != 'true'", notification['if'])
+
+    def test_wanchuan_revision_is_stable_owner_release(self):
+        release.VERSION_FILE.write_text('9.8.7-wanchuan.2\n')
+        with patch.dict(os.environ, {'GITHUB_OUTPUT': 'outputs'}), patch.object(subprocess, 'check_output', return_value='a' * 40 + '\n'):
+            release.plan(argparse.Namespace(ref='feature/wanchuan', dry_run=True, simple=False))
+        output = dict(line.split('=', 1) for line in Path('outputs').read_text().splitlines())
+        self.assertEqual(output['prerelease'], 'false')
+        self.assertEqual(output['fork_release'], 'true')
+
+        with patch.dict(os.environ, {'RELEASE_VERSION': '9.8.7-wanchuan.2'}):
+            release.generate_config(argparse.Namespace(mode='publish', simple=False, output='publisher.yaml'))
+        data = yaml.safe_load(Path('publisher.yaml').read_text())
+        self.assertIs(data['release']['prerelease'], False)
+
+    def test_wanchuan_images_advance_stable_tags(self):
+        fake_bin = Path('bin-wanchuan')
+        fake_bin.mkdir()
+        docker = fake_bin / 'docker'
+        docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\n')
+        docker.chmod(0o755)
+        log_path = Path('wanchuan.log').resolve()
+        env = {**os.environ, 'PATH': str(fake_bin.resolve()) + os.pathsep + os.environ['PATH'],
+               'DOCKER_LOG': str(log_path), 'RUNNER_TEMP': self.temp.name,
+               'RELEASE_VERSION': '9.8.7-wanchuan.2', 'RELEASE_SHA': 'a' * 40,
+               'GITHUB_REPOSITORY': 'ExampleOwner/sub2api', 'DRY_RUN': 'false',
+               'SIMPLE_RELEASE': 'false', 'DOCKERHUB_USERNAME': 'fixturehub'}
+        subprocess.run(['bash', str(ROOT / '.github/release-tools/release-images.sh')], env=env, check=True)
+        log = log_path.read_text()
+        self.assertIn('ghcr.io/exampleowner/sub2api:latest', log)
+        self.assertIn('ghcr.io/exampleowner/sub2api:9.8', log)
+        self.assertIn('ghcr.io/exampleowner/sub2api:9', log)
 
     def test_release_announcement_requires_explicit_opt_in(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())

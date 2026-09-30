@@ -24,6 +24,10 @@ def config(simple=False):
     return yaml.safe_load((SIMPLE_CONFIG if simple else FULL_CONFIG).read_text())
 
 
+def is_wanchuan_release(version):
+    return bool(WANCHUAN_RELEASE_RE.fullmatch(version))
+
+
 def targets(simple=False):
     build = config()['builds'][0]
     result = []
@@ -66,8 +70,10 @@ def plan(args):
     if not VERSION_RE.fullmatch(version):
         raise ValueError('invalid VERSION')
     VERSION_FILE.write_text(version + '\n')
+    fork_release = is_wanchuan_release(version)
     result = {'sha': sha, 'tag': tag, 'version': version,
-              'prerelease': str('-' in version).lower(),
+              'prerelease': str('-' in version and not fork_release).lower(),
+              'fork_release': str(fork_release).lower(),
               'owner_lower': os.environ.get('GITHUB_REPOSITORY_OWNER', '').lower(),
               'simple': str(args.simple).lower(), 'dry_run': str(args.dry_run).lower(),
               'date': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -80,6 +86,11 @@ def plan(args):
 def generate_config(args):
     data = config(args.simple if args.mode == 'publish' else False)
     data['snapshot'] = {'version_template': '{{ .Env.RELEASE_VERSION }}'}
+    if args.mode == 'publish' and is_wanchuan_release(os.environ.get('RELEASE_VERSION', '')):
+        # Wanchuan revisions are stable owner releases, not upstream prereleases.
+        # Marking them stable keeps GitHub's /releases/latest endpoint compatible
+        # with the built-in updater.
+        data['release']['prerelease'] = False
     data['dockers'] = []
     data['docker_manifests'] = []
     if args.mode == 'build':

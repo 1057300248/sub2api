@@ -70,7 +70,7 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrNoUpdateAvailable))
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
-	require.Equal(t, "ranxi2001/sub2api", githubClient.latestRepo)
+	require.Equal(t, "1057300248/sub2api", githubClient.latestRepo)
 }
 
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
@@ -188,4 +188,28 @@ func TestUpdateServiceRollbackToVersionAcceptsVPrefix(t *testing.T) {
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrRollbackVersionNotAllowed)
 	require.Contains(t, err.Error(), "no compatible release found")
+}
+
+
+func TestCompareVersionsWanchuanRevision(t *testing.T) {
+	tests := []struct {
+		name    string
+		current string
+		latest  string
+		want    int
+	}{
+		{name: "first fork revision follows upstream base", current: "2.9.6", latest: "2.9.6-wanchuan.1", want: -1},
+		{name: "fork revisions increase monotonically", current: "2.9.6-wanchuan.1", latest: "2.9.6-wanchuan.2", want: -1},
+		{name: "same fork revision is equal", current: "v2.9.6-wanchuan.2", latest: "2.9.6-wanchuan.2", want: 0},
+		{name: "next upstream base wins over fork revision", current: "2.9.6-wanchuan.99", latest: "2.9.7", want: -1},
+		{name: "older upstream base remains older", current: "2.9.5-wanchuan.99", latest: "2.9.6-wanchuan.1", want: -1},
+		{name: "unknown prerelease suffix keeps legacy base comparison", current: "2.9.6-rc.1", latest: "2.9.6", want: 0},
+		{name: "malformed fork revision is ignored", current: "2.9.6-wanchuan.bad", latest: "2.9.6", want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, compareVersions(tt.current, tt.latest))
+			require.Equal(t, -tt.want, compareVersions(tt.latest, tt.current))
+		})
+	}
 }

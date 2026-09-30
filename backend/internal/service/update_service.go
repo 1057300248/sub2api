@@ -33,7 +33,7 @@ const (
 	// Releases are maintained on the owner-controlled production fork. Keep the
 	// updater independent from the upstream repository so production installs
 	// see our release stream and can update to our fork's assets.
-	githubRepo = "ranxi2001/sub2api"
+	githubRepo = "1057300248/sub2api"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -640,7 +640,10 @@ func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
 	_ = s.cache.SetUpdateInfo(ctx, string(data), time.Duration(updateCacheTTL)*time.Second)
 }
 
-// compareVersions compares two semantic versions
+// compareVersions compares the upstream semantic version first and then the
+// owner-controlled Wanchuan patch revision. A fork release such as
+// 2.9.6-wanchuan.2 is newer than 2.9.6-wanchuan.1 and 2.9.6, but remains older
+// than the next upstream release (for example 2.9.7).
 func compareVersions(current, latest string) int {
 	currentParts := parseVersion(current)
 	latestParts := parseVersion(latest)
@@ -652,6 +655,15 @@ func compareVersions(current, latest string) int {
 		if currentParts[i] > latestParts[i] {
 			return 1
 		}
+	}
+
+	currentRevision := parseWanchuanRevision(current)
+	latestRevision := parseWanchuanRevision(latest)
+	if currentRevision < latestRevision {
+		return -1
+	}
+	if currentRevision > latestRevision {
+		return 1
 	}
 	return 0
 }
@@ -669,4 +681,25 @@ func parseVersion(v string) [3]int {
 		}
 	}
 	return result
+}
+
+func parseWanchuanRevision(v string) int {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	_, suffix, ok := strings.Cut(v, "-")
+	if !ok {
+		return 0
+	}
+	const prefix = "wanchuan."
+	if !strings.HasPrefix(suffix, prefix) {
+		return 0
+	}
+	revisionText := strings.TrimPrefix(suffix, prefix)
+	if revisionText == "" || strings.Contains(revisionText, ".") {
+		return 0
+	}
+	revision, err := strconv.Atoi(revisionText)
+	if err != nil || revision < 1 {
+		return 0
+	}
+	return revision
 }
