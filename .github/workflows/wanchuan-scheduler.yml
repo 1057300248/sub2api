@@ -10,112 +10,69 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
   actions: write
 
 jobs:
   trigger:
+    if: github.repository == '1057300248/sub2api'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      UPSTREAM_REPO: ranxi2001/sub2api
     steps:
-      - name: Checkout Wanchuan stable control target
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           ref: wanchuan/stable
           fetch-depth: 0
-          persist-credentials: true
-
-      - name: Trigger adaptation or release recovery
+          persist-credentials: false
+      - name: Resolve upstream without writing synthetic stable commits
+        id: upstream
         run: |
           set -euo pipefail
-
-          git remote remove upstream 2>/dev/null || true
-          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
-          git fetch upstream production --tags --force
-
-          latest_tag="$(gh api "repos/${UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
-          latest_sha="$(git rev-parse "${latest_tag}^{commit}")"
-          locked_tag="$(jq -r '.tag' .wanchuan/upstream.lock)"
-          locked_sha="$(jq -r '.sha' .wanchuan/upstream.lock)"
-
-          if [[ "${latest_sha}" != "${locked_sha}" || "${latest_tag}" != "${locked_tag}" ]]; then
-            mkdir -p .wanchuan
-            jq -n               --arg tag "${latest_tag}"               --arg sha "${latest_sha}"               --arg run_id "${GITHUB_RUN_ID}"               --arg reason "upstream-change"               '{tag: $tag, sha: $sha, scheduler_run_id: $run_id, reason: $reason}'               > .wanchuan/upstream.trigger
-
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .wanchuan/upstream.trigger
-            git commit -m "chore(wanchuan): trigger upstream sync for ${latest_tag}"
-            git push origin HEAD:wanchuan/stable
-            gh workflow run wanchuan-upstream-sync.yml               --repo "${GITHUB_REPOSITORY}"               --ref wanchuan/stable               -f base_branch=wanchuan/stable               -f publish_if_safe=true
-            echo "Triggered stable adaptation for ${latest_tag} (${latest_sha}) and dispatched upstream sync."
-            exit 0
-          fi
-
-          version="${locked_tag#v}-wanchuan.1"
-          release_tag="v${version}"
-          if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            git fetch origin "refs/tags/${release_tag}:refs/tags/${release_tag}" --force >/dev/null 2>&1 || true
-            if git rev-parse --verify "refs/tags/${release_tag}^{commit}" >/dev/null 2>&1; then
-              release_sha="$(git rev-parse "refs/tags/${release_tag}^{commit}")"
-              stable_sha="$(git rev-parse HEAD)"
-              if [[ "${release_sha}" != "${stable_sha}" ]]; then
-                echo "Release ${release_tag} exists, while stable has newer local changes."
-                echo "A later Wanchuan revision requires explicit promotion; scheduler will not auto-publish it."
-              else
-                echo "Aligned release ${release_tag} already exists."
-              fi
-            fi
-            exit 0
-          fi
-
-          git fetch origin wanchuan/release-candidate || true
-          stable_tree="$(git rev-parse 'HEAD^{tree}')"
-          candidate_tree="$(git rev-parse 'origin/wanchuan/release-candidate^{tree}' 2>/dev/null || true)"
-          if [[ -z "${candidate_tree}" || "${candidate_tree}" != "${stable_tree}" ]]; then
-            echo "Release recovery is waiting for an exact release-candidate tree."
-            exit 0
-          fi
-
-          candidate_sha="$(git rev-parse origin/wanchuan/release-candidate)"
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${candidate_sha}&per_page=100" > "$RUNNER_TEMP/candidate-runs.json"
-          if ! CANDIDATE_SHA="${candidate_sha}" python3 - <<'PY'
+          python3 tools/wanchuan_patchpack.py verify
+          gh api repos/ranxi2001/sub2api/releases/latest > "$RUNNER_TEMP/upstream.json"
+          python3 - <<'PY'
           import json
           import os
+          import re
+          import subprocess
           from pathlib import Path
-
-          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "candidate-runs.json").read_text())
-          matches = [
-              run for run in payload.get("workflow_runs", [])
-              if run.get("head_sha") == os.environ["CANDIDATE_SHA"]
-              and run.get("name") == "Wanchuan release candidate"
-          ]
-          if not matches:
-              raise SystemExit(1)
-          latest = max(matches, key=lambda run: run.get("created_at") or "")
-          raise SystemExit(0 if latest.get("conclusion") == "success" else 1)
+          release = json.loads((Path(os.environ['RUNNER_TEMP']) / 'upstream.json').read_text())
+          tag = release['tag_name']
+          if release.get('draft') or release.get('prerelease') or not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag):
+              raise SystemExit('Not a stable upstream release')
+          subprocess.run(['git', 'fetch', '--no-tags', 'https://github.com/ranxi2001/sub2api.git', f'refs/tags/{tag}:refs/wanchuan/upstream-candidate'], check=True)
+          sha = subprocess.check_output(['git', 'rev-parse', 'refs/wanchuan/upstream-candidate^{commit}'], text=True).strip()
+          lock = json.loads(Path('.wanchuan/upstream.lock').read_text())
+          if tag == lock['tag'] and sha != lock['sha']:
+              raise SystemExit('Upstream retag detected; automatic adaptation blocked')
+          changed = tag != lock['tag'] or sha != lock['sha']
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'changed={str(changed).lower()}\ntag={tag}\n')
           PY
-          then
-            echo "Release recovery is waiting for a successful candidate validation."
+      - name: Dispatch adaptation explicitly
+        if: steps.upstream.outputs.changed == 'true'
+        run: gh workflow run wanchuan-upstream-sync.yml --repo "$GITHUB_REPOSITORY" --ref wanchuan/stable -f base_branch=wanchuan/stable -f publish_if_safe=true
+      - name: Recover missing validation and bootstrap release
+        if: steps.upstream.outputs.changed == 'false'
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          candidate="$(git ls-remote --exit-code origin refs/heads/wanchuan/release-candidate | cut -f1)"
+          if [[ "$candidate" != "$sha" ]]; then
+            gh workflow run wanchuan-release-candidate-sync.yml --repo "$GITHUB_REPOSITORY" --ref wanchuan/stable
             exit 0
           fi
-
-          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/wanchuan-promote.yml/runs?per_page=50" > "$RUNNER_TEMP/promote-runs.json"
-          if python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "promote-runs.json").read_text())
-          active = [r for r in payload.get("workflow_runs", []) if r.get("status") != "completed"]
-          raise SystemExit(0 if active else 1)
-          PY
-          then
-            echo "A Wanchuan promotion is already active."
+          python3 tools/wanchuan_ci_gate.py ensure --sha "$sha"
+          if ! python3 tools/wanchuan_ci_gate.py verify --sha "$sha" --output "$RUNNER_TEMP/wanchuan-gates.json"; then
+            echo 'Not ready for promotion; no release or tag was created.'
             exit 0
           fi
-
-          gh workflow run wanchuan-promote.yml             --repo "${GITHUB_REPOSITORY}"             --ref main             -f revision=1
-          echo "Dispatched recovery/bootstrap promotion for ${release_tag}."
+          tag="$(python3 -c 'import json; print(json.load(open(".wanchuan/upstream.lock"))["tag"])')-wanchuan.1"
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" > "$RUNNER_TEMP/release.json" 2> "$RUNNER_TEMP/release.err"; then
+            echo 'The first revision exists; later local revisions require explicit promotion.'
+            exit 0
+          fi
+          grep -q 'HTTP 404' "$RUNNER_TEMP/release.err" || { cat "$RUNNER_TEMP/release.err" >&2; exit 1; }
+          gh workflow run wanchuan-promote.yml --repo "$GITHUB_REPOSITORY" --ref main -f revision=1

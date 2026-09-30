@@ -4,13 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       revision:
-        description: Wanchuan revision number, or auto
-        required: false
+        description: Positive Wanchuan revision, or auto
         default: auto
+        required: false
         type: string
   push:
-    branches:
-      - wanchuan/promote
+    branches: [wanchuan/promote]
 
 concurrency:
   group: wanchuan-promote
@@ -19,213 +18,105 @@ concurrency:
 permissions:
   contents: write
   actions: write
-  checks: read
 
 jobs:
   promote:
+    if: github.repository == '1057300248/sub2api'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout stable source
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           ref: wanchuan/stable
           fetch-depth: 0
-          persist-credentials: true
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Resolve and verify release identity
-        id: release
-        env:
-          REQUESTED_REVISION: ${{ inputs.revision || 'auto' }}
+      - name: Verify immutable source and all workflow gates
+        id: source
         run: |
           set -euo pipefail
           python3 tools/wanchuan_patchpack.py verify
-
-          upstream_tag="$(jq -r '.tag' .wanchuan/upstream.lock)"
-          upstream_version="${upstream_tag#v}"
-          source_version="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
-          if [[ "${source_version}" != "${upstream_version}" ]]; then
-            echo "Source VERSION ${source_version} is not upstream-clean (${upstream_version})" >&2
-            exit 1
-          fi
-
-          git fetch origin --tags --force
-          requested="${REQUESTED_REVISION}"
-          if [[ "${requested}" == "auto" || -z "${requested}" ]]; then
-            highest=0
-            while IFS= read -r tag; do
-              [[ -z "${tag}" ]] && continue
-              revision="${tag##*.}"
-              if [[ "${revision}" =~ ^[1-9][0-9]*$ ]] && (( revision > highest )); then
-                highest="${revision}"
-              fi
-            done < <(git tag -l "v${upstream_version}-wanchuan.*")
-
-            if (( highest == 0 )); then
-              revision=1
-            else
-              latest_tag="v${upstream_version}-wanchuan.${highest}"
-              if gh release view "${latest_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-                revision=$((highest + 1))
-              else
-                revision="${highest}"
-              fi
-            fi
-          else
-            if [[ ! "${requested}" =~ ^[1-9][0-9]*$ ]]; then
-              echo "revision must be a positive integer or auto" >&2
-              exit 1
-            fi
-            revision="${requested}"
-          fi
-
-          version="$(python3 tools/wanchuan_patchpack.py next-version             --upstream-tag "${upstream_tag}"             --revision "${revision}")"
-          stable_sha="$(git rev-parse HEAD)"
-          stable_tree="$(git rev-parse 'HEAD^{tree}')"
-          {
-            echo "version=${version}"
-            echo "tag=v${version}"
-            echo "stable_sha=${stable_sha}"
-            echo "stable_tree=${stable_tree}"
-            echo "upstream_tag=${upstream_tag}"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Require latest stable checks to be green
+          sha="$(git rev-parse HEAD)"
+          python3 tools/wanchuan_ci_gate.py verify --sha "$sha" --output "$RUNNER_TEMP/wanchuan-gates.json"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Choose an immutable revision and dispatch the full release
         env:
-          STABLE_SHA: ${{ steps.release.outputs.stable_sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          REVISION: ${{ inputs.revision || 'auto' }}
         run: |
           set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/commits/${STABLE_SHA}/check-runs?per_page=100" > "$RUNNER_TEMP/stable-checks.json"
           python3 - <<'PY'
           import json
           import os
+          import re
+          import subprocess
           from pathlib import Path
 
-          required = {
-              "shell",
-              "test",
-              "frontend",
-              "golangci-lint",
-              "release-helpers",
-              "backend-security",
-              "frontend-security",
-              "patch-inventory",
-              "cline-cas",
-              "legacy-patch-regression",
-              "frontend-upgrade-regression",
-          }
-          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "stable-checks.json").read_text())
-          latest = {}
-          for check in payload.get("check_runs", []):
-              name = check.get("name")
-              if name not in required:
-                  continue
-              stamp = check.get("completed_at") or check.get("started_at") or ""
-              previous = latest.get(name)
-              previous_stamp = ""
-              if previous is not None:
-                  previous_stamp = previous.get("completed_at") or previous.get("started_at") or ""
-              if previous is None or stamp > previous_stamp:
-                  latest[name] = check
-          missing = sorted(required - set(latest))
-          bad = {name: check.get("conclusion") for name, check in latest.items() if check.get("conclusion") != "success"}
-          if missing or bad:
-              raise SystemExit(f"stable gates are not green: missing={missing} bad={bad}")
-          print("stable gates green:", ", ".join(sorted(required)))
+          def call(*args):
+              return subprocess.run(args, check=True, text=True, capture_output=True, timeout=120).stdout.strip()
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          sha = os.environ['SOURCE_SHA']
+          lock = json.loads(Path('.wanchuan/upstream.lock').read_text())
+          base = lock['tag'].removeprefix('v')
+          if Path('backend/cmd/server/VERSION').read_text().strip() != base:
+              raise SystemExit('Source VERSION must remain upstream-clean')
+          call('git', 'fetch', '--no-tags', 'origin', '+refs/tags/*:refs/tags/*')
+          tags = call('git', 'tag', '-l', f'v{base}-wanchuan.*').splitlines()
+          pattern = re.compile(r'v' + re.escape(base) + r'-wanchuan\.([1-9][0-9]*)')
+          known = sorted((int(m[1]), t) for t in tags if (m := pattern.fullmatch(t)))
+          requested = os.environ['REVISION']
+          if requested == 'auto':
+              revision = known[-1][0] + 1 if known else 1
+              if known and call('git', 'rev-parse', known[-1][1] + '^{commit}') == sha:
+                  revision = known[-1][0]  # A retry is not a new release.
+          elif re.fullmatch(r'[1-9][0-9]{0,8}', requested):
+              revision = int(requested)
+          else:
+              raise SystemExit('Invalid revision')
+          tag = f'v{base}-wanchuan.{revision}'
+          if known and revision < known[-1][0]:
+              raise SystemExit('Refusing to republish an older revision as latest')
+          if tag in tags:
+              if call('git', 'rev-parse', tag + '^{commit}') != sha:
+                  raise SystemExit('Existing tag points to another source; it will not be rewritten')
+          else:
+              if known and revision <= known[-1][0]:
+                  raise SystemExit('Refusing to publish an older revision as latest')
+              # Recheck branch movement immediately before creating a new tag.
+              heads = call('git', 'ls-remote', '--exit-code', 'origin', 'refs/heads/wanchuan/stable')
+              if heads.split()[0] != sha:
+                  raise SystemExit('Stable moved during promotion')
+              call('git', 'config', 'user.name', 'github-actions[bot]')
+              call('git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+              call('git', 'tag', '-a', tag, sha, '-m', f'Wanchuan {tag}; upstream {lock["tag"]}; validated source {sha}')
+              call('git', 'push', 'origin', 'refs/tags/' + tag)
+          from sys import path
+          path.insert(0, 'tools')
+          from wanchuan_ci_gate import records
+          existing = subprocess.run(['gh', 'api', f'repos/{repo}/releases/tags/{tag}'], text=True, capture_output=True, timeout=120)
+          if existing.returncode == 0:
+              data = json.loads(existing.stdout)
+              if not data.get('draft') and not data.get('prerelease'):
+                  names = {a.get('name') for a in data.get('assets', [])}
+                  expected = {'checksums.txt', 'wanchuan-release.json', f'sub2api_{tag[1:]}_linux_amd64.tar.gz'}
+                  if not expected.issubset(names):
+                      raise SystemExit('Published release is incomplete; inspect assets before recovery')
+                  print(f'Release {tag} already published; no duplicate dispatch')
+                  raise SystemExit(0)
+              raise SystemExit('Draft or prerelease exists; inspect it before retrying')
+          if 'HTTP 404' not in existing.stderr:
+              raise SystemExit('Could not verify release absence: ' + existing.stderr)
+          runs = records(f'repos/{repo}/actions/workflows/release.yml/runs?per_page=100', 'workflow_runs')
+          if any(r.get('head_branch') == tag and r.get('head_sha') == sha and r.get('status') != 'completed' for r in runs):
+              print('Release build already active; no duplicate dispatch')
+          else:
+              call('gh', 'workflow', 'run', 'release.yml', '--repo', repo, '--ref', tag, '-f', f'tag={tag}', '-f', 'simple_release=false', '-f', 'notify_release=false', '-f', 'dry_run=false')
+              print(f'Dispatched full release for {tag} at {sha}')
           PY
-
-      - name: Require successful candidate for exact stable tree
-        env:
-          STABLE_TREE: ${{ steps.release.outputs.stable_tree }}
-        run: |
-          set -euo pipefail
-          git fetch origin wanchuan/release-candidate
-          candidate_sha="$(git rev-parse origin/wanchuan/release-candidate)"
-          candidate_tree="$(git rev-parse "origin/wanchuan/release-candidate^{tree}")"
-          if [[ "${candidate_tree}" != "${STABLE_TREE}" ]]; then
-            echo "Candidate tree ${candidate_tree} does not match stable tree ${STABLE_TREE}" >&2
-            exit 1
-          fi
-
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${candidate_sha}&per_page=100" > "$RUNNER_TEMP/candidate-runs.json"
-          CANDIDATE_SHA="${candidate_sha}" python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "candidate-runs.json").read_text())
-          matches = [
-              run for run in payload.get("workflow_runs", [])
-              if run.get("head_sha") == os.environ["CANDIDATE_SHA"]
-              and run.get("name") == "Wanchuan release candidate"
-          ]
-          if not matches:
-              raise SystemExit("no release-candidate workflow run found for candidate head")
-          latest = max(matches, key=lambda run: run.get("created_at") or "")
-          if latest.get("conclusion") != "success":
-              raise SystemExit(
-                  f"latest release candidate is not successful: "
-                  f"status={latest.get('status')} conclusion={latest.get('conclusion')}"
-              )
-          print("candidate gate green:", latest.get("html_url"))
-          PY
-
-      - name: Create or recover immutable release
-        env:
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          STABLE_SHA: ${{ steps.release.outputs.stable_sha }}
-          UPSTREAM_TAG: ${{ steps.release.outputs.upstream_tag }}
-        run: |
-          set -euo pipefail
-          git fetch origin --tags --force
-
-          if git rev-parse --verify "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-            tagged_sha="$(git rev-parse "${RELEASE_TAG}^{commit}")"
-            if [[ "${tagged_sha}" != "${STABLE_SHA}" ]]; then
-              echo "Immutable tag ${RELEASE_TAG} points to ${tagged_sha}, expected ${STABLE_SHA}" >&2
-              exit 1
-            fi
-            if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-              echo "Release ${RELEASE_TAG} already exists at the validated stable commit."
-              exit 0
-            fi
-
-            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/runs?per_page=100" > "$RUNNER_TEMP/release-runs.json"
-            if ACTIVE_TAG="${RELEASE_TAG}" python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "release-runs.json").read_text())
-          active = [
-              run for run in payload.get("workflow_runs", [])
-              if run.get("head_branch") == os.environ["ACTIVE_TAG"]
-              and run.get("status") != "completed"
-          ]
-          if active:
-              print("release workflow already active:", active[0].get("html_url"))
-              raise SystemExit(0)
-          raise SystemExit(1)
-          PY
-            then
-              exit 0
-            fi
-
-            gh workflow run release.yml               --repo "${GITHUB_REPOSITORY}"               --ref "${RELEASE_TAG}"               -f tag="${RELEASE_TAG}"               -f simple_release=false
-            echo "Recovered release workflow for existing tag ${RELEASE_TAG}."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${RELEASE_TAG}" "${STABLE_SHA}"             -m "Wanchuan ${RELEASE_VERSION}"             -m "Upstream: ${UPSTREAM_TAG}"             -m "Validated stable source: ${STABLE_SHA}"
-          git push origin "refs/tags/${RELEASE_TAG}"
-          gh workflow run release.yml             --repo "${GITHUB_REPOSITORY}"             --ref "${RELEASE_TAG}"             -f tag="${RELEASE_TAG}"             -f simple_release=false
-          echo "Published ${RELEASE_TAG} and explicitly dispatched release.yml."
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: wanchuan-promotion-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/wanchuan-gates.json
+          if-no-files-found: warn
