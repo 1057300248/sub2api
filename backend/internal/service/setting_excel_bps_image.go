@@ -50,7 +50,7 @@ type ExcelBPSImageRelaySettings struct {
 
 func normalizeExcelBPSImageRelaySettings(enabled bool, baseURL, mode string) (ExcelBPSImageRelaySettings, error) {
 	if mode == "" {
-		mode = ExcelBPSImageModeRelay
+		mode = ExcelBPSImageModeNative
 	}
 	if mode != ExcelBPSImageModeRelay && mode != ExcelBPSImageModeNative {
 		return ExcelBPSImageRelaySettings{}, infraerrors.BadRequest("INVALID_EXCEL_BPS_IMAGE_MODE", "Image mode must be relay or native")

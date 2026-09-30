@@ -10424,7 +10424,7 @@ const form = reactive<SettingsForm>({
   request_capture_enabled: false,
   request_capture_quota_mib: 1024,
   request_capture_retention_days: 7,
-  excel_bps_image_mode: 'relay' as 'relay' | 'native',
+  excel_bps_image_mode: 'native' as 'relay' | 'native',
   excel_bps_image_relay_enabled: false,
   excel_bps_image_base_url: '',
   excel_bps_image_body_limit_mib: 64,

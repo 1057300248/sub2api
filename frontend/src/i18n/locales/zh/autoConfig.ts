@@ -100,7 +100,6 @@ export default {
     "auto_disable_on_403Hint": "收到符合条件的上游 403 时关闭 BPS，账号仍可使用原 Codex 通道。",
     "cache_creation_as_inputHint": "缓存创建 token 按普通输入单价计费，上游缓存行为不变。",
     "omit_unsupported_toolsHint": "省略 BPS 不支持的托管工具；实时搜索和图片生成将不可用。",
-    "ignore_imagesHint": "系统关闭 BPS 图片支持时，将图片替换为提示，保留其余对话。",
     "auto_recover_on_403Hint": "需要开启 403 自动关闭。按间隔发送文本探测，成功后重新开启 BPS，会消耗少量额度。",
     "auto_move_on_403Hint": "遇到符合条件的 403 时移入目标分组；可选择退出全部分组。",
     "session_proxyHint": "需要已配置可用的 Mihomo 或 IP 管理代理池；出口不稳定会影响请求。",
