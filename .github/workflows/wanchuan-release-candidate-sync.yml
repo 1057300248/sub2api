@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - wanchuan/stable
+  workflow_dispatch:
 
 concurrency:
   group: wanchuan-candidate-sync
@@ -11,10 +12,13 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 10
     steps:
       - name: Checkout exact stable head
@@ -32,13 +36,15 @@ jobs:
 
           if git rev-parse --verify origin/wanchuan/release-candidate >/dev/null 2>&1; then
             candidate_sha="$(git rev-parse origin/wanchuan/release-candidate)"
-            if [[ "${candidate_sha}" == "${stable_sha}" ]]; then
+            if [[ "${candidate_sha}" != "${stable_sha}" ]]; then
+              git push                 --force-with-lease="refs/heads/wanchuan/release-candidate:${candidate_sha}"                 origin "${stable_sha}:refs/heads/wanchuan/release-candidate"
+            else
               echo "Candidate already matches stable: ${stable_sha}"
-              exit 0
             fi
-            git push               --force-with-lease="refs/heads/wanchuan/release-candidate:${candidate_sha}"               origin "${stable_sha}:refs/heads/wanchuan/release-candidate"
           else
             git push origin "${stable_sha}:refs/heads/wanchuan/release-candidate"
           fi
 
           echo "Release candidate now points to ${stable_sha}."
+          gh workflow run wanchuan-release-candidate.yml             --repo "$GITHUB_REPOSITORY"             --ref wanchuan/release-candidate             -f revision=1
+          echo "Dispatched non-publishing release candidate validation."

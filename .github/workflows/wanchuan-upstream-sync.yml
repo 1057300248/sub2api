@@ -252,12 +252,9 @@ jobs:
 
           if [[ "${risk}" == "safe" && "${{ steps.upstream.outputs.auto_publish }}" == "true" && "${can_fast_forward}" == "true" ]]; then
             git push origin "HEAD:refs/heads/${BASE_BRANCH}"
-            release_tag="v${version}"
-            git tag -a "${release_tag}" -m "Wanchuan automatic adaptation of ${{ steps.upstream.outputs.tag }}"
-            git push origin "refs/tags/${release_tag}"
-            # release.yml is triggered by the tag push. Do not dispatch it a
-            # second time or the same release can race itself.
-            echo "Published safe source adaptation; tag ${release_tag} will trigger release.yml."
+            gh workflow run wanchuan-release-candidate-sync.yml               --repo "$GITHUB_REPOSITORY"               --ref "${BASE_BRANCH}"
+            echo "Published safe source adaptation and dispatched exact-tree candidate validation."
+            echo "Promotion will occur only after the candidate and stable gates are green."
             exit 0
           fi
 
