@@ -8,6 +8,7 @@ on:
       - codex/ranxi-latest-patches-20260929
       - codex/ranxi-v2.9.3-patches-20260929
       - codex/modular-updates-20260930
+      - wanchuan/stable
   pull_request:
     paths:
       - 'backend/**'

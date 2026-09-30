@@ -3,7 +3,7 @@
   "upstream_repo": "ranxi2001/sub2api",
   "release_repo": "1057300248/sub2api",
   "fork_suffix": "wanchuan",
-  "integration_branch": "codex/modular-updates-20260930",
+  "integration_branch": "wanchuan/stable",
   "modules": [
     {
       "id": "cline-rate-limit-cas",

@@ -3,7 +3,7 @@ name: Wanchuan upstream sync
 on:
   push:
     branches:
-      - codex/modular-updates-20260930
+      - wanchuan/stable
     paths:
       - '.wanchuan/**'
       - 'tools/wanchuan_patchpack.py'
@@ -14,7 +14,7 @@ on:
       base_branch:
         description: Branch that owns the Wanchuan custom layer
         required: false
-        default: codex/modular-updates-20260930
+        default: wanchuan/stable
         type: string
       publish_if_safe:
         description: Fast-forward the base branch and dispatch a release when all automatic gates pass
@@ -36,7 +36,7 @@ permissions:
 
 env:
   UPSTREAM_REPO: ranxi2001/sub2api
-  BASE_BRANCH: ${{ inputs.base_branch || vars.WANCHUAN_BASE_BRANCH || 'codex/modular-updates-20260930' }}
+  BASE_BRANCH: ${{ inputs.base_branch || vars.WANCHUAN_BASE_BRANCH || 'wanchuan/stable' }}
   AUTO_PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish_if_safe == true }}
 
 jobs:

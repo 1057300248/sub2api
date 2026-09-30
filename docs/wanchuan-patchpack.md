@@ -4,6 +4,8 @@ This fork treats local customizations as a source-overlay patch pack rather than
 
 The upstream runtime plugin system remains useful for isolated capabilities, but several Wanchuan changes touch compile-time Go code, database/repository behavior, release logic and the admin frontend. Those cannot be safely hot-loaded as ordinary process plugins.
 
+Long-lived integration branch: wanchuan/stable.
+
 The patch pack uses four layers:
 
 1. .wanchuan/patches/manifest.json declares custom ownership boundaries and regression commands.
