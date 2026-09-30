@@ -516,14 +516,6 @@ func validateDownloadURL(rawURL string) error {
 	return nil
 }
 
-func (s *UpdateService) verifyChecksum(ctx context.Context, filePath, checksumURL string) error {
-	checksumData, err := s.githubClient.FetchChecksumFile(ctx, checksumURL)
-	if err != nil {
-		return fmt.Errorf("failed to download checksums: %w", err)
-	}
-	return verifyFileChecksum(filePath, checksumData)
-}
-
 func checksumForFile(checksumData []byte, fileName string) (string, error) {
 	scanner := bufio.NewScanner(strings.NewReader(string(checksumData)))
 	for scanner.Scan() {
