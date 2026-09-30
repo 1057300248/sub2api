@@ -1,0 +1,54 @@
+name: Wanchuan upstream scheduler
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: wanchuan-upstream-scheduler
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Wanchuan stable control target
+        uses: actions/checkout@v6
+        with:
+          ref: wanchuan/stable
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Trigger stable sync only when upstream changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_REPO: ranxi2001/sub2api
+        run: |
+          set -euo pipefail
+
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream production --tags --force
+
+          latest_tag="$(gh api "repos/${UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
+          latest_sha="$(git rev-parse "${latest_tag}^{commit}")"
+          locked_sha="$(jq -r '.sha' .wanchuan/upstream.lock)"
+
+          if [[ "${latest_sha}" == "${locked_sha}" ]]; then
+            echo "Already aligned: ${latest_tag} (${latest_sha})"
+            exit 0
+          fi
+
+          mkdir -p .wanchuan
+          jq -n             --arg tag "${latest_tag}"             --arg sha "${latest_sha}"             --arg run_id "${GITHUB_RUN_ID}"             '{tag: $tag, sha: $sha, scheduler_run_id: $run_id}'             > .wanchuan/upstream.trigger
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .wanchuan/upstream.trigger
+          git commit -m "chore(wanchuan): trigger upstream sync for ${latest_tag}"
+          git push origin HEAD:wanchuan/stable
