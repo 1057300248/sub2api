@@ -1,0 +1,162 @@
+name: Wanchuan promote
+
+on:
+  push:
+    branches:
+      - wanchuan/promote
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Wanchuan revision to publish
+        required: false
+        default: '1'
+        type: string
+
+concurrency:
+  group: wanchuan-promote
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout stable source
+        uses: actions/checkout@v6
+        with:
+          ref: wanchuan/stable
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Resolve and verify release identity
+        id: release
+        env:
+          REQUESTED_REVISION: ${{ inputs.revision || '1' }}
+        run: |
+          set -euo pipefail
+          python3 tools/wanchuan_patchpack.py verify
+
+          upstream_tag="$(jq -r '.tag' .wanchuan/upstream.lock)"
+          upstream_version="${upstream_tag#v}"
+          source_version="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
+          if [[ "${source_version}" != "${upstream_version}" ]]; then
+            echo "Source VERSION ${source_version} is not upstream-clean (${upstream_version})" >&2
+            exit 1
+          fi
+
+          version="$(python3 tools/wanchuan_patchpack.py next-version             --upstream-tag "${upstream_tag}"             --revision "${REQUESTED_REVISION}")"
+          stable_sha="$(git rev-parse HEAD)"
+          stable_tree="$(git rev-parse 'HEAD^{tree}')"
+          {
+            echo "version=${version}"
+            echo "stable_sha=${stable_sha}"
+            echo "stable_tree=${stable_tree}"
+            echo "upstream_tag=${upstream_tag}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Require latest stable checks to be green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STABLE_SHA: ${{ steps.release.outputs.stable_sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${STABLE_SHA}/check-runs?per_page=100" > "$RUNNER_TEMP/stable-checks.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime
+          from pathlib import Path
+
+          required = {
+              "shell",
+              "test",
+              "frontend",
+              "golangci-lint",
+              "release-helpers",
+              "backend-security",
+              "frontend-security",
+              "patch-inventory",
+              "cline-cas",
+              "legacy-patch-regression",
+              "frontend-upgrade-regression",
+          }
+          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "stable-checks.json").read_text())
+          latest = {}
+          for check in payload.get("check_runs", []):
+              name = check.get("name")
+              if name not in required:
+                  continue
+              stamp = check.get("completed_at") or check.get("started_at") or ""
+              previous = latest.get(name)
+              if previous is None or stamp > (previous.get("completed_at") or previous.get("started_at") or ""):
+                  latest[name] = check
+          missing = sorted(required - set(latest))
+          bad = {name: check.get("conclusion") for name, check in latest.items() if check.get("conclusion") != "success"}
+          if missing or bad:
+              raise SystemExit(f"stable gates are not green: missing={missing} bad={bad}")
+          print("stable gates green:", ", ".join(sorted(required)))
+          PY
+
+      - name: Require a successful candidate for the exact stable tree
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STABLE_TREE: ${{ steps.release.outputs.stable_tree }}
+        run: |
+          set -euo pipefail
+          git fetch origin wanchuan/release-candidate
+          candidate_sha="$(git rev-parse origin/wanchuan/release-candidate)"
+          candidate_tree="$(git rev-parse "origin/wanchuan/release-candidate^{tree}")"
+          if [[ "${candidate_tree}" != "${STABLE_TREE}" ]]; then
+            echo "Candidate tree ${candidate_tree} does not match stable tree ${STABLE_TREE}" >&2
+            exit 1
+          fi
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${candidate_sha}&per_page=100" > "$RUNNER_TEMP/candidate-runs.json"
+          CANDIDATE_SHA="${candidate_sha}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "candidate-runs.json").read_text())
+          matches = [
+              run for run in payload.get("workflow_runs", [])
+              if run.get("head_sha") == os.environ["CANDIDATE_SHA"]
+              and run.get("name") == "Wanchuan release candidate"
+          ]
+          if not matches:
+              raise SystemExit("no release-candidate workflow run found for candidate head")
+          latest = max(matches, key=lambda run: run.get("created_at") or "")
+          if latest.get("conclusion") != "success":
+              raise SystemExit(
+                  f"latest release candidate is not successful: "
+                  f"status={latest.get('status')} conclusion={latest.get('conclusion')}"
+              )
+          print("candidate gate green:", latest.get("html_url"))
+          PY
+
+      - name: Create immutable release tag
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          STABLE_SHA: ${{ steps.release.outputs.stable_sha }}
+          UPSTREAM_TAG: ${{ steps.release.outputs.upstream_tag }}
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          if [[ -n "$(git ls-remote --tags origin "refs/tags/${tag}")" ]]; then
+            echo "Tag ${tag} already exists; refusing to overwrite an immutable release." >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${tag}" "${STABLE_SHA}"             -m "Wanchuan ${RELEASE_VERSION}"             -m "Upstream: ${UPSTREAM_TAG}"             -m "Validated stable source: ${STABLE_SHA}"
+          git push origin "refs/tags/${tag}"
+          echo "Published ${tag}; release.yml will build and publish verified artifacts."
