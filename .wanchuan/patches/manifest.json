@@ -70,7 +70,9 @@
         ".github/workflows/release.yml",
         ".github/workflows/wanchuan-upstream-sync.yml",
         ".wanchuan/**",
-        "tools/wanchuan_patchpack.py"
+        "tools/wanchuan_patchpack.py",
+        ".github/workflows/wanchuan-release-candidate.yml",
+        ".github/workflows/wanchuan-release-candidate-sync.yml"
       ],
       "tests": [
         "python3 -m unittest discover -s .github/release-tools -p 'test_release_matrix.py'",

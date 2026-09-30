@@ -21,9 +21,6 @@ on:
         required: false
         default: false
         type: boolean
-  schedule:
-    - cron: '17 * * * *'
-
 concurrency:
   group: wanchuan-upstream-sync
   cancel-in-progress: false
@@ -37,7 +34,7 @@ permissions:
 env:
   UPSTREAM_REPO: ranxi2001/sub2api
   BASE_BRANCH: ${{ inputs.base_branch || vars.WANCHUAN_BASE_BRANCH || 'wanchuan/stable' }}
-  AUTO_PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish_if_safe == true }}
+  AUTO_PUBLISH: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish_if_safe == true) || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'chore(wanchuan): trigger upstream sync')) }}
 
 jobs:
   sync:
@@ -72,7 +69,7 @@ jobs:
             echo "old_sha=${old_sha}"
             echo "base_start=${base_start}"
           } >> "$GITHUB_OUTPUT"
-          if [[ "${latest_sha}" == "${old_sha}" ]]; then
+          if [[ "${latest_sha}" == "${old_sha}" && "${latest_tag}" == "${old_tag}" ]]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Already aligned to ${latest_tag} (${latest_sha})."
           else

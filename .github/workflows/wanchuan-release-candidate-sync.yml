@@ -1,0 +1,45 @@
+name: Wanchuan candidate sync
+
+on:
+  push:
+    branches:
+      - wanchuan/stable
+
+concurrency:
+  group: wanchuan-candidate-sync
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(wanchuan): trigger upstream sync') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact stable head
+        uses: actions/checkout@v6
+        with:
+          ref: wanchuan/stable
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Mirror stable head to release-candidate
+        run: |
+          set -euo pipefail
+          stable_sha="$(git rev-parse HEAD)"
+          git fetch origin wanchuan/release-candidate || true
+
+          if git rev-parse --verify origin/wanchuan/release-candidate >/dev/null 2>&1; then
+            candidate_sha="$(git rev-parse origin/wanchuan/release-candidate)"
+            if [[ "${candidate_sha}" == "${stable_sha}" ]]; then
+              echo "Candidate already matches stable: ${stable_sha}"
+              exit 0
+            fi
+            git push               --force-with-lease="refs/heads/wanchuan/release-candidate:${candidate_sha}"               origin "${stable_sha}:refs/heads/wanchuan/release-candidate"
+          else
+            git push origin "${stable_sha}:refs/heads/wanchuan/release-candidate"
+          fi
+
+          echo "Release candidate now points to ${stable_sha}."

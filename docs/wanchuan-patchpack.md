@@ -4,7 +4,9 @@ This fork treats local customizations as a source-overlay patch pack rather than
 
 The upstream runtime plugin system remains useful for isolated capabilities, but several Wanchuan changes touch compile-time Go code, database/repository behavior, release logic and the admin frontend. Those cannot be safely hot-loaded as ordinary process plugins.
 
-Long-lived integration branch: wanchuan/stable.
+Long-lived integration branch: wanchuan/stable. GitHub's scheduled workflows only execute from the repository default branch, so the default branch hosts a thin scheduler/promoter control plane that checks out and drives this stable branch without importing Wanchuan application code.
+
+Every non-trigger push to wanchuan/stable mirrors the exact commit to wanchuan/release-candidate. The candidate branch runs a non-publishing packaging build; promotion requires the candidate tree to equal the stable tree.
 
 The patch pack uses four layers:
 
