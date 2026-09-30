@@ -69,10 +69,32 @@ jobs:
             echo 'Not ready for promotion; no release or tag was created.'
             exit 0
           fi
-          tag="$(python3 -c 'import json; print(json.load(open(".wanchuan/upstream.lock"))["tag"])')-wanchuan.1"
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" > "$RUNNER_TEMP/release.json" 2> "$RUNNER_TEMP/release.err"; then
-            echo 'The first revision exists; later local revisions require explicit promotion.'
-            exit 0
-          fi
-          grep -q 'HTTP 404' "$RUNNER_TEMP/release.err" || { cat "$RUNNER_TEMP/release.err" >&2; exit 1; }
-          gh workflow run wanchuan-promote.yml --repo "$GITHUB_REPOSITORY" --ref main -f revision=1
+          python3 - <<'PYCODE'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+          repo = os.environ['GITHUB_REPOSITORY']
+          base_tag = json.loads(Path('.wanchuan/upstream.lock').read_text())['tag']
+          pattern = re.compile(re.escape(base_tag) + r'-wanchuan\.[1-9][0-9]*')
+          payload = subprocess.check_output(['gh', 'api', '--paginate', '--slurp', f'repos/{repo}/releases?per_page=100'], text=True)
+          pages = json.loads(payload)
+          if not isinstance(pages, list) or not pages or any(not isinstance(page, list) for page in pages):
+              raise SystemExit('Invalid release-list response')
+          for page in pages:
+              for release in page:
+                  if not isinstance(release, dict):
+                      raise SystemExit('Invalid release entry')
+                  if pattern.fullmatch(release.get('tag_name', '')):
+                      if release.get('draft') or release.get('prerelease'):
+                          raise SystemExit('An incomplete candidate release exists; inspect it before recovery')
+                      names = {asset.get('name') for asset in release.get('assets', [])}
+                      if not {'checksums.txt', 'wanchuan-release.json'}.issubset(names):
+                          raise SystemExit('An incomplete published release exists; inspect it before recovery')
+                      print('This upstream base already has a published owner revision; later local revisions require explicit promotion.')
+                      raise SystemExit(0)
+          # Failed, immutable tags may consume a revision without publishing it.
+          # Let the promoter choose the next safe revision; never overwrite tag 1.
+          subprocess.run(['gh', 'workflow', 'run', 'wanchuan-promote.yml', '--repo', repo, '--ref', 'main', '-f', 'revision=auto'], check=True)
+          PYCODE
