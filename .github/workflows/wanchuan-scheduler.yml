@@ -1,0 +1,97 @@
+name: Wanchuan upstream scheduler
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: wanchuan-upstream-scheduler
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      UPSTREAM_REPO: ranxi2001/sub2api
+    steps:
+      - name: Checkout Wanchuan stable control target
+        uses: actions/checkout@v6
+        with:
+          ref: wanchuan/stable
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Trigger adaptation or release recovery
+        run: |
+          set -euo pipefail
+
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream production --tags --force
+
+          latest_tag="$(gh api "repos/${UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
+          latest_sha="$(git rev-parse "${latest_tag}^{commit}")"
+          locked_tag="$(jq -r '.tag' .wanchuan/upstream.lock)"
+          locked_sha="$(jq -r '.sha' .wanchuan/upstream.lock)"
+
+          if [[ "${latest_sha}" != "${locked_sha}" || "${latest_tag}" != "${locked_tag}" ]]; then
+            mkdir -p .wanchuan
+            jq -n               --arg tag "${latest_tag}"               --arg sha "${latest_sha}"               --arg run_id "${GITHUB_RUN_ID}"               --arg reason "upstream-change"               '{tag: $tag, sha: $sha, scheduler_run_id: $run_id, reason: $reason}'               > .wanchuan/upstream.trigger
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .wanchuan/upstream.trigger
+            git commit -m "chore(wanchuan): trigger upstream sync for ${latest_tag}"
+            git push origin HEAD:wanchuan/stable
+            echo "Triggered stable adaptation for ${latest_tag} (${latest_sha})."
+            exit 0
+          fi
+
+          version="${locked_tag#v}-wanchuan.1"
+          release_tag="v${version}"
+          if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            git fetch origin "refs/tags/${release_tag}:refs/tags/${release_tag}" --force >/dev/null 2>&1 || true
+            if git rev-parse --verify "refs/tags/${release_tag}^{commit}" >/dev/null 2>&1; then
+              release_sha="$(git rev-parse "refs/tags/${release_tag}^{commit}")"
+              stable_sha="$(git rev-parse HEAD)"
+              if [[ "${release_sha}" != "${stable_sha}" ]]; then
+                echo "Release ${release_tag} exists, while stable has newer local changes."
+                echo "A later Wanchuan revision requires explicit promotion; scheduler will not auto-publish it."
+              else
+                echo "Aligned release ${release_tag} already exists."
+              fi
+            fi
+            exit 0
+          fi
+
+          git fetch origin wanchuan/release-candidate || true
+          stable_tree="$(git rev-parse 'HEAD^{tree}')"
+          candidate_tree="$(git rev-parse 'origin/wanchuan/release-candidate^{tree}' 2>/dev/null || true)"
+          if [[ -z "${candidate_tree}" || "${candidate_tree}" != "${stable_tree}" ]]; then
+            echo "Release recovery is waiting for an exact release-candidate tree."
+            exit 0
+          fi
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/wanchuan-promote.yml/runs?per_page=50" > "$RUNNER_TEMP/promote-runs.json"
+          if python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "promote-runs.json").read_text())
+          active = [r for r in payload.get("workflow_runs", []) if r.get("status") != "completed"]
+          raise SystemExit(0 if active else 1)
+          PY
+          then
+            echo "A Wanchuan promotion is already active."
+            exit 0
+          fi
+
+          gh workflow run wanchuan-promote.yml             --repo "${GITHUB_REPOSITORY}"             --ref main             -f revision=1
+          echo "Dispatched recovery/bootstrap promotion for ${release_tag}."
