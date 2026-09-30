@@ -50,7 +50,8 @@ jobs:
             git add .wanchuan/upstream.trigger
             git commit -m "chore(wanchuan): trigger upstream sync for ${latest_tag}"
             git push origin HEAD:wanchuan/stable
-            echo "Triggered stable adaptation for ${latest_tag} (${latest_sha})."
+            gh workflow run wanchuan-upstream-sync.yml               --repo "${GITHUB_REPOSITORY}"               --ref wanchuan/stable               -f base_branch=wanchuan/stable               -f publish_if_safe=true
+            echo "Triggered stable adaptation for ${latest_tag} (${latest_sha}) and dispatched upstream sync."
             exit 0
           fi
 
@@ -76,6 +77,29 @@ jobs:
           candidate_tree="$(git rev-parse 'origin/wanchuan/release-candidate^{tree}' 2>/dev/null || true)"
           if [[ -z "${candidate_tree}" || "${candidate_tree}" != "${stable_tree}" ]]; then
             echo "Release recovery is waiting for an exact release-candidate tree."
+            exit 0
+          fi
+
+          candidate_sha="$(git rev-parse origin/wanchuan/release-candidate)"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${candidate_sha}&per_page=100" > "$RUNNER_TEMP/candidate-runs.json"
+          if ! CANDIDATE_SHA="${candidate_sha}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "candidate-runs.json").read_text())
+          matches = [
+              run for run in payload.get("workflow_runs", [])
+              if run.get("head_sha") == os.environ["CANDIDATE_SHA"]
+              and run.get("name") == "Wanchuan release candidate"
+          ]
+          if not matches:
+              raise SystemExit(1)
+          latest = max(matches, key=lambda run: run.get("created_at") or "")
+          raise SystemExit(0 if latest.get("conclusion") == "success" else 1)
+          PY
+          then
+            echo "Release recovery is waiting for a successful candidate validation."
             exit 0
           fi
 

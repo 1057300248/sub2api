@@ -227,4 +227,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "${RELEASE_TAG}" "${STABLE_SHA}"             -m "Wanchuan ${RELEASE_VERSION}"             -m "Upstream: ${UPSTREAM_TAG}"             -m "Validated stable source: ${STABLE_SHA}"
           git push origin "refs/tags/${RELEASE_TAG}"
-          echo "Published ${RELEASE_TAG}; tag push will trigger release.yml."
+          gh workflow run release.yml             --repo "${GITHUB_REPOSITORY}"             --ref "${RELEASE_TAG}"             -f tag="${RELEASE_TAG}"             -f simple_release=false
+          echo "Published ${RELEASE_TAG} and explicitly dispatched release.yml."

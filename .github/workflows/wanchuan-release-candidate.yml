@@ -1,0 +1,127 @@
+name: Wanchuan release candidate
+
+on:
+  push:
+    branches:
+      - wanchuan/release-candidate
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Wanchuan revision to validate
+        required: false
+        default: '1'
+        type: string
+
+concurrency:
+  group: wanchuan-release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install release helper dependencies
+        run: python -m pip install -r .github/release-tools/requirements-release.txt
+
+      - name: Resolve candidate version without dirtying source history
+        id: candidate
+        env:
+          REQUESTED_REVISION: ${{ inputs.revision || '1' }}
+        run: |
+          set -euo pipefail
+          upstream_tag="$(jq -r '.tag' .wanchuan/upstream.lock)"
+          version="$(python3 tools/wanchuan_patchpack.py next-version             --upstream-tag "$upstream_tag"             --revision "$REQUESTED_REVISION")"
+          printf '%s\n' "$version" > backend/cmd/server/VERSION
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          python3 tools/wanchuan_patchpack.py verify --require-release-version
+          echo "Candidate version: $version"
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build embedded frontend
+        run: |
+          pnpm install --frozen-lockfile --dir frontend
+          pnpm --dir frontend run build
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Verify updater revision behavior
+        working-directory: backend
+        run: go test -tags=unit ./internal/service -run '^(TestUpdateService|TestCompareVersionsWanchuanRevision)' -count=1
+
+      - name: Generate one production packaging target
+        env:
+          RELEASE_VERSION: ${{ steps.candidate.outputs.version }}
+        run: |
+          python .github/release-tools/release_matrix.py config build             --goos linux             --goarch amd64             --output "$RUNNER_TEMP/goreleaser.candidate.yaml"
+
+      - name: Build candidate archive without publishing
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: release --snapshot --clean --skip=validate,publish,docker,announce --config=${{ runner.temp }}/goreleaser.candidate.yaml
+        env:
+          RELEASE_VERSION: ${{ steps.candidate.outputs.version }}
+          RELEASE_DATE: ${{ github.event.repository.updated_at }}
+          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO_OWNER_LOWER: ${{ github.repository_owner }}
+          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
+          DOCKERHUB_USERNAME: skip
+          TAG_MESSAGE: ''
+
+      - name: Collect and verify candidate provenance
+        env:
+          RELEASE_VERSION: ${{ steps.candidate.outputs.version }}
+        run: |
+          set -euo pipefail
+          python .github/release-tools/release_matrix.py collect             --version "$RELEASE_VERSION"             --sha "$GITHUB_SHA"             --goos linux             --goarch amd64             --output candidate-output
+          python .github/release-tools/release_matrix.py verify             --version "$RELEASE_VERSION"             --sha "$GITHUB_SHA"             --input candidate-output             --simple
+          python .github/release-tools/release_matrix.py manifest             --version "$RELEASE_VERSION"             --sha "$GITHUB_SHA"             --output candidate-output/wanchuan-release.json
+          (
+            cd candidate-output
+            sha256sum sub2api_* manifest-*.json wanchuan-release.json > candidate-checksums.txt
+          )
+
+      - name: Verify packaged binary reports the candidate version
+        env:
+          RELEASE_VERSION: ${{ steps.candidate.outputs.version }}
+        run: |
+          set -euo pipefail
+          archive="candidate-output/sub2api_${RELEASE_VERSION}_linux_amd64.tar.gz"
+          mkdir candidate-bin
+          tar -xzf "$archive" -C candidate-bin
+          output="$(candidate-bin/sub2api --version 2>&1)"
+          printf '%s\n' "$output"
+          grep -F "$RELEASE_VERSION" <<< "$output"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wanchuan-release-candidate-${{ steps.candidate.outputs.version }}-${{ github.sha }}
+          path: candidate-output/
+          if-no-files-found: error
+          retention-days: 7
