@@ -79,7 +79,8 @@ func (h *OpenAIOAuthReauthHandler) CreateTask(c *gin.Context) {
 }
 
 type reauthWorkerRequest struct {
-	WorkerID string `json:"worker_id"`
+	WorkerID string   `json:"worker_id"`
+	Engines  []string `json:"engines"`
 }
 
 type reauthWorkerProgressRequest struct {
@@ -130,7 +131,7 @@ func (h *OpenAIOAuthReauthHandler) Claim(c *gin.Context) {
 		response.BadRequest(c, "Invalid worker request")
 		return
 	}
-	claim, err := h.service.ClaimTask(c.Request.Context(), req.WorkerID)
+	claim, err := h.service.ClaimTaskWithEngines(c.Request.Context(), req.WorkerID, req.Engines)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

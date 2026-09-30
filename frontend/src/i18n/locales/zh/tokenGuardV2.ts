@@ -1,4 +1,10 @@
 export default {
+  remoteEngineEgress: '服务端出口（不使用账号代理）',
+  reloginEngine: '重登引擎',
+  localWorkerEngine: '本地 Worker（默认）',
+  sessionStudioEngine: 'Session Studio（临时提速）',
+  localWorkerEngineHint: '在自己的 Worker 中完成登录，使用所选账号代理。',
+  sessionStudioEngineHint: '将此账号的邮箱、密码和 TOTP 密钥发送到凭证守护中配置的重登服务。仅支持密码 / TOTP，使用服务端出口，不使用账号代理；失败不会自动切换引擎。需先升级 Worker。',
   runtimeTitle: '自动重登服务',
   runtimeManaged: '由程序自动准备和管理，账密 / 2FA 无需额外配置。',
   runtimeExternal: '当前使用已有的独立重登服务。',

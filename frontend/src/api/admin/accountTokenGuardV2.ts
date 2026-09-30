@@ -2,11 +2,13 @@ import { apiClient } from '../client'
 
 export type TokenGuardV2CredentialMode = 'email_otp_url' | 'password_totp'
 export type TokenGuardV2ProxySource = 'account' | 'managed_proxy' | 'mihomo'
+export type TokenGuardV2Engine = 'local_worker' | 'session_studio'
 
 export interface TokenGuardV2LoginConfig {
   account_id: number
   login_email: string
   credential_mode: TokenGuardV2CredentialMode
+  engine: TokenGuardV2Engine
   proxy_source: TokenGuardV2ProxySource
   proxy_id?: number
   otp_url_masked?: string
@@ -63,6 +65,7 @@ export interface SaveTokenGuardV2Account {
   account_id?: number
   login_email: string
   credential_mode: TokenGuardV2CredentialMode
+  engine?: TokenGuardV2Engine
   proxy_source: TokenGuardV2ProxySource
   proxy_id?: number | null
   password?: string

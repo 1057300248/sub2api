@@ -122,6 +122,7 @@ type AccountTokenGuardV2Prober interface {
 type AccountTokenGuardV2AccountInput struct {
 	LoginEmail         string `json:"login_email"`
 	CredentialMode     string `json:"credential_mode"`
+	Engine             string `json:"engine"`
 	ProxySource        string `json:"proxy_source"`
 	ProxyID            *int64 `json:"proxy_id"`
 	Password           string `json:"password"`
@@ -269,7 +270,7 @@ func (s *AccountTokenGuardV2Service) SaveAccount(ctx context.Context, accountID 
 		return nil, infraerrors.BadRequest("TOKEN_GUARD_V2_ACCOUNT_INVALID", "invalid account id")
 	}
 	if _, err := s.reauth.SaveCredentialConfig(ctx, accountID, OpenAIOAuthReauthConfigInput{
-		LoginEmail: input.LoginEmail, CredentialMode: input.CredentialMode,
+		LoginEmail: input.LoginEmail, CredentialMode: input.CredentialMode, Engine: input.Engine,
 		ProxySource: input.ProxySource, ProxyID: input.ProxyID,
 		Password: input.Password, TOTPSecret: input.TOTPSecret, OTPURL: input.OTPURL,
 		ClearPassword: input.ClearPassword, ClearTOTP: input.ClearTOTP,
