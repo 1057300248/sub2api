@@ -229,6 +229,7 @@ class ReleaseMatrixTest(unittest.TestCase):
             release.generate_config(argparse.Namespace(mode='publish', simple=False, output='publisher.yaml'))
         data = yaml.safe_load(Path('publisher.yaml').read_text())
         self.assertIs(data['release']['prerelease'], False)
+        self.assertIs(data['release']['make_latest'], True)
 
     def test_wanchuan_images_advance_stable_tags(self):
         fake_bin = Path('bin-wanchuan')
