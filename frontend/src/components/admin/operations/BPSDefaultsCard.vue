@@ -51,7 +51,7 @@ const props = defineProps<{ groups: Group[] }>()
 const draft = defineModel<ExcelBPSDefaults>({ required: true })
 const { t } = useI18n()
 const recommended = [{ key: 'ignore_encrypted_content', label: 'IgnoreEncryptedContent' }, { key: 'auto_disable_on_403', label: 'AutoDisableOn403' }, { key: 'cache_creation_as_input', label: 'CacheCreationAsInput' }] as const
-const advanced = [{ key: 'omit_unsupported_tools', label: 'OmitUnsupportedTools' }, { key: 'ignore_images', label: 'IgnoreImages' }, { key: 'auto_recover_on_403', label: 'AutoRecoverOn403' }, { key: 'auto_move_on_403', label: 'AutoMoveOn403' }, { key: 'session_proxy', label: 'Mihomo' }] as const
+const advanced = [{ key: 'omit_unsupported_tools', label: 'OmitUnsupportedTools' }, { key: 'auto_recover_on_403', label: 'AutoRecoverOn403' }, { key: 'auto_move_on_403', label: 'AutoMoveOn403' }, { key: 'session_proxy', label: 'Mihomo' }] as const
 const targetGroups = computed(() => props.groups.filter(g => g.platform === 'openai' || g.platform === 'composite'))
 watch(() => draft.value.auto_disable_on_403, enabled => { if (!enabled) draft.value.auto_recover_on_403 = false })
 function resetOptions() {

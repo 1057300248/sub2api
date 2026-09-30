@@ -100,7 +100,6 @@ export default {
     "auto_disable_on_403Hint": "Disable BPS on a matching upstream 403. The account can still use its original Codex route.",
     "cache_creation_as_inputHint": "Bill cache creation tokens at the input rate without changing upstream caching.",
     "omit_unsupported_toolsHint": "Omit unsupported hosted tools. Live search and image generation will be unavailable.",
-    "ignore_imagesHint": "Replace images with a notice when system BPS image support is off, retaining the rest of the conversation.",
     "auto_recover_on_403Hint": "Requires automatic disabling on 403. Periodic text probes consume some quota and re-enable BPS on success.",
     "auto_move_on_403Hint": "Move to the selected group on a matching 403, or choose to leave all groups.",
     "session_proxyHint": "Requires a configured Mihomo or IP management pool. Unstable egress can affect requests.",
