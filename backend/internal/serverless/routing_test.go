@@ -264,7 +264,7 @@ func TestServerlessWebSocketBidirectionalForwarding(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer ws.CloseNow()
+		defer func() { _ = ws.CloseNow() }()
 		kind, msg, err := ws.Read(c.Request.Context())
 		if err == nil {
 			_ = ws.Write(c.Request.Context(), kind, msg)
@@ -278,7 +278,7 @@ func TestServerlessWebSocketBidirectionalForwarding(t *testing.T) {
 	defer cancel()
 	ws, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http")+"/v1/responses", nil)
 	require.NoError(t, err)
-	defer ws.CloseNow()
+	defer func() { _ = ws.CloseNow() }()
 	require.NoError(t, ws.Write(ctx, websocket.MessageText, []byte("hello")))
 	_, msg, err := ws.Read(ctx)
 	require.NoError(t, err)

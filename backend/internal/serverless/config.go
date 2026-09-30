@@ -54,7 +54,7 @@ func ValidateEndpoint(raw string) error {
 		return nil
 	}
 	ip, err := netip.ParseAddr(u.Hostname())
-	if u.Scheme != "http" || err != nil || !(ip.IsPrivate() || ip.IsLoopback()) {
+	if u.Scheme != "http" || err != nil || (!ip.IsPrivate() && !ip.IsLoopback()) {
 		return errors.New("use HTTPS, or an HTTP private/loopback IP over a trusted network")
 	}
 	return nil

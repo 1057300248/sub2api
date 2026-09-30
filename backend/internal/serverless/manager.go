@@ -174,7 +174,7 @@ func (m *Manager) Pods(ctx context.Context) ([]Pod, error) {
 	if m.redis == nil {
 		return []Pod{}, nil
 	}
-	ids, err := m.redis.ZRevRange(ctx, prefix+"pods", 0, 127).Result()
+	ids, err := m.redis.ZRangeArgs(ctx, redis.ZRangeArgs{Key: prefix + "pods", Start: 0, Stop: 127, Rev: true}).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +231,7 @@ func (m *Manager) Probe(ctx context.Context, p Pod) bool {
 	response, err := m.http.Do(request)
 	healthy := false
 	if err == nil {
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		healthy = response.StatusCode == 200 && m.verify(response.Header.Get("X-Serverless-Proof"), "ready", p.ID, p.Boot, nonce)
 	}
 	m.healthMu.Lock()

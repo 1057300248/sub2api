@@ -61,7 +61,9 @@ func SetVerifiedForwardedIP(c *gin.Context, address string) {
 func GetClientIP(c *gin.Context) string {
 	if c != nil {
 		if v, ok := c.Get("sub2api.verified_forwarded_ip"); ok {
-			return normalizeIP(v.(string))
+			if address, valid := v.(string); valid && normalizeIP(address) != "" {
+				return normalizeIP(address)
+			}
 		}
 	}
 	if c == nil {
@@ -162,7 +164,9 @@ func resolveLegacyForwardedHeaderIP(c *gin.Context) (string, string) {
 func GetTrustedClientIP(c *gin.Context) string {
 	if c != nil {
 		if v, ok := c.Get("sub2api.verified_forwarded_ip"); ok {
-			return normalizeIP(v.(string))
+			if address, valid := v.(string); valid && normalizeIP(address) != "" {
+				return normalizeIP(address)
+			}
 		}
 	}
 	if c == nil {
