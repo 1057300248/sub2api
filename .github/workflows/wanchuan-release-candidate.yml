@@ -72,7 +72,7 @@ jobs:
 
       - name: Verify updater revision behavior
         working-directory: backend
-        run: go test -tags=unit ./internal/service -run '^(TestUpdateService|TestCompareVersionsWanchuanRevision)' -count=1
+        run: go test -tags=unit ./internal/service -run '^(TestUpdateService|TestCompareVersionsWanchuanRevision|TestSelectWanchuanReleaseAssetURLs|TestWanchuanReleaseArchiveName)' -count=1
 
       - name: Generate one production packaging target
         env:
