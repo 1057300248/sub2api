@@ -183,8 +183,10 @@ def command_verify(args: argparse.Namespace) -> int:
         raise ValueError("current source does not contain the recorded integration merge")
 
     updater = (ROOT / "backend" / "internal" / "service" / "update_service.go").read_text(encoding="utf-8")
-    expected_repo = f'githubRepo = "{data["release_repo"]}"'
-    if expected_repo not in updater:
+    repo_pattern = re.compile(
+        r'\\bgithubRepo\\s*=\\s*"' + re.escape(data["release_repo"]) + r'"'
+    )
+    if not repo_pattern.search(updater):
         raise ValueError("built-in updater is not pinned to the owner release repository")
 
     base_version = normalize_upstream_version(str(lock.get("tag", "")))
