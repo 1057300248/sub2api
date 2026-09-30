@@ -97,6 +97,11 @@ def classify_paths(paths: list[str], data: dict) -> dict:
     }
 
 
+def updater_repo_is_pinned(source: str, release_repo: str) -> bool:
+    pattern = re.compile(r'\bgithubRepo\s*=\s*"' + re.escape(release_repo) + r'"')
+    return bool(pattern.search(source))
+
+
 def normalize_upstream_version(tag: str) -> str:
     match = STABLE_UPSTREAM_TAG_RE.fullmatch(tag.strip())
     if not match:
@@ -183,10 +188,7 @@ def command_verify(args: argparse.Namespace) -> int:
         raise ValueError("current source does not contain the recorded integration merge")
 
     updater = (ROOT / "backend" / "internal" / "service" / "update_service.go").read_text(encoding="utf-8")
-    repo_pattern = re.compile(
-        r'\\bgithubRepo\\s*=\\s*"' + re.escape(data["release_repo"]) + r'"'
-    )
-    if not repo_pattern.search(updater):
+    if not updater_repo_is_pinned(updater, data["release_repo"]):
         raise ValueError("built-in updater is not pinned to the owner release repository")
 
     base_version = normalize_upstream_version(str(lock.get("tag", "")))
