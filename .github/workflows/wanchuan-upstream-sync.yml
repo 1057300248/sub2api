@@ -249,8 +249,9 @@ jobs:
             release_tag="v${version}"
             git tag -a "${release_tag}" -m "Wanchuan automatic adaptation of ${{ steps.upstream.outputs.tag }}"
             git push origin "refs/tags/${release_tag}"
-            gh workflow run release.yml               --repo "$GITHUB_REPOSITORY"               --ref "${release_tag}"               -f tag="${release_tag}"               -f simple_release=false               -f notify_release=false               -f dry_run=false
-            echo "Published safe source adaptation and dispatched ${release_tag}."
+            # release.yml is triggered by the tag push. Do not dispatch it a
+            # second time or the same release can race itself.
+            echo "Published safe source adaptation; tag ${release_tag} will trigger release.yml."
             exit 0
           fi
 
