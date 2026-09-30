@@ -92,6 +92,7 @@ def generate_config(args):
         # Marking them stable keeps GitHub's /releases/latest endpoint compatible
         # with the built-in updater.
         data['release']['prerelease'] = False
+        data['release']['make_latest'] = True
     data['dockers'] = []
     data['docker_manifests'] = []
     if args.mode == 'build':
