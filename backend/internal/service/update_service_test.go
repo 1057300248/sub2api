@@ -179,15 +179,20 @@ func TestUpdateServiceRollbackToVersionRejectsDisallowedTargets(t *testing.T) {
 }
 
 func TestUpdateServiceRollbackToVersionAcceptsVPrefix(t *testing.T) {
-	// No platform asset in the release: the target passes the allowlist check
-	// and fails later at asset lookup, proving the version itself was accepted.
-	releases := []*GitHubRelease{
-		{TagName: "v0.1.147"},
-		{TagName: "v0.1.146"},
+	// A validated Wanchuan target with no platform archive must pass the version
+	// allowlist and fail only at exact app-archive selection. This proves the
+	// optional v prefix is accepted without weakening the Wanchuan-only policy.
+	requiredAssets := []GitHubAsset{
+		{Name: "checksums.txt"},
+		{Name: wanchuanReleaseManifestName},
 	}
-	svc := newRollbackTestService("0.1.147", releases)
+	releases := []*GitHubRelease{
+		{TagName: "v2.9.6-wanchuan.2", Assets: requiredAssets},
+		{TagName: "v2.9.6-wanchuan.1", Assets: requiredAssets},
+	}
+	svc := newRollbackTestService("2.9.6-wanchuan.2", releases)
 
-	err := svc.RollbackToVersion(context.Background(), "v0.1.146")
+	err := svc.RollbackToVersion(context.Background(), "v2.9.6-wanchuan.1")
 
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrRollbackVersionNotAllowed)

@@ -34,7 +34,6 @@ permissions:
 env:
   UPSTREAM_REPO: ranxi2001/sub2api
   BASE_BRANCH: ${{ inputs.base_branch || vars.WANCHUAN_BASE_BRANCH || 'wanchuan/stable' }}
-  AUTO_PUBLISH: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish_if_safe == true) || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'chore(wanchuan): trigger upstream sync')) }}
 
 jobs:
   sync:
@@ -52,6 +51,9 @@ jobs:
         id: upstream
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUBLISH_INPUT: ${{ inputs.publish_if_safe }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
           git remote remove upstream 2>/dev/null || true
@@ -62,12 +64,19 @@ jobs:
           old_tag="$(jq -r '.tag' .wanchuan/upstream.lock)"
           old_sha="$(jq -r '.sha' .wanchuan/upstream.lock)"
           base_start="$(git rev-parse HEAD)"
+          auto_publish=false
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" && "${PUBLISH_INPUT}" == "true" ]]; then
+            auto_publish=true
+          elif [[ "${EVENT_NAME}" == "push" && "${HEAD_MESSAGE}" == "chore(wanchuan): trigger upstream sync"* ]]; then
+            auto_publish=true
+          fi
           {
             echo "tag=${latest_tag}"
             echo "sha=${latest_sha}"
             echo "old_tag=${old_tag}"
             echo "old_sha=${old_sha}"
             echo "base_start=${base_start}"
+            echo "auto_publish=${auto_publish}"
           } >> "$GITHUB_OUTPUT"
           if [[ "${latest_sha}" == "${old_sha}" && "${latest_tag}" == "${old_tag}" ]]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -241,7 +250,7 @@ jobs:
             can_fast_forward=true
           fi
 
-          if [[ "${risk}" == "safe" && "${AUTO_PUBLISH}" == "true" && "${can_fast_forward}" == "true" ]]; then
+          if [[ "${risk}" == "safe" && "${{ steps.upstream.outputs.auto_publish }}" == "true" && "${can_fast_forward}" == "true" ]]; then
             git push origin "HEAD:refs/heads/${BASE_BRANCH}"
             release_tag="v${version}"
             git tag -a "${release_tag}" -m "Wanchuan automatic adaptation of ${{ steps.upstream.outputs.tag }}"
