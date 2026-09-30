@@ -36,28 +36,30 @@ jobs:
           persist-credentials: false
       - name: Verify exact upstream and complete previous customization ancestry
         env:
-          UPSTREAM_SHA: 9f7d96be367e795bd76e1f45c82bd5d4c563e0fa
           PREVIOUS_CUSTOM_SHA: 95bf4b1f76dd9d4ff32b4dfca807a4ea07a97fa5
           CLINE_SHA: 94ce53353ecc501c26308ddaef36d1f8bcec78e0
-          PREVIOUS_UPSTREAM_SHA: 412b2225a357b9bb5ee2295603253fec362dbd0f
+          BASELINE_UPSTREAM_SHA: 412b2225a357b9bb5ee2295603253fec362dbd0f
         run: |
           set -euo pipefail
+          UPSTREAM_SHA="$(jq -r '.sha' .wanchuan/upstream.lock)"
+          UPSTREAM_TAG="$(jq -r '.tag' .wanchuan/upstream.lock)"
+          test -n "$UPSTREAM_SHA"
+          test -n "$UPSTREAM_TAG"
           git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD
           git merge-base --is-ancestor "$PREVIOUS_CUSTOM_SHA" HEAD
           git merge-base --is-ancestor "$CLINE_SHA" HEAD
-          test "$(cat backend/cmd/server/VERSION)" = '2.9.6'
           python tools/wanchuan_patchpack.py verify
           git diff --check "$UPSTREAM_SHA" HEAD
           mkdir -p "$RUNNER_TEMP/patch-inventory"
           {
             git rev-parse HEAD
-            printf 'upstream=%s\nprevious_custom=%s\n' "$UPSTREAM_SHA" "$PREVIOUS_CUSTOM_SHA"
-            git rev-list --count "$PREVIOUS_UPSTREAM_SHA..$UPSTREAM_SHA"
-            git log --no-merges --format='%H %s' "$PREVIOUS_UPSTREAM_SHA..$UPSTREAM_SHA"
+            printf 'upstream_tag=%s\nupstream=%s\nprevious_custom=%s\n' "$UPSTREAM_TAG" "$UPSTREAM_SHA" "$PREVIOUS_CUSTOM_SHA"
+            git rev-list --count "$BASELINE_UPSTREAM_SHA..$UPSTREAM_SHA"
+            git log --no-merges --format='%H %s' "$BASELINE_UPSTREAM_SHA..$UPSTREAM_SHA"
             git diff --stat "$UPSTREAM_SHA" HEAD
             git ls-files '*AGENTS.md'
           } | tee "$RUNNER_TEMP/patch-inventory/inventory.txt"
-          git diff "$PREVIOUS_UPSTREAM_SHA" "$UPSTREAM_SHA" > "$RUNNER_TEMP/patch-inventory/upstream.patch"
+          git diff "$BASELINE_UPSTREAM_SHA" "$UPSTREAM_SHA" > "$RUNNER_TEMP/patch-inventory/upstream.patch"
           git diff "$UPSTREAM_SHA" HEAD > "$RUNNER_TEMP/patch-inventory/custom.patch"
           git archive --format=tar HEAD > "$RUNNER_TEMP/patch-inventory/source.tar"
       - uses: actions/upload-artifact@v6

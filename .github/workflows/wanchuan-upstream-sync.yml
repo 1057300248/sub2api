@@ -126,9 +126,11 @@ jobs:
           })
           path.write_text(json.dumps(data, indent=2) + "\n")
           PY
-          printf '%s\n' "${version}" > backend/cmd/server/VERSION
-          git add .wanchuan/upstream.lock backend/cmd/server/VERSION
-          git commit -m "chore(wanchuan): adapt ${tag} as ${version}"
+          # Keep the source VERSION identical to upstream. The Wanchuan revision
+          # exists only in the release tag/build workspace, which avoids a guaranteed
+          # merge conflict when upstream bumps VERSION on the next release.
+          git add .wanchuan/upstream.lock
+          git commit -m "chore(wanchuan): adapt ${tag}"
 
           {
             echo "conflict=false"
@@ -163,7 +165,7 @@ jobs:
 
       - name: Verify patch pack binding
         if: ${{ steps.upstream.outputs.changed == 'true' && steps.integrate.outputs.conflict == 'false' }}
-        run: python3 tools/wanchuan_patchpack.py verify --require-release-version
+        run: python3 tools/wanchuan_patchpack.py verify
 
       - uses: actions/setup-go@v6
         if: ${{ steps.upstream.outputs.changed == 'true' && steps.integrate.outputs.conflict == 'false' }}

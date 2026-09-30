@@ -13,6 +13,8 @@ The patch pack uses four layers:
 
 Stable fork releases use <upstream>-wanchuan.<revision>, for example 2.9.6-wanchuan.1. The built-in updater is pinned to 1057300248/sub2api, so production instances continue using Sub2API's existing update mechanism while consuming only validated Wanchuan release artifacts.
 
+The source tree deliberately keeps backend/cmd/server/VERSION equal to the upstream version. The Wanchuan revision is injected from the release tag into the release build workspace. Keeping the source VERSION untouched prevents every future upstream version bump from becoming an artificial merge conflict.
+
 ## Safety rules
 
 - Merge conflicts never publish.
