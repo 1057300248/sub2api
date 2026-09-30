@@ -204,30 +204,19 @@ func (s *UpdateService) PerformUpdate(ctx context.Context) error {
 // verifies its checksum, and atomically swaps the running binary.
 // Shared by PerformUpdate (latest) and RollbackToVersion (specific older version).
 func (s *UpdateService) applyReleaseAssets(ctx context.Context, expectedVersion string, releaseAssets []Asset) error {
-	archiveName := s.getArchiveName()
-	var downloadURL string
-	var checksumURL string
-	var manifestURL string
-
-	for _, asset := range releaseAssets {
-		if strings.Contains(asset.Name, archiveName) && !strings.HasSuffix(asset.Name, ".txt") {
-			downloadURL = asset.DownloadURL
-		}
-		switch asset.Name {
-		case "checksums.txt":
-			checksumURL = asset.DownloadURL
-		case wanchuanReleaseManifestName:
-			manifestURL = asset.DownloadURL
-		}
-	}
-
-	if downloadURL == "" {
-		return fmt.Errorf("no compatible release found for %s/%s", runtime.GOOS, runtime.GOARCH)
-	}
-
 	expectedVersion = strings.TrimPrefix(strings.TrimSpace(expectedVersion), "v")
 	if parseWanchuanRevision(expectedVersion) < 1 {
 		return fmt.Errorf("release %q is not a Wanchuan revision", expectedVersion)
+	}
+
+	downloadURL, checksumURL, manifestURL := selectWanchuanReleaseAssetURLs(
+		expectedVersion,
+		runtime.GOOS,
+		runtime.GOARCH,
+		releaseAssets,
+	)
+	if downloadURL == "" {
+		return fmt.Errorf("no compatible release found for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	if checksumURL == "" {
 		return fmt.Errorf("release is missing required checksums.txt")
@@ -484,10 +473,27 @@ func (s *UpdateService) downloadFile(ctx context.Context, downloadURL, dest stri
 	return s.githubClient.DownloadFile(ctx, downloadURL, dest, maxDownloadSize)
 }
 
-func (s *UpdateService) getArchiveName() string {
-	osName := runtime.GOOS
-	arch := runtime.GOARCH
-	return fmt.Sprintf("%s_%s", osName, arch)
+func wanchuanReleaseArchiveName(version, goos, goarch string) string {
+	extension := ".tar.gz"
+	if goos == "windows" {
+		extension = ".zip"
+	}
+	return fmt.Sprintf("sub2api_%s_%s_%s%s", version, goos, goarch, extension)
+}
+
+func selectWanchuanReleaseAssetURLs(version, goos, goarch string, assets []Asset) (downloadURL, checksumURL, manifestURL string) {
+	expectedArchive := wanchuanReleaseArchiveName(version, goos, goarch)
+	for _, asset := range assets {
+		switch asset.Name {
+		case expectedArchive:
+			downloadURL = asset.DownloadURL
+		case "checksums.txt":
+			checksumURL = asset.DownloadURL
+		case wanchuanReleaseManifestName:
+			manifestURL = asset.DownloadURL
+		}
+	}
+	return downloadURL, checksumURL, manifestURL
 }
 
 // validateDownloadURL checks if the URL is from an allowed domain

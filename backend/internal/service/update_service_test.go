@@ -290,3 +290,33 @@ func TestVerifyBytesChecksumAcceptsManifestEntry(t *testing.T) {
 	require.NoError(t, verifyBytesChecksum(wanchuanReleaseManifestName, data, checksums))
 	require.Error(t, verifyBytesChecksum(wanchuanReleaseManifestName, append(data, '!'), checksums))
 }
+
+
+func TestSelectWanchuanReleaseAssetURLsIgnoresReauthRuntime(t *testing.T) {
+	const version = "2.9.6-wanchuan.1"
+	assets := []Asset{
+		{
+			Name:        "sub2api_" + version + "_linux_amd64.tar.gz",
+			DownloadURL: "https://github.com/1057300248/sub2api/releases/download/v" + version + "/sub2api_" + version + "_linux_amd64.tar.gz",
+		},
+		{
+			Name:        "sub2api-reauth_" + version + "_linux_amd64.tar.gz",
+			DownloadURL: "https://github.com/1057300248/sub2api/releases/download/v" + version + "/sub2api-reauth_" + version + "_linux_amd64.tar.gz",
+		},
+		{Name: "checksums.txt", DownloadURL: "https://github.com/1057300248/sub2api/releases/download/v" + version + "/checksums.txt"},
+		{Name: wanchuanReleaseManifestName, DownloadURL: "https://github.com/1057300248/sub2api/releases/download/v" + version + "/" + wanchuanReleaseManifestName},
+	}
+
+	downloadURL, checksumURL, manifestURL := selectWanchuanReleaseAssetURLs(version, "linux", "amd64", assets)
+
+	require.Contains(t, downloadURL, "/sub2api_"+version+"_linux_amd64.tar.gz")
+	require.NotContains(t, downloadURL, "sub2api-reauth")
+	require.Contains(t, checksumURL, "/checksums.txt")
+	require.Contains(t, manifestURL, "/"+wanchuanReleaseManifestName)
+}
+
+func TestWanchuanReleaseArchiveNameUsesPublishedArtifactNaming(t *testing.T) {
+	require.Equal(t, "sub2api_2.9.6-wanchuan.1_linux_amd64.tar.gz", wanchuanReleaseArchiveName("2.9.6-wanchuan.1", "linux", "amd64"))
+	require.Equal(t, "sub2api_2.9.6-wanchuan.1_darwin_arm64.tar.gz", wanchuanReleaseArchiveName("2.9.6-wanchuan.1", "darwin", "arm64"))
+	require.Equal(t, "sub2api_2.9.6-wanchuan.1_windows_amd64.zip", wanchuanReleaseArchiveName("2.9.6-wanchuan.1", "windows", "amd64"))
+}
