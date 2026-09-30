@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -60,8 +61,8 @@ func TestExcelBPSImagesHTTPFlow(t *testing.T) {
 								http.Error(w, err.Error(), http.StatusBadRequest)
 								return
 							}
-							defer file.Close()
-							defer r.MultipartForm.RemoveAll()
+							defer func() { assert.NoError(t, r.MultipartForm.RemoveAll()) }()
+							defer func() { assert.NoError(t, file.Close()) }()
 							data, err := io.ReadAll(file)
 							if err != nil {
 								http.Error(w, err.Error(), http.StatusBadRequest)
@@ -118,7 +119,7 @@ func TestExcelBPSImagesHTTPFlow(t *testing.T) {
 						req.Header.Set("session_id", t.Name())
 						resp, err := gateway.Client().Do(req)
 						require.NoError(t, err)
-						defer resp.Body.Close()
+						defer func() { assert.NoError(t, resp.Body.Close()) }()
 						result, err := io.ReadAll(resp.Body)
 						require.NoError(t, err)
 						require.Equal(t, wantStatus, resp.StatusCode, string(result))
