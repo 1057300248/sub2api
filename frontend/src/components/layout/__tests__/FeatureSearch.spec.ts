@@ -3,7 +3,7 @@ import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import FeatureSearch from '../FeatureSearch.vue'
-import zh from '@/i18n/locales/zh/common'
+import zhAll from '@/i18n/locales/zh'
 import { buildFeatureSearchEntries, searchFeatures, type SearchNavItem } from '@/utils/featureSearch'
 
 const items: SearchNavItem[] = [
@@ -41,6 +41,10 @@ describe('feature search index', () => {
 let cleanup: (() => void) | undefined
 afterEach(() => { cleanup?.(); cleanup = undefined; document.body.innerHTML = ''; vi.restoreAllMocks() })
 
+function messageFunctions(value: unknown): unknown {
+  return typeof value === 'string' ? () => value : Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, messageFunctions(child)]))
+}
+
 async function setup() {
   const router = createRouter({
     history: createMemoryHistory(),
@@ -56,9 +60,7 @@ async function setup() {
     global: {
       stubs: { transition: true },
       plugins: [router, createI18n({ legacy: false, locale: 'zh', messages: {
-        zh: { common: { featureSearch: Object.fromEntries(
-          Object.entries(zh.common.featureSearch).map(([name, text]) => [name, () => text])
-        ) } }
+        zh: messageFunctions(zhAll) as typeof zhAll
       } })]
     }
   })
@@ -84,6 +86,32 @@ describe('feature search dialog', () => {
     expect(router.currentRoute.value.path).toBe('/admin/channels/pricing')
     expect(wrapper.emitted('navigate')).toEqual([['/admin/channels/pricing']])
     expect(document.querySelector('[role=dialog]')).toBeNull()
+  })
+  it('finds cyber and navigates directly to the risk settings card', async () => {
+    const { wrapper, router } = await setup()
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    const input = document.querySelector<HTMLInputElement>('[role=combobox]')!
+    input.value = 'cyber'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    expect(document.querySelectorAll('[role=option]')).toHaveLength(1)
+    expect(document.querySelector('[role=option]')?.textContent).toContain('风控中心')
+    await key(input, 'Enter')
+    expect(router.currentRoute.value.fullPath).toBe('/admin/settings?tab=features#settings-section-features-risk-control')
+    const heading = document.createElement('h2')
+    heading.id = 'settings-section-features-risk-control'
+    heading.tabIndex = -1
+    document.body.appendChild(heading)
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    const repeatedInput = document.querySelector<HTMLInputElement>('[role=combobox]')!
+    repeatedInput.value = '风控'
+    repeatedInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    await key(repeatedInput, 'Enter')
+    expect(document.activeElement).toBe(heading)
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
   })
   it('updates results when visible navigation changes and safely handles empty results and IME', async () => {
     const { wrapper, router } = await setup()

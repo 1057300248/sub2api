@@ -1,6 +1,7 @@
 export interface SearchNavItem {
   path: string
   label: string
+  keywords?: string
   children?: SearchNavItem[]
   expandOnly?: boolean
 }
@@ -30,7 +31,7 @@ export function buildFeatureSearchEntries(
           path: item.path,
           label: item.label,
           group: parents.join(' / '),
-          keywords: normalize([item.label, ...parents, item.path, routeKeywords(item.path)].join(' '))
+          keywords: normalize([item.label, item.keywords, ...parents, item.path, routeKeywords(item.path)].join(' '))
         })
       }
       if (item.children) visit(item.children, [...parents, item.label])

@@ -78,10 +78,12 @@ import { useRouter } from 'vue-router'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { buildFeatureSearchEntries, searchFeatures, type FeatureSearchEntry, type SearchNavItem } from '@/utils/featureSearch'
+import { withSettingsSearch } from '@/utils/settingsSearch'
+import { focusSettingsLocation } from '@/composables/useSettingsNavigation'
 
 const props = defineProps<{ items: SearchNavItem[]; collapsed?: boolean }>()
 const emit = defineEmits<{ navigate: [path: string] }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const router = useRouter()
 const show = ref(false)
 const query = ref('')
@@ -89,7 +91,7 @@ const selectedIndex = ref(0)
 const inputRef = ref<HTMLInputElement | null>(null)
 const resultsRef = ref<HTMLElement | null>(null)
 const shortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ K' : 'Ctrl K'
-const entries = computed(() => buildFeatureSearchEntries(props.items, path => {
+const entries = computed(() => buildFeatureSearchEntries(withSettingsSearch(props.items, t, locale.value), path => {
   const meta = router.resolve(path).meta
   return [meta.title, meta.titleKey ? t(meta.titleKey) : ''].filter(Boolean).join(' ')
 }))
@@ -107,10 +109,16 @@ async function open() {
   inputRef.value?.focus()
 }
 
-function navigate(item: FeatureSearchEntry) {
+async function navigate(item: FeatureSearchEntry) {
   show.value = false
   emit('navigate', item.path)
-  void router.push(item.path)
+  const target = router.resolve(item.path)
+  const sameLocation = router.currentRoute.value.fullPath === target.fullPath
+  await router.push(item.path)
+  if (sameLocation && target.path === '/admin/settings') {
+    await nextTick()
+    focusSettingsLocation(target.query.tab, target.hash)
+  }
 }
 
 async function handleInputKeydown(event: KeyboardEvent) {
