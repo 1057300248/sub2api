@@ -31,7 +31,17 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Resolve an exact official release using the package manager
-        run: pnpm --dir frontend add axios@1.20.0 --save-exact --lockfile-only --ignore-scripts
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import json
+          from pathlib import Path
+          path = Path('frontend/package.json')
+          data = json.loads(path.read_text())
+          data['dependencies']['axios'] = '1.20.0'
+          path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+          PYCODE
+          pnpm --dir frontend install --lockfile-only --ignore-scripts
       - name: Install and verify frozen lockfile
         run: |
           set -euo pipefail
