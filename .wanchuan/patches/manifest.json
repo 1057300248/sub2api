@@ -88,6 +88,16 @@
     "backend/cmd/server/wire*.go",
     "backend/internal/service/plugin*.go",
     "backend/pkg/pluginapi/**",
-    "pkg/pluginapi/**"
+    "pkg/pluginapi/**",
+    ".github/**",
+    "tools/**",
+    "backend/go.mod",
+    "backend/go.sum",
+    "frontend/package.json",
+    "frontend/pnpm-lock.yaml",
+    "Makefile",
+    "backend/Makefile",
+    "Dockerfile*",
+    "deploy/**"
   ]
 }

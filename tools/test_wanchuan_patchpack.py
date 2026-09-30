@@ -47,6 +47,16 @@ class WanchuanPatchpackTest(unittest.TestCase):
         self.assertEqual(result["risk"], "review")
         self.assertIn("cline-rate-limit-cas", result["module_hits"])
 
+    def test_actual_overlay_collision_requires_review_without_matching_glob(self):
+        result = patchpack.classify_paths(["unlisted/custom.go"], patchpack.load_manifest(), ["unlisted/custom.go"])
+        self.assertEqual(result["risk"], "review")
+        self.assertEqual(result["custom_overlay_hits"], ["unlisted/custom.go"])
+
+    def test_workflow_and_dependency_changes_always_require_review(self):
+        for path in [".github/workflows/new.yml", "tools/new.py", "backend/go.mod", "deploy/install.sh"]:
+            with self.subTest(path=path):
+                self.assertEqual(patchpack.classify_paths([path], patchpack.load_manifest())["risk"], "review")
+
     def test_unowned_documentation_change_is_safe(self):
         data = patchpack.load_manifest()
         result = patchpack.classify_paths(["docs/upstream-only.md"], data)

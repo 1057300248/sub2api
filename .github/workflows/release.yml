@@ -39,6 +39,9 @@ env:
 
 jobs:
   prepare:
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.plan.outputs.sha }}
@@ -76,6 +79,20 @@ jobs:
           if [[ "$SIMPLE_RELEASE" == true ]]; then args+=(--simple); fi
           if [[ "$DRY_RUN" == true ]]; then args+=(--dry-run); fi
           python "$RUNNER_TEMP/release-tools/release_matrix.py" plan "${args[@]}"
+      - name: Require exact-source Wanchuan release gates
+        if: steps.plan.outputs.fork_release == 'true' && steps.plan.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ steps.plan.outputs.sha }}
+          SIMPLE: ${{ steps.plan.outputs.simple }}
+        run: |
+          set -euo pipefail
+          if [[ "$SIMPLE" == true ]]; then
+            echo 'Wanchuan releases require archives, manifest and checksums; simple image-only release is not allowed.' >&2
+            exit 1
+          fi
+          python3 tools/wanchuan_patchpack.py verify --require-release-version
+          python3 tools/wanchuan_ci_gate.py verify --sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@v7
         with:
           name: release-tooling

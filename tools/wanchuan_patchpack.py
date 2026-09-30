@@ -69,15 +69,15 @@ def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 
 
 def changed_paths(old_upstream: str, new_upstream: str) -> list[str]:
-    output = git("diff", "--name-only", f"{old_upstream}..{new_upstream}").stdout
-    return sorted({line.strip() for line in output.splitlines() if line.strip()})
+    output = git("diff", "--no-renames", "--name-only", "-z", f"{old_upstream}..{new_upstream}").stdout
+    return sorted({path for path in output.split("\0") if path})
 
 
 def _matches(path: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
 
 
-def classify_paths(paths: list[str], data: dict) -> dict:
+def classify_paths(paths: list[str], data: dict, custom_paths: list[str] | None = None) -> dict:
     modules: dict[str, list[str]] = {}
     review_hits: set[str] = set()
     for module in data["modules"]:
@@ -88,11 +88,14 @@ def classify_paths(paths: list[str], data: dict) -> dict:
                 review_hits.update(hits)
     global_hits = sorted(path for path in paths if _matches(path, data.get("global_review_globs", [])))
     review_hits.update(global_hits)
+    overlay_hits = sorted(set(paths).intersection(custom_paths or []))
+    review_hits.update(overlay_hits)
     return {
         "risk": "review" if review_hits else "safe",
         "changed_count": len(paths),
         "review_hits": sorted(review_hits),
         "global_review_hits": global_hits,
+        "custom_overlay_hits": overlay_hits,
         "module_hits": modules,
     }
 
@@ -146,8 +149,15 @@ def command_validate(_: argparse.Namespace) -> int:
 def command_plan(args: argparse.Namespace) -> int:
     data = load_manifest()
     validate_manifest(data)
+    for value in (args.old_upstream, args.new_upstream):
+        if not re.fullmatch(r"[0-9a-f]{40}", value):
+            raise ValueError("planning requires full pinned commit SHAs")
+    if git("merge-base", "--is-ancestor", args.old_upstream, args.new_upstream, check=False).returncode != 0:
+        raise ValueError("upstream history diverged or moved backwards; manual review required")
+    if git("merge-base", "--is-ancestor", args.old_upstream, "HEAD", check=False).returncode != 0:
+        raise ValueError("custom source does not contain the previous upstream pin")
     paths = changed_paths(args.old_upstream, args.new_upstream)
-    result = classify_paths(paths, data)
+    result = classify_paths(paths, data, changed_paths(args.old_upstream, "HEAD"))
     result.update({"old_upstream": args.old_upstream, "new_upstream": args.new_upstream})
     payload = json.dumps(result, indent=2, sort_keys=True)
     if args.output:

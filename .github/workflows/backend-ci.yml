@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
   pull_request:
 
@@ -102,6 +103,6 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r .github/release-tools/requirements-release.txt
       - run: python -m unittest discover -s .github/release-tools -p 'test_release_matrix.py'
-      - run: python -m unittest discover -s tools -p 'test_wanchuan_patchpack.py'
+      - run: python -m unittest discover -s tools -p 'test_wanchuan*.py'
       - run: python tools/wanchuan_patchpack.py validate
       - run: bash -n .github/release-tools/release-images.sh
