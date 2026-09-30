@@ -18,6 +18,7 @@ FULL_CONFIG = Path('.goreleaser.yaml')
 SIMPLE_CONFIG = Path('.goreleaser.simple.yaml')
 VERSION_FILE = Path('backend/cmd/server/VERSION')
 VERSION_RE = re.compile(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?')
+WANCHUAN_RELEASE_RE = re.compile(r'\d+\.\d+\.\d+-wanchuan\.[1-9]\d*')
 
 
 def config(simple=False):
