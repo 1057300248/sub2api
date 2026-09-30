@@ -411,3 +411,38 @@ describe('managed re-login availability', () => {
     expect(runtime.text()).toContain('tokenGuardV2.runtimeManaged')
   })
 })
+
+it('selects the external engine, explains credential sharing and persists it', async () => {
+  wrapper = mount(TokenGuardV2View, {
+    global: { stubs: { AppLayout: { template: '<main><slot /></main>' }, SmartOpsNav: true, Icon: true,
+      BaseDialog: { props: ['show'], template: '<section v-if="show"><slot /><footer><slot name="footer" /></footer></section>' } } },
+  })
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'tokenGuardV2.edit')!.trigger('click')
+  expect((wrapper.get('#token-guard-v2-engine').element as HTMLSelectElement).value).toBe('local_worker')
+  await wrapper.get('#token-guard-v2-engine').setValue('session_studio')
+  expect(wrapper.text()).toContain('tokenGuardV2.sessionStudioEngineHint')
+  expect(wrapper.get('#token-guard-v2-proxy').attributes('disabled')).toBeDefined()
+  await wrapper.get('#token-guard-v2-editor').trigger('submit')
+  await flushPromises()
+  expect(api.updateGuard).toHaveBeenCalledWith(42, expect.objectContaining({ engine: 'session_studio', password: '', totp_secret: '' }))
+})
+
+it('preserves the saved engine when pausing, but uses local execution for email OTP', async () => {
+  const data = await api.listGuard()
+  data.accounts[0].login_config.engine = 'session_studio'
+  api.listGuard.mockResolvedValue(data)
+  wrapper = mount(TokenGuardV2View, {
+    global: { stubs: { AppLayout: { template: '<main><slot /></main>' }, SmartOpsNav: true, Icon: true,
+      BaseDialog: { props: ['show'], template: '<section v-if="show"><slot /><footer><slot name="footer" /></footer></section>' } } },
+  })
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'tokenGuardV2.pause')!.trigger('click')
+  await flushPromises()
+  expect(api.updateGuard).toHaveBeenCalledWith(42, expect.objectContaining({ engine: 'session_studio', enabled: false }))
+  await wrapper.findAll('button').find(button => button.text() === 'tokenGuardV2.edit')!.trigger('click')
+  expect((wrapper.get('#token-guard-v2-engine').element as HTMLSelectElement).value).toBe('session_studio')
+  await wrapper.get('input[value="email_otp_url"]').setValue()
+  expect((wrapper.get('#token-guard-v2-engine').element as HTMLSelectElement).value).toBe('local_worker')
+  expect(wrapper.get('#token-guard-v2-engine option[value="session_studio"]').attributes('disabled')).toBeDefined()
+})

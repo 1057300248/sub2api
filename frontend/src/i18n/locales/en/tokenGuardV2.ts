@@ -1,4 +1,10 @@
 export default {
+  remoteEngineEgress: 'Service egress (account proxy is not used)',
+  reloginEngine: 'Re-login engine',
+  localWorkerEngine: 'Local Worker (default)',
+  sessionStudioEngine: 'Session Studio (temporary fast path)',
+  localWorkerEngineHint: 'Sign in using your own Worker and the selected account proxy.',
+  sessionStudioEngineHint: 'Sends this account’s email, password and TOTP secret to the re-login service configured in Credential Guard. Password / TOTP only; uses the service’s egress instead of the account proxy. No automatic engine fallback. Upgrade the Worker first.',
   runtimeTitle: 'Automatic re-login service',
   runtimeManaged: 'Prepared and managed by the application. Password / 2FA needs no extra setup.',
   runtimeExternal: 'Using the existing external re-login service.',
