@@ -16,6 +16,16 @@ class WanchuanPatchpackTest(unittest.TestCase):
         self.assertEqual(data["release_repo"], "1057300248/sub2api")
         self.assertEqual(data["fork_suffix"], "wanchuan")
 
+    def test_updater_repo_pin_ignores_go_alignment_spacing(self):
+        self.assertTrue(patchpack.updater_repo_is_pinned(
+            'const (\n\tgithubRepo         = "1057300248/sub2api"\n)',
+            '1057300248/sub2api',
+        ))
+        self.assertFalse(patchpack.updater_repo_is_pinned(
+            'githubRepo = "ranxi2001/sub2api"',
+            '1057300248/sub2api',
+        ))
+
     def test_next_version_tracks_upstream_and_revision(self):
         self.assertEqual(
             patchpack.fork_version("v2.9.6", 1, "wanchuan"),
