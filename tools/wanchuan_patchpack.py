@@ -132,6 +132,8 @@ def command_validate(_: argparse.Namespace) -> int:
     normalize_upstream_version(lock.get("tag", ""))
     if not re.fullmatch(r"[0-9a-f]{40}", str(lock.get("sha", ""))):
         raise ValueError("upstream lock sha must be a full 40-character commit")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(lock.get("integrated_commit", ""))):
+        raise ValueError("upstream lock integrated_commit must be a full 40-character commit")
     print(json.dumps({"manifest": "ok", "modules": len(data["modules"]), "upstream": lock["tag"]}))
     return 0
 
@@ -169,10 +171,16 @@ def command_verify(args: argparse.Namespace) -> int:
         raise ValueError("upstream lock repository mismatch")
 
     locked_sha = str(lock.get("sha", ""))
-    if git("cat-file", "-e", f"{locked_sha}^{{commit}}", check=False).returncode != 0:
-        raise ValueError(f"locked upstream commit is not present locally: {locked_sha}")
-    if git("merge-base", "--is-ancestor", locked_sha, "HEAD", check=False).returncode != 0:
-        raise ValueError("current source does not contain the locked upstream commit")
+    integrated_commit = str(lock.get("integrated_commit", ""))
+    for label, commit in (("locked upstream", locked_sha), ("integration merge", integrated_commit)):
+        if not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise ValueError(f"{label} commit must be a full 40-character SHA")
+        if git("cat-file", "-e", f"{commit}^{{commit}}", check=False).returncode != 0:
+            raise ValueError(f"{label} commit is not present locally: {commit}")
+    if git("merge-base", "--is-ancestor", locked_sha, integrated_commit, check=False).returncode != 0:
+        raise ValueError("integration merge does not contain the locked upstream commit")
+    if git("merge-base", "--is-ancestor", integrated_commit, "HEAD", check=False).returncode != 0:
+        raise ValueError("current source does not contain the recorded integration merge")
 
     updater = (ROOT / "backend" / "internal" / "service" / "update_service.go").read_text(encoding="utf-8")
     expected_repo = f'githubRepo = "{data["release_repo"]}"'
