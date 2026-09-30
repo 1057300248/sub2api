@@ -7,12 +7,15 @@ on:
       - codex/ranxi-v2.8.17-cline-cas-20260926
       - codex/ranxi-latest-patches-20260929
       - codex/ranxi-v2.9.3-patches-20260929
+      - codex/modular-updates-20260930
   pull_request:
     paths:
       - 'backend/**'
       - 'frontend/**'
       - '.github/workflows/cline-cas-validation.yml'
       - 'tools/verify_custom_patch_alignment.py'
+      - 'tools/wanchuan_patchpack.py'
+      - '.wanchuan/**'
   workflow_dispatch:
 
 permissions:
@@ -29,16 +32,17 @@ jobs:
           persist-credentials: false
       - name: Verify exact upstream and complete previous customization ancestry
         env:
-          UPSTREAM_SHA: 412b2225a357b9bb5ee2295603253fec362dbd0f
-          PREVIOUS_CUSTOM_SHA: 6793a84770efbcef9b37878ba35b5f66d7f45a18
+          UPSTREAM_SHA: 9f7d96be367e795bd76e1f45c82bd5d4c563e0fa
+          PREVIOUS_CUSTOM_SHA: 95bf4b1f76dd9d4ff32b4dfca807a4ea07a97fa5
           CLINE_SHA: 94ce53353ecc501c26308ddaef36d1f8bcec78e0
-          PREVIOUS_UPSTREAM_SHA: 468061e082a0fcc1ef6a9c8f8b0ef1f773d26652
+          PREVIOUS_UPSTREAM_SHA: 412b2225a357b9bb5ee2295603253fec362dbd0f
         run: |
           set -euo pipefail
           git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD
           git merge-base --is-ancestor "$PREVIOUS_CUSTOM_SHA" HEAD
           git merge-base --is-ancestor "$CLINE_SHA" HEAD
-          test "$(cat backend/cmd/server/VERSION)" = '2.9.3'
+          test "$(cat backend/cmd/server/VERSION)" = '2.9.6'
+          python tools/wanchuan_patchpack.py verify
           git diff --check "$UPSTREAM_SHA" HEAD
           mkdir -p "$RUNNER_TEMP/patch-inventory"
           {

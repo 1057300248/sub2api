@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "upstream_repo": "ranxi2001/sub2api",
+  "release_repo": "1057300248/sub2api",
+  "fork_suffix": "wanchuan",
+  "integration_branch": "codex/modular-updates-20260930",
+  "modules": [
+    {
+      "id": "cline-rate-limit-cas",
+      "mode": "source-overlay",
+      "review_on_upstream_touch": true,
+      "protected_globs": [
+        "backend/internal/service/cline_ratelimit*.go",
+        "backend/internal/service/ratelimit_service.go",
+        "backend/internal/repository/*account*.go"
+      ],
+      "tests": [
+        "go test -race -tags=unit ./internal/service -run '^Test(ParseCline|SetCline|Handle429Cline)' -count=10",
+        "go test -tags=integration ./internal/repository -run 'TestSetRateLimitedIfLaterDoesNotShortenReset' -count=1"
+      ]
+    },
+    {
+      "id": "codex-ticket-safety",
+      "mode": "source-overlay",
+      "review_on_upstream_touch": true,
+      "protected_globs": [
+        "backend/internal/service/openai_codex_ticket*.go",
+        "backend/internal/config/config.go",
+        "backend/internal/handler/dto/*account*.go",
+        "backend/internal/repository/*account*.go"
+      ],
+      "tests": [
+        "python3 tools/verify_custom_patch_alignment.py"
+      ]
+    },
+    {
+      "id": "model-compat-overlays",
+      "mode": "source-overlay",
+      "review_on_upstream_touch": true,
+      "protected_globs": [
+        "backend/internal/service/openai_gateway*.go",
+        "backend/internal/pkg/antigravity/**",
+        "backend/internal/pkg/apicompat/**"
+      ],
+      "tests": [
+        "python3 tools/verify_custom_patch_alignment.py"
+      ]
+    },
+    {
+      "id": "operations-ui",
+      "mode": "source-overlay",
+      "review_on_upstream_touch": true,
+      "protected_globs": [
+        "frontend/src/components/account/**",
+        "frontend/src/components/admin/operations/**",
+        "frontend/src/views/admin/**",
+        "frontend/src/features/channel-monitor-v2/**"
+      ],
+      "tests": [
+        "make test-frontend"
+      ]
+    },
+    {
+      "id": "fork-update-channel",
+      "mode": "source-overlay",
+      "review_on_upstream_touch": true,
+      "protected_globs": [
+        "backend/internal/service/update_service*.go",
+        ".github/release-tools/**",
+        ".github/workflows/release.yml",
+        ".github/workflows/wanchuan-upstream-sync.yml",
+        ".wanchuan/**",
+        "tools/wanchuan_patchpack.py"
+      ],
+      "tests": [
+        "python3 -m unittest discover -s .github/release-tools -p 'test_release_matrix.py'",
+        "python3 -m unittest discover -s tools -p 'test_wanchuan_patchpack.py'"
+      ]
+    }
+  ],
+  "global_review_globs": [
+    "backend/migrations/**",
+    "backend/ent/schema/**",
+    "backend/cmd/server/wire*.go",
+    "backend/internal/service/plugin*.go",
+    "backend/pkg/pluginapi/**",
+    "pkg/pluginapi/**"
+  ]
+}

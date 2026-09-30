@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "upstream_repo": "ranxi2001/sub2api",
+  "tag": "v2.9.6",
+  "sha": "9f7d96be367e795bd76e1f45c82bd5d4c563e0fa",
+  "integrated_commit": "c2ebf06f2baaffe180c060a364b5a6878109ffdd",
+  "integrated_at": "2026-09-30T09:46:08Z"
+}
