@@ -217,6 +217,22 @@ class ReleaseMatrixTest(unittest.TestCase):
         notification = next(step for step in workflow['jobs']['release']['steps'] if step.get('name') == 'Send Telegram Notification')
         self.assertIn("prerelease != 'true'", notification['if'])
 
+    def test_wanchuan_publish_tag_overrides_upstream_source_version(self):
+        # The source tree intentionally keeps the upstream VERSION so future
+        # upstream bumps merge cleanly. A Wanchuan release tag must still drive
+        # the built binary/release version.
+        release.VERSION_FILE.write_text('9.8.7\n')
+        sha = 'a' * 40 + '\n'
+        with patch.dict(os.environ, {'GITHUB_OUTPUT': 'outputs'}), patch.object(
+            subprocess, 'check_output', side_effect=[sha, sha]
+        ):
+            release.plan(argparse.Namespace(ref='v9.8.7-wanchuan.1', dry_run=False, simple=False))
+        output = dict(line.split('=', 1) for line in Path('outputs').read_text().splitlines())
+        self.assertEqual(output['version'], '9.8.7-wanchuan.1')
+        self.assertEqual(output['prerelease'], 'false')
+        self.assertEqual(output['fork_release'], 'true')
+        self.assertEqual(release.VERSION_FILE.read_text(), '9.8.7-wanchuan.1\n')
+
     def test_wanchuan_revision_is_stable_owner_release(self):
         release.VERSION_FILE.write_text('9.8.7-wanchuan.2\n')
         with patch.dict(os.environ, {'GITHUB_OUTPUT': 'outputs'}), patch.object(subprocess, 'check_output', return_value='a' * 40 + '\n'):
