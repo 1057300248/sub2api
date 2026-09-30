@@ -14,7 +14,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / ".wanchuan" / "patches" / "manifest.json"
 LOCK_PATH = ROOT / ".wanchuan" / "upstream.lock"
-STABLE_UPSTREAM_TAG_RE = re.compile(r"^v?(\\d+)\\.(\\d+)\\.(\\d+)$")
+STABLE_UPSTREAM_TAG_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 
 
 def load_json(path: Path) -> dict:
@@ -120,7 +120,7 @@ def write_github_outputs(values: dict[str, object]) -> None:
         for key, value in values.items():
             if isinstance(value, (dict, list)):
                 value = json.dumps(value, separators=(",", ":"))
-            stream.write(f"{key}={value}\\n")
+            stream.write(f"{key}={value}\n")
 
 
 def command_validate(_: argparse.Namespace) -> int:
@@ -144,7 +144,7 @@ def command_plan(args: argparse.Namespace) -> int:
     result.update({"old_upstream": args.old_upstream, "new_upstream": args.new_upstream})
     payload = json.dumps(result, indent=2, sort_keys=True)
     if args.output:
-        Path(args.output).write_text(payload + "\\n", encoding="utf-8")
+        Path(args.output).write_text(payload + "\n", encoding="utf-8")
     print(payload)
     write_github_outputs({
         "risk": result["risk"],
@@ -182,7 +182,7 @@ def command_verify(args: argparse.Namespace) -> int:
     base_version = normalize_upstream_version(str(lock.get("tag", "")))
     version = (ROOT / "backend" / "cmd" / "server" / "VERSION").read_text(encoding="utf-8").strip()
     fork_pattern = re.compile(
-        rf"^{re.escape(base_version)}-{re.escape(data['fork_suffix'])}\\.[1-9]\\d*$"
+        rf"^{re.escape(base_version)}-{re.escape(data['fork_suffix'])}\.[1-9]\d*$"
     )
     if args.require_release_version:
         if not fork_pattern.fullmatch(version):
