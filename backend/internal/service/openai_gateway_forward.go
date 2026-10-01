@@ -21,11 +21,15 @@ import (
 )
 
 func accountUsesPrismBrowser(account *Account, cfg *config.Config) bool {
-	if account == nil || cfg == nil || !cfg.Gateway.PrismBrowser.Enabled || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
+	return accountHasPrismBrowser(account) && cfg != nil && cfg.Gateway.PrismBrowser.Enabled
+}
+
+func accountHasPrismBrowser(account *Account) bool {
+	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsShadow() {
 		return false
 	}
-	value, ok := account.Extra["openai_prism_browser"]
-	return ok && value == true
+	enabled, _ := account.Extra["openai_prism_browser"].(bool)
+	return enabled
 }
 
 func prismBrowserResponsesURL(baseURL string) string {
@@ -101,7 +105,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	modelForBPS := gjson.GetBytes(body, "model").String()
-	if accountUsesPrismBrowser(account, s.cfg) {
+	if accountHasPrismBrowser(account) {
 		return s.forwardPrismBrowser(ctx, c, account, body, startTime)
 	}
 	if c.GetBool(bpsAccountProbeRequiredContextKey) &&

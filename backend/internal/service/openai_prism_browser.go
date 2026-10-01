@@ -19,6 +19,39 @@ import (
 
 const prismBrowserMaxResponseBytes = 2 << 20
 
+func prismBrowserTerminal(body []byte, model string, stream bool) (string, error) {
+	terminal := body
+	if stream {
+		terminal = nil
+		for _, line := range bytes.Split(body, []byte("\n")) {
+			if !bytes.HasPrefix(line, []byte("data:")) {
+				continue
+			}
+			data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+			if !gjson.ValidBytes(data) {
+				return "", errors.New("Prism adapter returned invalid SSE JSON")
+			}
+			switch gjson.GetBytes(data, "type").String() {
+			case "response.created":
+			case "response.completed":
+				if terminal != nil {
+					return "", errors.New("Prism adapter returned repeated terminal events")
+				}
+				terminal = []byte(gjson.GetBytes(data, "response").Raw)
+			default:
+				return "", errors.New("Prism adapter returned unsupported SSE event")
+			}
+		}
+	}
+	if !gjson.ValidBytes(terminal) || gjson.GetBytes(terminal, "status").String() != "completed" ||
+		gjson.GetBytes(terminal, "model").String() != model ||
+		gjson.GetBytes(terminal, "output.0.content.0.text").String() == "" ||
+		gjson.GetBytes(terminal, "id").String() == "" {
+		return "", errors.New("Prism adapter returned an invalid terminal response")
+	}
+	return gjson.GetBytes(terminal, "id").String(), nil
+}
+
 func prismBrowserAdapterURL(baseURL string) (string, error) {
 	parsed, err := url.Parse(prismBrowserResponsesURL(baseURL))
 	if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" {
@@ -47,41 +80,41 @@ func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.C
 	}
 	responseBody, upstreamHeaders, status, err := s.callPrismBrowser(ctx, account, body)
 	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "prism_unavailable", "message": "Prism adapter unavailable; request was not replayed"}})
 		return nil, err
 	}
 	if status != http.StatusOK {
 		c.Data(status, "application/json", responseBody)
 		return nil, fmt.Errorf("Prism adapter returned HTTP %d", status)
 	}
-	responseID := strings.TrimSpace(upstreamHeaders.Get("X-Request-Id"))
+	responseID, err := prismBrowserTerminal(responseBody, model, stream)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "invalid_prism_response", "message": "Prism adapter returned no valid terminal response"}})
+		return nil, err
+	}
 	contentType := "application/json"
 	if stream {
-		if !bytes.Contains(responseBody, []byte("event: response.completed")) {
-			return nil, errors.New("Prism adapter stream has no completed event")
-		}
 		contentType = "text/event-stream"
-	} else {
-		if !gjson.ValidBytes(responseBody) || gjson.GetBytes(responseBody, "status").String() != "completed" ||
-			!gjson.GetBytes(responseBody, "output.0.content.0.text").Exists() {
-			return nil, errors.New("Prism adapter returned an invalid terminal response")
-		}
-		responseID = gjson.GetBytes(responseBody, "id").String()
 	}
 	SetActualOpenAIUpstreamEndpoint(c, "/v1/responses")
 	c.Header("X-Prism-Usage", "unavailable")
 	c.Data(http.StatusOK, contentType, responseBody)
 	return &OpenAIForwardResult{
-		RequestID:       upstreamHeaders.Get("X-Request-Id"),
-		ResponseID:      responseID,
-		UpstreamHeaders: upstreamHeaders,
-		Model:           model,
-		UpstreamModel:   model,
-		Stream:          stream,
-		Duration:        time.Since(started),
+		RequestID:        responseID,
+		ResponseID:       responseID,
+		UpstreamHeaders:  upstreamHeaders,
+		Model:            model,
+		UpstreamModel:    model,
+		Stream:           stream,
+		Duration:         time.Since(started),
+		UsageUnavailable: true,
 	}, nil
 }
 
 func (s *OpenAIGatewayService) callPrismBrowser(ctx context.Context, account *Account, body []byte) ([]byte, http.Header, int, error) {
+	if !accountUsesPrismBrowser(account, s.cfg) {
+		return nil, nil, 0, errors.New("Prism adapter is disabled; native fallback is prohibited")
+	}
 	endpoint, err := prismBrowserAdapterURL(s.cfg.Gateway.PrismBrowser.BaseURL)
 	if err != nil {
 		return nil, nil, 0, err
@@ -107,9 +140,11 @@ func (s *OpenAIGatewayService) callPrismBrowser(ctx context.Context, account *Ac
 	req.Header.Set("X-Prism-OAuth-Token", token)
 	// The token must never pass through an account proxy, environment proxy,
 	// plugin transport, or an HTTP redirect.
+	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
 	client := &http.Client{
 		Timeout:       5 * time.Minute,
-		Transport:     &http.Transport{Proxy: nil},
+		Transport:     transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	resp, err := client.Do(req)

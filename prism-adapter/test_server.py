@@ -69,13 +69,55 @@ class AdapterTests(unittest.TestCase):
                 body = json.load(response)
             self.assertEqual(fake.assert_values, ("300", "oauth-token", "[user]\ncandy"))
             self.assertEqual(body["output"][0]["content"][0]["text"], "21")
-            self.assertNotIn("usage", body)
+            self.assertIsNone(body["usage"])
             with self.assertRaises(HTTPError) as denied:
                 urlopen(Request(url, data=data, headers={"Content-Type": "application/json"}), timeout=5)
             self.assertEqual(denied.exception.code, 401)
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_gate_blocks_retry_and_model_downgrade_before_send(self):
+        gate = adapter.StartGate()
+        body = {"metadata": {"model": "gpt-5.6-sol", "reasoning_effort": "medium"}}
+        self.assertFalse(gate.accept(body))
+        gate = adapter.StartGate()
+        gate.armed = True
+        self.assertTrue(gate.accept(body))
+        self.assertFalse(gate.accept(body))
+        for metadata in ({"model": "gpt-6-astra", "reasoning_effort": "medium"},
+                         {"model": "gpt-5.6-sol", "reasoning_effort": "high"}):
+            gate = adapter.StartGate()
+            gate.armed = True
+            self.assertFalse(gate.accept({"metadata": metadata}))
+            self.assertFalse(gate.sent)
+
+    def test_success_is_not_terminal_without_completed_status(self):
+        self.assertIsNone(adapter.terminal_text({"status": "running", "response": {"status": "success"}}))
+        self.assertIsNone(adapter.terminal_text({"status": "completed"}))
+        self.assertIsNone(adapter.terminal_text({"status": "completed", "response": "invalid"}))
+
+    def test_journal_retains_latest_turn_state_and_writes_redacted_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = adapter.State(directory)
+            state.begin("300", "fixture-project")
+            state.update("300", {"request_id": "fixture-request", "turn_state": "fixture-state-one"})
+            state.update("300", {"turn_state": "fixture-state-two"})
+            journal = json.loads((state.pending / "300").read_text())
+            self.assertEqual(journal["turn_state"], "fixture-state-two")
+            self.assertEqual(journal["request_id"], "fixture-request")
+            state.receipt("300", "fixture-request", 1, 2, "secret answer text")
+            receipt = next(state.receipts.iterdir()).read_text()
+            self.assertNotIn("secret answer text", receipt)
+            self.assertNotIn("turn_state", receipt)
+            self.assertEqual(json.loads(receipt)["start_count"], 1)
+
+    def test_unsupported_options_and_empty_text_do_not_dispatch(self):
+        for fields in ({"additional_tools": [{"name": "shell"}]}, {"background": True},
+                       {"max_output_tokens": 10}, {"input": "   "}, {"store": True},
+                       {"text": {"format": {"type": "json_schema"}}}):
+            with self.assertRaises(adapter.AdapterError):
+                adapter.parse_prompt({"model": adapter.MODEL, "input": "hi", **fields})
 
 
 if __name__ == "__main__":
