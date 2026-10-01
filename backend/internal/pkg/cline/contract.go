@@ -44,12 +44,12 @@ func NormalizeBaseURL(value string) (string, error) {
 	}
 	u, err := url.Parse(value)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
-		return "", errors.New("Cline base URL must be HTTPS without credentials, query or fragment")
+		return "", errors.New("cline base URL must be HTTPS without credentials, query or fragment")
 	}
 	u.Path = strings.TrimRight(u.Path, "/")
 	if strings.EqualFold(u.Hostname(), "api.cline.bot") {
 		if u.Port() != "" && u.Port() != "443" {
-			return "", errors.New("Cline official origin only supports port 443")
+			return "", errors.New("cline official origin only supports port 443")
 		}
 		switch u.Path {
 		case "", "/api", "/api/v1":
@@ -72,18 +72,18 @@ func ValidModelID(id string) bool {
 }
 func ValidateUpstreamModel(mode, id string) error {
 	if !ValidModelID(id) {
-		return errors.New("Cline requires an explicit non-wildcard upstream model ID")
+		return errors.New("cline requires an explicit non-wildcard upstream model ID")
 	}
 	switch mode {
 	case ModeFree:
 		return ErrFreeAPIUnsupported
 	case ModePass:
 		if !strings.HasPrefix(id, "cline-pass/") || len(id) == len("cline-pass/") {
-			return errors.New("ClinePass requires the complete cline-pass/ model ID; paid fallback is disabled")
+			return errors.New("cline pass requires the complete cline-pass/ model ID; paid fallback is disabled")
 		}
 	case ModePayG:
 		if strings.HasPrefix(id, "cline-pass/") {
-			return errors.New("PAYG cannot use a ClinePass model")
+			return errors.New("payg cannot use a ClinePass model")
 		}
 	default:
 		return errors.New("confirm the Cline usage mode before forwarding")
@@ -104,7 +104,7 @@ type Catalog struct {
 
 func ParseCatalog(body []byte) (*Catalog, error) {
 	if len(body) > MaxBodyBytes {
-		return nil, errors.New("Cline catalog is too large")
+		return nil, errors.New("cline catalog is too large")
 	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
@@ -167,7 +167,7 @@ type Window struct {
 // Missing windows remain unknown. This optional metadata endpoint is not a stable public contract.
 func ParseUsage(body []byte) ([]Window, error) {
 	if len(body) > MaxBodyBytes {
-		return nil, errors.New("Cline usage response is too large")
+		return nil, errors.New("cline usage response is too large")
 	}
 	var p struct {
 		Success *bool `json:"success"`

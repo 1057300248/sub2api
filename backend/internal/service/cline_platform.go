@@ -140,7 +140,7 @@ func (a *Account) ValidateClineOutboundBody(body []byte) error {
 		return nil
 	}
 	if a.Type != AccountTypeAPIKey {
-		return fmt.Errorf("Cline requires an API-key account")
+		return fmt.Errorf("cline requires an API-key account")
 	}
 	if a.GetClineBaseURL() == "" {
 		return fmt.Errorf("invalid Cline base URL")
@@ -159,7 +159,7 @@ func (a *Account) ValidateClineOutboundBody(body []byte) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("Cline upstream model is not present in the explicit account model mapping")
+	return fmt.Errorf("cline upstream model is not present in the explicit account model mapping")
 }
 
 func ClineCredentialFingerprint(a *Account) string {
