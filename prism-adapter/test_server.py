@@ -54,8 +54,8 @@ class AdapterTests(unittest.TestCase):
 
     def test_http_boundary_uses_real_terminal_without_usage(self):
         class FakeBrowser:
-            def run(self, account_id, token, prompt):
-                self.assert_values = (account_id, token, prompt)
+            def run(self, account_id, token, prompt, session_id=None):
+                self.assert_values = (account_id, token, prompt, session_id)
                 return "prism-123", "21"
 
         fake = FakeBrowser()
@@ -68,10 +68,11 @@ class AdapterTests(unittest.TestCase):
             url = f"http://127.0.0.1:{server.server_port}/v1/responses"
             data = json.dumps({"model": "gpt-5.6-sol", "input": "candy"}).encode()
             headers = {"Authorization": "Bearer test-key", "X-Prism-Account-ID": "300",
-                       "X-Prism-OAuth-Token": "oauth-token", "Content-Type": "application/json"}
+                       "X-Prism-OAuth-Token": "oauth-token", "X-Prism-Session-ID": "a" * 64,
+                       "Content-Type": "application/json"}
             with urlopen(Request(url, data=data, headers=headers), timeout=5) as response:
                 body = json.load(response)
-            self.assertEqual(fake.assert_values, ("300", "oauth-token", "[user]\ncandy"))
+            self.assertEqual(fake.assert_values, ("300", "oauth-token", "[user]\ncandy", "a" * 64))
             self.assertEqual(body["output"][0]["content"][0]["text"], "21")
             self.assertIsNone(body["usage"])
             with self.assertRaises(HTTPError) as denied:
@@ -125,7 +126,7 @@ class AdapterTests(unittest.TestCase):
 
 
 PROJECT = "0123abcd-0000-4000-8000-00000000abcd"
-VALID_START = {"metadata": {"model": adapter.MODEL, "reasoning_effort": "medium"}}
+VALID_START = {"metadata": {"model": adapter.MODEL, "reasoning_effort": "medium", "projectId": PROJECT}}
 
 
 class FakeRoute:
@@ -147,17 +148,19 @@ class FakeMessage:
         self.url = adapter.BASE + path
         self.post_data_json = body
         self.status = status
+        self.request = self
 
     def json(self):
         return self.post_data_json
 
 
 class FakeControl:
-    def __init__(self, page):
+    def __init__(self, page, name=None):
         self.page = page
+        self.name = name
 
     def click(self, **_kwargs):
-        pass
+        self.page.clicks.append(self.name)
 
     def wait_for(self, **_kwargs):
         pass
@@ -179,6 +182,8 @@ class FakePage:
         self.route_handler = None
         self.listeners = {}
         self.clock = 0.0
+        self.requests = {}
+        self.clicks = []
 
     def set_default_timeout(self, _timeout):
         pass
@@ -193,7 +198,7 @@ class FakePage:
         self.url = adapter.BASE + "/?u=" + PROJECT
 
     def get_by_role(self, *_args, **_kwargs):
-        return FakeControl(self)
+        return FakeControl(self, _kwargs.get("name"))
 
     def locator(self, _selector):
         return FakeControl(self)
@@ -207,20 +212,25 @@ class FakePage:
     def browser_request(self, path, body):
         """The page issues a request; it passes the listener and the route gate."""
         request = FakeMessage(path, body)
-        self.listeners["request"](request)
+        self.requests[path] = request
         route = FakeRoute(request)
         self.route_handler(route)
         return route
 
-    def server_response(self, path, body, status=200):
-        self.listeners["response"](FakeMessage(path, body, status))
+    def server_response(self, path, body, status=200, request=None):
+        response = FakeMessage(path, body, status)
+        response.request = request or self.requests[path]
+        self.listeners["response"](response)
 
 
 class FakeBrowser:
     def __init__(self, page):
         self.page = page
+        self.contexts = []
+        self.closed = False
 
     def new_context(self, **_kwargs):
+        self.contexts.append(self)
         return self
 
     def add_cookies(self, _cookies):
@@ -230,7 +240,7 @@ class FakeBrowser:
         return self.page
 
     def close(self):
-        pass
+        self.closed = True
 
 
 def run_turn(state, on_submit):

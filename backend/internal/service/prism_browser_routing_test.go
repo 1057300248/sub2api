@@ -33,6 +33,118 @@ func TestPrismBrowserResponsesURL(t *testing.T) {
 	}
 }
 
+func TestPrismBrowserSessionIDIsBoundToAuthenticatedKeyAndAccount(t *testing.T) {
+	newContext := func(keyID, accountID int64, raw string) *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		if raw != "" {
+			c.Request.Header.Set("X-Prism-Session-ID", raw)
+		}
+		c.Set("api_key", &APIKey{ID: keyID})
+		return c
+	}
+
+	first, err := prismBrowserSessionID(newContext(7, 42, "client-session"), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := prismBrowserSessionID(newContext(7, 42, "client-session"), 42)
+	if err != nil || first != second || len(first) != 64 {
+		t.Fatalf("same authenticated session must be stable: first=%q second=%q err=%v", first, second, err)
+	}
+	for _, tc := range []struct {
+		name      string
+		keyID     int64
+		accountID int64
+		raw       string
+	}{
+		{"other api key", 8, 42, "client-session"},
+		{"other account", 7, 43, "client-session"},
+		{"other client session", 7, 42, "other-session"},
+	} {
+		got, err := prismBrowserSessionID(newContext(tc.keyID, tc.accountID, tc.raw), tc.accountID)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got == first {
+			t.Fatalf("%s collided with authenticated session", tc.name)
+		}
+	}
+	if got, err := prismBrowserSessionID(newContext(7, 42, ""), 42); err != nil || got == "" {
+		t.Fatalf("missing client session should use a server-owned scope: %q %v", got, err)
+	}
+	if got, err := prismBrowserSessionID(newContext(0, 42, "client-session"), 42); err != nil || got != "" {
+		t.Fatalf("without an authenticated API key the helper must stay stateless: %q %v", got, err)
+	}
+	standard := newContext(7, 42, "")
+	standard.Request.Header.Set("session_id", "codex-session")
+	got, err := prismBrowserSessionID(standard, 42)
+	if err != nil || got == "" || got == first {
+		t.Fatalf("standard Codex session header should opt into isolated reuse: %q %v", got, err)
+	}
+}
+
+func TestPrismBrowserSessionIDRejectsAmbiguousHeader(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set("api_key", &APIKey{ID: 7})
+	c.Request.Header.Add("X-Prism-Session-ID", "one")
+	c.Request.Header.Add("X-Prism-Session-ID", "two")
+	if _, err := prismBrowserSessionID(c, 42); err == nil {
+		t.Fatal("duplicate session headers must be rejected")
+	}
+	c.Request.Header.Del("X-Prism-Session-ID")
+	c.Request.Header.Set("session-id", "one")
+	c.Request.Header.Set("session_id", "two")
+	if _, err := prismBrowserSessionID(c, 42); err == nil {
+		t.Fatal("conflicting standard session headers must be rejected")
+	}
+}
+
+func TestPrismBrowserSessionForwardAndStatelessAdminTest(t *testing.T) {
+	const body = `{"model":"gpt-5.6-sol","input":"fixture"}`
+	const terminal = `{"id":"resp_fixture","status":"completed","model":"gpt-5.6-sol","usage":null,"output":[{"content":[{"text":"21"}]}]}`
+	requests := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.JSONEq(t, body, string(got))
+		requests <- r.Header.Get("X-Prism-Session-ID")
+		_, _ = io.WriteString(w, terminal)
+	}))
+	defer server.Close()
+	s, account := prismTestService(server.URL)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("X-Prism-Session-ID", "fixture-session")
+	c.Set("api_key", &APIKey{ID: 7})
+	expected, err := prismBrowserSessionID(c, account.ID)
+	require.NoError(t, err)
+	_, err = s.forwardPrismBrowser(context.Background(), c, account, []byte(body), time.Now())
+	require.NoError(t, err)
+	require.Equal(t, expected, <-requests)
+	require.NotEqual(t, "fixture-session", expected)
+	_, _, _, err = s.callPrismBrowser(context.Background(), account, []byte(body))
+	require.NoError(t, err)
+	require.Empty(t, <-requests, "admin tests always create a fresh project")
+}
+
+func TestPrismBrowserInvalidSessionDoesNotDispatch(t *testing.T) {
+	s, account := prismTestService("http://127.0.0.1:1")
+	for _, value := range []string{"", "with space", "with\tcontrol", "中文", strings.Repeat("x", 129)} {
+		t.Run(value, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Request.Header.Set("X-Prism-Session-ID", value)
+			c.Set("api_key", &APIKey{ID: 7})
+			_, err := s.forwardPrismBrowser(context.Background(), c, account, []byte(`{"model":"gpt-5.6-sol","input":"fixture"}`), time.Now())
+			require.Error(t, err)
+			require.Equal(t, http.StatusBadRequest, w.Code, "invalid identity must be rejected before contacting the adapter")
+		})
+	}
+}
+
 func prismTestService(endpoint string) (*OpenAIGatewayService, *Account) {
 	cfg := &config.Config{}
 	cfg.Gateway.PrismBrowser = config.GatewayPrismBrowserConfig{Enabled: true, BaseURL: endpoint + "/v1", APIKey: "fixture-bridge-key"}

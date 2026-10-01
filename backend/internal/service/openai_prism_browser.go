@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -105,7 +107,12 @@ func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.C
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "model is required"}})
 		return nil, errors.New("prism adapter model is required")
 	}
-	responseBody, upstreamHeaders, status, err := s.callPrismBrowser(ctx, account, body)
+	sessionID, err := prismBrowserSessionID(c, account.ID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+		return nil, err
+	}
+	responseBody, upstreamHeaders, status, err := s.callPrismBrowserWithSession(ctx, account, body, sessionID)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "prism_unavailable", "message": "Prism adapter unavailable; request was not replayed"}})
 		return nil, err
@@ -143,6 +150,12 @@ func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.C
 }
 
 func (s *OpenAIGatewayService) callPrismBrowser(ctx context.Context, account *Account, body []byte) ([]byte, http.Header, int, error) {
+	// Admin account tests always use a fresh project, even when a client sends
+	// a session header. A previous answer must not contaminate a capability test.
+	return s.callPrismBrowserWithSession(ctx, account, body, "")
+}
+
+func (s *OpenAIGatewayService) callPrismBrowserWithSession(ctx context.Context, account *Account, body []byte, sessionID string) ([]byte, http.Header, int, error) {
 	if !accountUsesPrismBrowser(account, s.cfg) {
 		return nil, nil, 0, errors.New("prism adapter is disabled; native fallback is prohibited")
 	}
@@ -169,6 +182,9 @@ func (s *OpenAIGatewayService) callPrismBrowser(ctx context.Context, account *Ac
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("X-Prism-Account-ID", strconv.FormatInt(account.ID, 10))
 	req.Header.Set("X-Prism-OAuth-Token", token)
+	if sessionID != "" {
+		req.Header.Set("X-Prism-Session-ID", sessionID)
+	}
 	// The token must never pass through an account proxy, environment proxy,
 	// plugin transport, or an HTTP redirect.
 	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true}
@@ -191,4 +207,46 @@ func (s *OpenAIGatewayService) callPrismBrowser(ctx context.Context, account *Ac
 		return nil, nil, 0, errors.New("prism adapter redirected unexpectedly")
 	}
 	return responseBody, resp.Header, resp.StatusCode, nil
+}
+
+func prismBrowserSessionID(c *gin.Context, accountID int64) (string, error) {
+	if c == nil || c.Request == nil {
+		return "", nil
+	}
+	var raw string
+	for _, header := range []string{"X-Prism-Session-ID", "session-id", "session_id"} {
+		values := c.Request.Header.Values(header)
+		if len(values) > 1 || (len(values) == 1 && values[0] == "" && header == "X-Prism-Session-ID") {
+			return "", errors.New("Prism session identity must contain one non-empty value")
+		}
+		if len(values) == 0 || values[0] == "" {
+			continue
+		}
+		if raw != "" && raw != values[0] {
+			return "", errors.New("Prism session identity headers conflict")
+		}
+		raw = values[0]
+	}
+	keyID := getAPIKeyIDFromContext(c)
+	if keyID <= 0 || accountID <= 0 {
+		return "", nil
+	}
+	// Normal gateway requests do not need a client change: when no standard
+	// session header is present, bind them to a server-owned API-key/account
+	// scope. Admin account tests call the low-level method and stay stateless.
+	if raw == "" {
+		raw = "server-default"
+	}
+	if len(raw) > 128 {
+		return "", errors.New("Prism session identity must contain 1 to 128 printable ASCII characters")
+	}
+	for _, char := range raw {
+		if char < 33 || char > 126 {
+			return "", errors.New("Prism session identity must contain 1 to 128 printable ASCII characters")
+		}
+	}
+	// Never trust a client-selected cache key without binding it to the verified
+	// tenant and upstream account. Only this opaque digest crosses the adapter hop.
+	digest := sha256.Sum256([]byte(fmt.Sprintf("prism-session-v1:%d:%d:%s", keyID, accountID, raw)))
+	return hex.EncodeToString(digest[:]), nil
 }

@@ -6,14 +6,15 @@
 
 ## 协议边界
 
-- 客户端无需传 `project_id`。适配器每次新建空白 Prism 项目，因为新 chat tab 不会清空已有项目文件。请求之间不复用项目内容；项目创建和服务端 sandbox 由 Prism 官方页面完成。
+- 客户端无需传 `project_id` 或新增头。网关优先读取已有的 `session-id/session_id`；没有时由服务端按已认证 API Key 和账号生成绑定摘要。适配器据此在内存中复用一个私有浏览器上下文和项目；命中缓存后先打开新的 chat tab，调用方提供的完整输入仍只提交一次。管理员测试走无会话的低层调用，每次新建空白项目。项目创建和服务端 sandbox 由 Prism 官方页面完成。
+- 会话摘要只在网关进程内存中存在，不写入 `projects.json`、回执或日志。每个上下文默认空闲 5 分钟或存活 15 分钟后销毁，缓存最多 1 个（可通过环境变量提高到 2 个）；账号凭据摘要变化、会话淘汰、请求失败和服务重启都会销毁上下文。Cookie、OAuth token 和 sandbox token 不跨进程保存。
 - 网页的 start 请求在发送前校验模型和 reasoning effort，只允许一次。浏览器尝试重复 start 会被拦截。status 响应会将最新 request ID 和 `turn_state` 更新到权限为 `0600` 的待决文件。
 - 结果不明确时保留待决文件，后续请求返回 409。没有自动删除待决文件或重放模型请求的逻辑。自动续接轮询、取消和结果恢复尚未实现；运营人员必须先确认原请求结局。
 - start 从未离开浏览器（页面没有发出，或被门控拦下）时结局是确定的：适配器清除待决文件并返回 `start_not_sent`，账号不会因此被锁。
 - 终态回执只保留 request ID、模型、请求次数、时间和答案摘要，不记录 prompt、答案正文、Cookie 或 OAuth token。待决文件含敏感 `turn_state`，不能公开或提交。
 - 成功结果 `usage: null`，不会估算官方 token 数。SSE 只包含 created/completed 事件，不产生伪造的 token delta。主网关发现 usage 不可用时拒绝将它记录为零 token 或据此扣费，所以这是未计费的试验通道。
 - 仅允许 `http://127.0.0.1:<port>/v1` 或 `http://[::1]:<port>/v1` 作为适配器地址；不使用环境代理、账号代理、HTTP 重定向或通用插件链传递 OAuth token。适配器默认只监听 IPv4 回环 `127.0.0.1:8319`。
-- 单个浏览器回合串行执行，忙时返回 429，不排无限队列。每个账号有独立待决锁；全局服务也只允许一个浏览器回合，避免生产资源争用。
+- 单个浏览器回合串行执行，忙时返回 429，不排无限队列。每个账号有独立待决锁；全局服务也只允许一个浏览器回合，避免生产资源争用。会话头必须是单个可打印 ASCII 值；网关会把它绑定到已认证 API Key 和账号后再传给适配器，不能跨租户碰撞。
 - 调度器不会把 WebSocket 会话分给开启 Prism 的账号（与 Excel BPS 模型相同），HTTP 请求照常进入适配器。适配器的鉴权或路径错误（401/403/404/405）对客户端统一返回 502，不会被误当成客户端 API Key 失效。
 
 ## 运行条件
@@ -34,6 +35,9 @@ GATEWAY_PRISM_BROWSER_BASE_URL=http://127.0.0.1:8319/v1
 PRISM_ADAPTER_CHROME=<absolute-path-to-chromium>
 CHROME_DEVEL_SANDBOX=<absolute-path-to-chrome-sandbox>
 PRISM_ADAPTER_STATE_DIR=/var/lib/sub2api-prism
+# 可选：内存缓存上限 1-2 个，空闲回收 300 秒；不设置即用默认值
+PRISM_ADAPTER_MAX_SESSIONS=1
+PRISM_ADAPTER_SESSION_TTL_SECONDS=300
 ```
 
 安装 `sub2api-prism-adapter.service`，将 `sub2api-prism.conf` 放入主服务的 drop-in 目录，然后 reload/restart。主服务重启需要部署授权和二进制回滚备份。运行目录、状态目录权限与现有服务用户应对应；不要把 env 文件提交到 Git。
@@ -45,7 +49,8 @@ PRISM_ADAPTER_STATE_DIR=/var/lib/sub2api-prism
 1. 在账号编辑中打开 Prism 开关并保存。API Key 账号和 shadow 账号不显示开关。
 2. 对该 OAuth 账号通过管理员测试入口请求 `gpt-5.6-sol`。必须观察 `test_start → content → test_complete(success=true)`，不能只看 HTTP 200。
 3. 检查回执的 `start_count=1`、实际模型和终态；使用数学题时核对最终答案。项目必须是空白项目，不能用已有答案的项目评估推理能力。
-4. Astra 等其他模型返回 422；适配器不可用时不能退回原生 Codex 上游。工具请求也应明确拒绝。
+4. 普通网关请求无需修改客户端即可验证缓存；连续请求会使用已有会话头或服务端默认作用域，确认第二次回执的 `session_cache_hit=true`。管理员测试始终使用新项目。
+5. Astra 等其他模型返回 422；适配器不可用时不能退回原生 Codex 上游。工具请求也应明确拒绝。
 
 本地离线检查：
 
