@@ -117,7 +117,11 @@ jobs:
           if any(r.get('status') != 'completed' for r in release_runs):
               print('Release build already active; no duplicate dispatch')
           else:
-              call('gh', 'workflow', 'run', 'release.yml', '--repo', repo, '--ref', tag, '-f', f'tag={tag}', '-f', 'simple_release=false', '-f', 'notify_release=false', '-f', 'dry_run=false')
+              # Only pass inputs declared by the default-branch workflow.
+              # The tagged Wanchuan workflow defines notify_release and dry_run
+              # with safe false defaults, but GitHub validates dispatch input names
+              # against the workflow registered on the default branch.
+              call('gh', 'workflow', 'run', 'release.yml', '--repo', repo, '--ref', tag, '-f', f'tag={tag}', '-f', 'simple_release=false')
               print(f'Dispatched full release for {tag} at {sha}')
           PY
       - uses: actions/upload-artifact@v7
