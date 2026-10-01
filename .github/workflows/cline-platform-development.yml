@@ -1,17 +1,11 @@
 name: Cline platform development
-
 on:
   push:
     branches: ['codex/cline-platform-modular-20261001']
-    paths:
-      - '.github/workflows/cline-platform-development.yml'
-      - 'tools/cline_platform_apply.py'
-      - 'tools/cline_platform_edits.json'
+    paths: ['.github/workflows/cline-platform-development.yml', 'tools/cline_platform_apply.py', 'tools/cline_platform_edits.json']
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   inspect:
     if: github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
@@ -21,25 +15,40 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Inspect exact platform integration sites
-        shell: bash
+      - name: Inspect exact implementation boundaries
         run: |
           python3 - <<'PY'
           import pathlib, re, hashlib, subprocess
-          print('HEAD', subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip())
-          patterns = re.compile(r'PlatformDeepseek|PlatformOpenCodeGo|[\x22\x27]deepseek[\x22\x27]|parseClineRateLimitResetAt|setClineRateLimited|SetModelRateLimit|IsModelRateLimited')
-          for name in subprocess.check_output(['git','ls-files'], text=True).splitlines():
+          files = subprocess.check_output(['git','ls-files'], text=True).splitlines()
+          print('MIGRATIONS', [p for p in files if p.startswith('backend/migrations/')][-20:])
+          for name in files:
               p = pathlib.Path(name)
-              if not name.startswith(('backend/internal/','backend/migrations/','frontend/src/')) or p.suffix not in ('.go','.ts','.vue','.sql'):
-                  continue
-              if '/ent/' in name or '_test.go' in name or '.test.' in name or '/i18n/' in name:
-                  continue
-              lines = p.read_text().splitlines()
-              matches = [i for i,line in enumerate(lines) if patterns.search(line)]
-              if not matches:
-                  continue
-              print('\nFILE', name, 'SHA256', hashlib.sha256(p.read_bytes()).hexdigest())
-              indexes = sorted({j for i in matches for j in range(max(0,i-2),min(len(lines),i+4))})
-              for i in indexes:
-                  print(f'{i+1}: {lines[i]}')
+              if p.name == 'AGENTS.md':
+                  print(name, p.read_text())
+          selected = {
+            'backend/internal/service/account.go': [(850,960),(1740,1900)],
+            'backend/internal/service/ratelimit_service.go': [(330,540)],
+            'backend/internal/repository/account_repo.go': [(2580,2740)],
+            'backend/internal/service/cn_provider_quota_service.go': [(1,280)],
+            'backend/internal/service/account_service.go': [(480,555)],
+            'frontend/src/components/account/CreateAccountModal.vue': [(200,255),(475,640),(4220,4320)],
+            'frontend/src/components/account/EditAccountModal.vue': [(3530,3720)],
+            'frontend/src/components/account/credentialsBuilder.ts': [(275,364)],
+            'backend/internal/service/openai_gateway_forward.go': [(1525,1645)]
+          }
+          for name, ranges in selected.items():
+              p=pathlib.Path(name); lines=p.read_text().splitlines()
+              print('\nFILE',name,'SHA256',hashlib.sha256(p.read_bytes()).hexdigest())
+              for start,end in ranges:
+                  for i in range(start-1,min(end,len(lines))): print(f'{i+1}: {lines[i]}')
+          patterns=re.compile(r'oneof=.*deepseek|IsMultiProtocolAPIKeyProvider|func .*GetBaseURL|func .*IsModel|func .*modelRate|func .*RateLimit.*Key|func .*IsMultiProtocolAPIKey|IsOpenAICompatible\(|func .*FetchModels|func .*ListModels|isOpenCodePlatform|openCodeAccountMode|build.*Credentials|credentials\.account_mode|credentials\["account_mode"\]|api\.deepseek\.com')
+          for name in files:
+              p=pathlib.Path(name)
+              if not name.startswith(('backend/internal/','frontend/src/components/account/')) or p.suffix not in ('.go','.ts','.vue'): continue
+              if '_test.go' in name or '/__tests__/' in name: continue
+              lines=p.read_text().splitlines()
+              matches=[i for i,line in enumerate(lines) if patterns.search(line)]
+              if not matches: continue
+              print('\nMATCHES',name,'SHA256',hashlib.sha256(p.read_bytes()).hexdigest())
+              for i in sorted({j for i in matches for j in range(max(0,i-3),min(len(lines),i+9))}): print(f'{i+1}: {lines[i]}')
           PY
