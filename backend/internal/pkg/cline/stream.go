@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-var ErrStreamFailure = errors.New("Cline upstream reported an explicit generation failure")
+var ErrStreamFailure = errors.New("cline upstream reported an explicit generation failure")
 
 // HasGenerationError inspects structural error fields only, not generated text.
 func HasGenerationError(payload []byte) bool {

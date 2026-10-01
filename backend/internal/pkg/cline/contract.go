@@ -26,7 +26,7 @@ const (
 	MaxBodyBytes     = 256 << 10
 )
 
-var ErrFreeAPIUnsupported = errors.New("Cline Free is IDE/CLI-only; unverified public API forwarding is disabled")
+var ErrFreeAPIUnsupported = errors.New("cline Free is IDE/CLI-only; unverified public API forwarding is disabled")
 
 func NormalizeMode(value string) string {
 	switch value {

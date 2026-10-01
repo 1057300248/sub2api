@@ -1,65 +1,99 @@
 name: Cline platform development
+
 on:
   push:
     branches: ['codex/cline-platform-modular-20261001']
     paths:
       - '.github/workflows/cline-platform-development.yml'
-      - '.wanchuan/patches/manifest.json'
-      - 'backend/**/cline*'
-      - 'backend/internal/pkg/cline/**'
-      - 'tools/cline_platform_apply.py'
-      - 'tools/verify_cline_platform.py'
+      - '.wanchuan/**'
+      - 'backend/**'
+      - 'tools/**'
   workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
-  group: cline-platform-development
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   integration:
     if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: write
+    timeout-minutes: 30
+    env:
+      EXPECTED_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
+          check-latest: false
           cache-dependency-path: backend/go.sum
-      - name: Apply baseline-guarded source integration
-        run: python3 tools/cline_platform_apply.py
-      - name: Format Cline additions
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Check exact source and formatting without mutation
+        shell: bash
         run: |
-          gofmt -w backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go backend/internal/repository/cline*.go
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          unformatted="$(gofmt -l backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go backend/internal/repository/cline*.go backend/internal/server/api_contract_test.go)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Files require gofmt:\n%s\n' "$unformatted"
+            exit 1
+          fi
           git diff --check
-      - name: Verify module integrity and existing patchpack
+      - name: Verify module integrity and CI invariants
         run: |
+          python3 -m pip install -r .github/release-tools/requirements-release.txt
           python3 tools/verify_cline_platform.py
-          python3 -m unittest discover -s tools -p 'test_wanchuan_patchpack.py'
+          python3 tools/wanchuan_patchpack.py verify
+          python3 -m unittest discover -s tools -p 'test_wanchuan*.py'
       - name: Policy and SSE race tests
         working-directory: backend
-        run: go test -race -count=3 ./internal/pkg/cline
-      - name: Compile host and exercise Cline service tests
-        working-directory: backend
-        run: go test -count=1 -run '^TestCline' ./internal/service ./internal/repository ./internal/handler/admin
-      - name: Commit verified generated integration to this development branch only
-        env:
-          EXPECTED_HEAD: ${{ github.sha }}
+        shell: bash
         run: |
-          set -eu
-          target='refs/heads/codex/cline-platform-modular-20261001'
-          test "$GITHUB_REF" = "$target"
-          test "$(git ls-remote origin "$target" | cut -f1)" = "$EXPECTED_HEAD"
-          test -z "$(git status --porcelain backend/go.mod backend/go.sum)"
-          if ! git diff --quiet; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add backend/internal tools/cline_platform_apply.py
-            git commit -m 'chore(cline): format verified module integration'
-            git push origin "HEAD:$target"
-          fi
-          git rev-parse HEAD
+          set -euo pipefail
+          go test -json -race -tags=unit -count=3 ./internal/pkg/cline | tee "$RUNNER_TEMP/cline-policy-tests.jsonl"
+          python3 - <<'PY'
+          import collections, json, os
+          from pathlib import Path
+          events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-policy-tests.jsonl').read_text().splitlines() if line.strip()]
+          passed = collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')
+          required = {'TestClineSSEFailurePreventsSuccessfulTerminal', 'TestClineSSEClosePropagatesSourceError', 'TestClineSSEFailureIsStickyAcrossSmallReads'}
+          missing = sorted(name for name in required if passed[name] != 3)
+          if missing or any(e.get('Action') == 'skip' for e in events):
+              raise SystemExit(f'policy tests missing, skipped or not repeated three times: {missing}')
+          print('Required Cline SSE tests executed three times with race detection.')
+          PY
+      - name: Cline service and legacy cooldown regression tests
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -json -tags=unit -count=1 -run '^Test(Cline|ParseCline|SetCline|Handle429Cline)' ./internal/service | tee "$RUNNER_TEMP/cline-service-tests.jsonl"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-service-tests.jsonl').read_text().splitlines() if line.strip()]
+          passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
+          required = {'TestClineAccountDoesNotBecomeDeepseek', 'TestClineCredentialsAndScopedRotation'}
+          if not required.issubset(passed) or any(e.get('Action') == 'skip' for e in events):
+              raise SystemExit(f'Cline service tests missing or skipped: {sorted(required-passed)}')
+          print('Cline service tests executed; compile-only packages are not reported as tested.')
+          PY
+      - name: Settings API contract regression and server build
+        working-directory: backend
+        run: |
+          go test -v -tags=unit -count=1 -run '^TestAPIContracts$' ./internal/server
+          go build -o "$RUNNER_TEMP/sub2api-cline" ./cmd/server
+      - name: Verify checked source remained unchanged
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code

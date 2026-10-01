@@ -5,7 +5,7 @@ Base: `wanchuan/stable@71906b39eb2fe14bca512564aa9414d504cbdb20`.
 
 **Status: foundational backend integration, not a complete usable platform release. Do not merge, promote, deploy, migrate live accounts, or advertise end-to-end Cline support yet.**
 
-## Committed and exercised
+## Committed foundation
 
 - Independent `cline` domain/service identity; Cline is not a CN provider or DeepSeek account.
 - Explicit `pass`, `free`, `payg`, `unknown` modes and API-key/account-token credential kinds.
@@ -19,19 +19,17 @@ Base: `wanchuan/stable@71906b39eb2fe14bca512564aa9414d504cbdb20`.
 - Additive database CHECK migration, with no account/group/history data conversion.
 - `cline-platform` source-overlay manifest entry and integrity verifier. Existing `cline-rate-limit-cas` module is retained.
 
-The Free public-API guard is intentionally closed. A catalog entry alone does not establish API entitlement. No user credential or paid inference request was used during this development work.
+The Free public-API guard remains closed. A catalog entry alone does not establish API entitlement. No user credential or paid inference request was used during this development work.
 
-## Verified so far
+## CI repair scope (2026-10-01)
 
-Run `36814869424` on GitHub Actions successfully executed:
+The full unit run on `a0a4d0be` failed because two static settings API response fixtures did not include the newly registered `cline` platform quota. Both fixtures now explicitly include `daily`, `weekly`, and `monthly` null values, retaining strict whole-response JSON equality and all existing platform values.
 
-```sh
-cd backend
-go test -race -count=3 ./internal/pkg/cline
-go test -count=1 -run '^TestCline' ./internal/service ./internal/repository ./internal/handler/admin
-```
+The reported lint findings are addressed by the already committed repository formatting plus checked response-body cleanup and lowercase error prefixes. New tests cover source Close error propagation and sticky terminal SSE errors with a single callback.
 
-The service tests ran; the repository/admin packages were compiled with that test filter. This is **not** a PostgreSQL integration test or a full backend regression run. The generated host integration was committed as `b5ce2e5d3c97faa04b61ef677e977af86144546c` only after those checks passed.
+Cline validation is now read-only: it checks out the event SHA, rejects formatting drift instead of fixing it, never executes the historical source generator, never commits or pushes, and asserts the source is unchanged at completion. Five Python regression tests enforce these invariants. Focused Go jobs use the unit build tag and inspect JSON events to reject missing/skipped required tests; compile-only packages are not presented as executed tests. The temporary exact-blob repair preparation workflow is removed from the final tree.
+
+Read the Actions results for the exact current SHA before claiming that the full CI has passed. CI success alone does not complete the rollout requirements below. Earlier runs `36814869424` and `36815636742` covered focused package/service tests, not the pending Cline PostgreSQL concurrency/migration or end-to-end platform tests.
 
 ## Required before rollout
 
@@ -43,10 +41,10 @@ The service tests ran; the repository/admin packages were compiled with that tes
 6. **Migration tool:** exact-host legacy DeepSeek/Cline preview, affected groups/API-key permissions, operator-confirmed mode and credential kind, in-flight request draining, reversible transaction and cache invalidation. No migration-preview endpoint or migration executor is implemented or executed.
 7. **Quota identity and recovery:** correlate multiple keys belonging to one upstream account; validate authoritative new-window transitions, unknown retry-vs-reset behavior, Redis/cache outages and process restart. Current scopes are per local account/credential fingerprint, not proven upstream-subject-wide limits.
 8. **Billing and capabilities:** preserve existing pricing, distinguish subscription market-cost metadata from actual incremental cost, verify reasoning/tool usage and partial-failure settlement, and do not infer unsupported native capabilities.
-9. **Tests:** actual PostgreSQL CAS concurrency and migration tests, full backend regressions, frontend typecheck/build/unit tests, mocked HTTP forwarding for all three protocols and manually authorized account validation. The new SQL migration has not been exercised against a production or disposable database yet.
+9. **Tests:** actual Cline PostgreSQL CAS concurrency and migration tests, mocked HTTP forwarding for all three protocols, new UI tests, and manually authorized account validation. Passing the existing general CI does not substitute for these feature-specific tests.
 
 ## Development tooling
 
-`tools/cline_platform_apply.py` is a one-time, reviewed-baseline integration helper used because local execution became unavailable. It refuses unexpected upstream edits and is not an automatic production upgrader. Its branch-only GitHub workflow can format and commit verified generated changes **only** to the named development branch; it cannot merge or release. Remove this temporary generation step after the host integration is finalized, retaining normal read-only CI and the module integrity tests.
+`tools/cline_platform_apply.py` is retained only as a historical reviewed-baseline integration helper. It is not run by CI and is not a production upgrader. Source changes must be committed before normal read-only validation; CI must not rewrite the checked source or move refs.
 
 Preserve `wanchuan/stable`, the current release channel and existing DeepSeek accounts. Resume by reading this file and the current branch, not by assuming that an earlier local draft or conversational progress report was committed.

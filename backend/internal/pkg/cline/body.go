@@ -43,7 +43,7 @@ func (b *guardedSSEBody) Read(p []byte) (int, error) {
 	for {
 		part, err := b.reader.ReadSlice('\n')
 		if len(line)+len(part) > b.maxLine {
-			b.terminal = fmt.Errorf("Cline SSE line exceeds configured limit")
+			b.terminal = fmt.Errorf("cline SSE line exceeds configured limit")
 			return 0, b.terminal
 		}
 		line = append(line, part...)
