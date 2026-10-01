@@ -997,6 +997,7 @@ export default {
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
         opencode_go: 'OpenCode',
+        cline: 'Cline',
         composite: 'Composite',
       },
       saving: '保存中...',

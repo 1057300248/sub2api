@@ -1164,6 +1164,9 @@ func (a *Account) IsCustomErrorCodesEnabled() bool {
 // IsPoolMode 检查 API Key 账号是否启用池模式。
 // 池模式下，上游错误不标记本地账号状态，而是在同一账号上重试。
 func (a *Account) IsPoolMode() bool {
+	if a.IsCline() {
+		return false
+	}
 	if !a.IsAPIKeyOrBedrock() || a.Credentials == nil {
 		return false
 	}
@@ -1908,6 +1911,9 @@ func (a *Account) GetOpenAISessionID() string {
 func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapability) bool {
 	if a == nil {
 		return false
+	}
+	if a.IsCline() {
+		return a.SupportsClineEndpointCapability(capability)
 	}
 	if capability == OpenAIEndpointCapabilitySeedance {
 		configured, _ := a.openAIEndpointCapabilitySet()

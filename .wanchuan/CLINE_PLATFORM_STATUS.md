@@ -3,7 +3,7 @@
 Updated: 2026-10-01. Development branch: `codex/cline-platform-modular-20261001`.
 Base: `wanchuan/stable@71906b39eb2fe14bca512564aa9414d504cbdb20`.
 
-**Status: foundational backend integration, not a complete usable platform release. Do not merge, promote, deploy, migrate live accounts, or advertise end-to-end Cline support yet.**
+**Status: registered development platform with an independent management form and guarded protocol bridges; not a complete platform release. Do not merge, promote, deploy, migrate live accounts, or advertise end-to-end Cline support yet.**
 
 ## Committed foundation
 
@@ -42,22 +42,34 @@ Continued from `cd321ebd2c94da2731a578f6d73379bfb0bfdde5`, without changing the 
 - Unknown generation errors remain failures without invented quota state. No retries, paid fallbacks, account migration or new Free entitlement were introduced.
 - Added policy and service-level regression tests, and expanded required-test execution checks plus protected upgrade anchors. Service tests use an observing repository fake; they are not PostgreSQL concurrency or full HTTP-route integration tests.
 
-Local selected-file smoke tests used Go 1.23.2 and reviewed support fixtures, not the complete repository or its required toolchain. The new commit must pass its own exact-SHA Actions validation; predecessor checks are not evidence for these changes. No live-account or paid inference test was performed.
+Earlier selected-file smoke results are not used as rollout evidence. The later exact-SHA predecessor `ddcf1eb56952a4cdbb8e351311ae7b3aaa5be2ce` passed general CI `36830707439` (unit, integration, lint, frontend, release helpers and shell). New source changes require new exact-SHA validation. No live-account or paid inference test was performed.
+
+## Registration, management UI and write-ownership continuation (2026-10-01)
+
+- Register Cline independently in concrete/composite text routing, group binding, scheduler normalization and canonical buckets, available-model lists, token estimation and the quota schema validator. Do not add Cline to CN-provider or multi-native-protocol predicates.
+- Preserve Cline mode/auth-kind/base URL in scheduler projections so admission and scoped cooldown fingerprints agree with hydrated accounts. Keep native Responses, compaction, embeddings, image generation, realtime and header overrides disabled. Requests to the three supported text interfaces bridge through Chat Completions, including when stale native-probe flags exist.
+- Move Cline creation/edit validation to shared repository entry points. Preserve `cline_state` and `model_rate_limits` from the latest locked database row during full edits and protect those keys in direct/bulk Extra deltas. Non-Cline and unrelated Extra SQL shapes remain unchanged.
+- Route explicitly requested administrative connection tests through the same guarded Cline pipeline with an explicit permitted model and a 64-token output cap. Opening or saving the configuration form never probes inference.
+- Add an independent Cline creation/edit dialog, platform/group filters, icon and mode labels. Expose Pass/Free/PAYG/unknown and API-key/account-token selections. Preserve invalid whitelist rows for operator correction, never rewrite model IDs on mode changes, omit a blank edit key to retain the secret, and preserve unchanged group bindings. Free/unknown cannot be forwarded; the catalog does not grant entitlement.
+- Add 24 mocked transport success combinations (three text protocols, two permitted modes, two credential kinds, streaming/non-streaming) plus protocol failure, blocked-mode, dispatch, scheduler projection and repository ownership regressions. These exercise gateway forwarding with synthetic transports, not an authenticated live deployment or complete monetary settlement.
+- Add five real PostgreSQL feature tests (24 simultaneous scoped writers, credential rotation, managed state edits, safe creation, migration/schema compatibility). A separate exact-SHA read-only CI job runs all five three times and rejects skips/missing events. They are not claimed as executed until that job passes.
+- Extend upgrade-protected paths and required test execution checks; include both new UI suites in the existing frontend-critical target without removing existing suites.
+
+Local validation used the full repository and its Go 1.27.0 toolchain. Cline service/repository/handler/admin targeted tests passed. The first broad unit run exposed SQL-shape and composite expected-list regressions; those were fixed without disabling assertions and their targeted legacy regressions passed. The broad run also encountered DNS-dependent channel-monitor validation tests in the offline environment, so it is not reported as a full local pass. UI validation passed 17 form/component tests, three locale completeness tests, ESLint on the new component/helper, and the full frontend typecheck. Disposable PostgreSQL and complete CI validation remain separate evidence. No live account or paid inference was used.
+
+Temporary source/dependency transfer and reviewed-blob preparation workflows are development transport only, not validation. They are removed from the final feature tree. All candidate source is committed before the normal read-only exact-SHA CI runs.
 
 ## Required before rollout
 
-1. **Platform registration:** account/group validation, composite routes, gateway predicates, scheduler platform buckets, snapshots/credential retention, import/export, quota and monitor registries. Do not simply add Cline to `IsCNProvider` or `IsMultiProtocolAPIKeyProvider`.
-2. **Management UI:** independent creation/editing controls, Pass/Free/PAYG labels, credential kind, full model IDs, filter/icon support, error states and explicit model whitelist selection. No Cline UI has been committed yet.
-3. **Metadata service:** bounded HTTP catalog retrieval, cached last-valid catalog, optional Pass usage endpoint, read-only state and explicit refresh APIs. Only parsers/state types/CAS storage currently exist; fetch endpoints and UI are not yet implemented. Quota queries must never convert 403/network/schema errors into an invented subscription state.
-4. **All request paths:** reject accidental native Responses dispatch, verify Chat/Responses/Messages bridge eligibility, and execute mocked route-level tests for all three protocols including HTTP-200 errors, structured stream limits, partial output and billing. The new shared response guard does not prove route registration or end-to-end settlement correctness.
-5. **Write-path audit:** bulk updates, direct Extra mutations, state ownership, passthrough/header overrides, operational account testing and generic balance probes need a complete Cline-specific audit. The existing `PreserveClineStateExtra` helper has tests but is not yet wired to every mutation path.
-6. **Migration tool:** exact-host legacy DeepSeek/Cline preview, affected groups/API-key permissions, operator-confirmed mode and credential kind, in-flight request draining, reversible transaction and cache invalidation. No migration-preview endpoint or migration executor is implemented or executed.
-7. **Quota identity and recovery:** correlate multiple keys belonging to one upstream account; validate authoritative new-window transitions, unknown retry-vs-reset behavior, Redis/cache outages and process restart. Current scopes are per local account/credential fingerprint, not proven upstream-subject-wide limits. Persistence failure handling still needs an operational outage policy.
-8. **Billing and capabilities:** preserve existing pricing, distinguish subscription market-cost metadata from actual incremental cost, verify reasoning/tool usage and partial-failure settlement, and do not infer unsupported native capabilities.
-9. **Tests:** actual Cline PostgreSQL CAS concurrency and migration tests, mocked HTTP forwarding for all three protocols, new UI tests, and manually authorized account validation. Passing the existing general CI does not substitute for these feature-specific tests.
+1. **Metadata and quota UI:** bounded catalog retrieval, cached last-valid catalog, optional Pass usage endpoint, read-only state and explicit refresh APIs. Parsers/state types/CAS storage exist, but HTTP metadata fetching and quota controls are not implemented. Network/schema/403 responses must not invent subscription state or zero usage.
+2. **Remaining administrative paths:** complete import/export, monitoring and bulk/direct credential-write audits. Individual shared repository create/update and managed Extra ownership are covered; that is not a claim that all generic credential mutation paths are Cline-aware.
+3. **Migration tool:** exact-host legacy DeepSeek/Cline preview, affected groups/API-key permissions, operator-confirmed mode/auth kind, request draining, reversible transaction and cache invalidation. No migration preview/executor is implemented or executed.
+4. **Quota identity and recovery:** correlate multiple keys of one upstream subject; distinguish authoritative window rollover from unknown retry timing, Redis/cache outages and restart recovery. Current identity is per local account/credential fingerprint. Persistence failure and outbox atomicity require further review.
+5. **Billing and capabilities:** preserve existing prices, distinguish subscription market-cost metadata from incremental cost, and validate reasoning/tool usage and partial-failure monetary settlement. Mock protocol usage assertions are not complete billing verification.
+6. **Acceptance:** exact-current-SHA general CI, PostgreSQL feature CI and frontend-critical checks, followed by manually authorized real-account testing and a reversible rollout plan. Do not merge, promote or deploy just because an earlier commit was green.
 
 ## Development tooling
 
-`tools/cline_platform_apply.py` is retained only as a historical reviewed-baseline integration helper. It is not run by CI and is not a production upgrader. Source changes must be committed before normal read-only validation; CI must not rewrite the checked source or move refs.
+`tools/cline_platform_apply.py` remains a historical reviewed-baseline helper, not a production upgrader or a CI source generator. Changes must be committed before read-only validation; validation must never rewrite checked source or move refs.
 
-Preserve `wanchuan/stable`, the current release channel and existing DeepSeek accounts. Resume by reading this file and the current branch, not by assuming that an earlier local draft or conversational progress report was committed.
+Preserve `wanchuan/stable`, the current release channel and existing DeepSeek accounts. Resume by reading this file and the actual branch rather than assuming an earlier local draft was pushed.

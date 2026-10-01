@@ -130,9 +130,6 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
-	if err := service.NormalizeClineCredentials(account.Platform, account.Type, account.Credentials); err != nil {
-		return err
-	}
 	if err := createAccountRecord(ctx, r.client, account); err != nil {
 		return err
 	}
@@ -146,6 +143,10 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
+	if err := service.NormalizeClineCredentials(account.Platform, account.Type, account.Credentials); err != nil {
+		return err
+	}
+	account.Extra = service.PreserveClineStateExtra(account.Platform, nil, account.Extra)
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -451,8 +452,8 @@ func (r *accountRepository) ListCRSAccountIDs(ctx context.Context) (map[string]i
 }
 
 func (r *accountRepository) Update(ctx context.Context, account *service.Account) error {
-	if err := service.NormalizeClineCredentials(account.Platform, account.Type, account.Credentials); err != nil {
-		return err
+	if account == nil {
+		return service.ErrAccountNilInput
 	}
 	return r.updateAccount(ctx, account, nil, nil, account.RateMultiplier)
 }
@@ -478,7 +479,10 @@ func (r *accountRepository) updateAccount(
 	explicitRateMultiplier *float64,
 ) error {
 	if account == nil {
-		return nil
+		return service.ErrAccountNilInput
+	}
+	if err := service.NormalizeClineCredentials(account.Platform, account.Type, account.Credentials); err != nil {
+		return err
 	}
 
 	baseCtx := ctx
@@ -754,6 +758,9 @@ func lockAndMergeAccountProbeExtra(
 	}
 	extra := service.MergeOpenAICodexTicketExtra(copyJSONMap(normalizeJSONMap(account.Extra)), currentExtra)
 	extra = service.MergeExcelBPS403Marker(extra, currentExtra)
+	// Preserve server-owned Cline observations and scoped cooldowns under the
+	// same row lock, not from the stale account-edit snapshot.
+	extra = service.PreserveClineStateExtra(account.Platform, currentExtra, extra)
 	// Omitted cost means an unrelated edit. Keep the value under the row lock,
 	// including a probe update committed after the edit form was loaded.
 	for _, key := range []string{service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey} {
@@ -3019,7 +3026,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			client = tx.Client()
 		}
 	}
-	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
+	extraExpression := "COALESCE(extra, '{}'::jsonb) || " + clineExtraUpdateSQL("$1", updates)
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}
@@ -3409,7 +3416,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			if err != nil {
 				return 0, err
 			}
-			extraExpression += " || $" + itoa(idx) + "::jsonb"
+			extraExpression += " || " + clineExtraUpdateSQL("$"+itoa(idx), updates.Extra)
 			args = append(args, payload)
 			idx++
 			if enabled, exists := updates.Extra["openai_excel_bps"].(bool); exists && !enabled {

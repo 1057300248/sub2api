@@ -139,8 +139,14 @@ func (a *Account) ValidateClineOutboundBody(body []byte) error {
 	if !a.IsCline() {
 		return nil
 	}
-	if a.Type != AccountTypeAPIKey {
-		return fmt.Errorf("cline requires an API-key account")
+	// Revalidate the complete contract at the last send boundary as well. Legacy
+	// imports or trusted background writers must not bypass mode/protocol guards.
+	credentials := make(map[string]any, len(a.Credentials))
+	for key, value := range a.Credentials {
+		credentials[key] = value
+	}
+	if err := NormalizeClineCredentials(a.Platform, a.Type, credentials); err != nil {
+		return err
 	}
 	if a.GetClineBaseURL() == "" {
 		return fmt.Errorf("invalid Cline base URL")
@@ -180,12 +186,14 @@ func PreserveClineStateExtra(platform string, existing, incoming map[string]any)
 	}
 	out := make(map[string]any, len(incoming)+1)
 	for k, v := range incoming {
-		if k != ClineStateExtraKey {
+		if k != ClineStateExtraKey && k != "model_rate_limits" {
 			out[k] = v
 		}
 	}
-	if state, ok := existing[ClineStateExtraKey]; ok {
-		out[ClineStateExtraKey] = state
+	for _, key := range []string{ClineStateExtraKey, "model_rate_limits"} {
+		if state, ok := existing[key]; ok {
+			out[key] = state
+		}
 	}
 	return out
 }

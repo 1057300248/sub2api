@@ -23,12 +23,59 @@
         "backend/migrations/263_cline_platform.sql",
         "frontend/src/components/account/Cline*.vue",
         "frontend/src/components/account/cline*.ts",
-        "tools/verify_cline_platform.py"
+        "tools/verify_cline_platform.py",
+        "backend/ent/schema/user_platform_quota.go",
+        "backend/internal/handler/admin/account_handler.go",
+        "backend/internal/handler/admin/group_handler.go",
+        "backend/internal/handler/endpoint.go",
+        "backend/internal/handler/gateway_handler.go",
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/repository/account_repo.go",
+        "backend/internal/repository/scheduler_cache.go",
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/service/account_test_service.go",
+        "backend/internal/service/admin_group.go",
+        "backend/internal/service/channel_service.go",
+        "backend/internal/service/cline_platform.go",
+        "backend/internal/service/composite_platform.go",
+        "backend/internal/service/gateway_service.go",
+        "backend/internal/service/openai_codex_models_service.go",
+        "backend/internal/service/openai_gateway_count_tokens.go",
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/service/openai_gateway_scheduling.go",
+        "backend/internal/service/openai_messages_dispatch.go",
+        "backend/internal/service/scheduler_snapshot_service.go",
+        "backend/internal/handler/cline*.go",
+        "backend/internal/repository/cline*.go",
+        ".github/workflows/cline-platform-development.yml",
+        ".wanchuan/patches/manifest.json",
+        "Makefile",
+        "backend/internal/service/channel_service_test.go",
+        "backend/internal/service/composite_platform_test.go",
+        "frontend/src/components/common/PlatformIcon.vue",
+        "frontend/src/components/keys/UseKeyModal.vue",
+        "frontend/src/constants/platforms.ts",
+        "frontend/src/i18n/locales/en/admin/accounts.ts",
+        "frontend/src/i18n/locales/en/admin/overview.ts",
+        "frontend/src/i18n/locales/en/index.ts",
+        "frontend/src/i18n/locales/zh/admin/accounts.ts",
+        "frontend/src/i18n/locales/zh/admin/overview.ts",
+        "frontend/src/i18n/locales/zh/index.ts",
+        "frontend/src/types/index.ts",
+        "frontend/src/utils/keyGroupProviders.ts",
+        "frontend/src/utils/platformColors.ts",
+        "frontend/src/views/admin/AccountsView.vue",
+        "frontend/src/components/account/__tests__/*Cline*",
+        "frontend/src/components/account/__tests__/cline*",
+        "frontend/src/i18n/locales/*/clineAccount.ts"
       ],
       "tests": [
         "python3 tools/verify_cline_platform.py",
         "go test -race ./internal/pkg/cline -count=3",
-        "go test -tags=unit ./internal/service -run '^TestCline' -count=1"
+        "go test -tags=unit ./internal/service -run '^TestCline' -count=1",
+        "go test -tags=unit ./internal/repository ./internal/handler ./internal/handler/admin -run '^TestCline' -count=1",
+        "go test -tags=integration ./internal/repository -run '^TestClinePostgres' -count=3",
+        "make test-frontend-critical"
       ]
     },
     {
@@ -55,7 +102,9 @@
         "backend/internal/handler/dto/*account*.go",
         "backend/internal/repository/*account*.go"
       ],
-      "tests": ["python3 tools/verify_custom_patch_alignment.py"]
+      "tests": [
+        "python3 tools/verify_custom_patch_alignment.py"
+      ]
     },
     {
       "id": "model-compat-overlays",
@@ -66,7 +115,9 @@
         "backend/internal/pkg/antigravity/**",
         "backend/internal/pkg/apicompat/**"
       ],
-      "tests": ["python3 tools/verify_custom_patch_alignment.py"]
+      "tests": [
+        "python3 tools/verify_custom_patch_alignment.py"
+      ]
     },
     {
       "id": "operations-ui",
@@ -78,7 +129,9 @@
         "frontend/src/views/admin/**",
         "frontend/src/features/channel-monitor-v2/**"
       ],
-      "tests": ["make test-frontend"]
+      "tests": [
+        "make test-frontend"
+      ]
     },
     {
       "id": "fork-update-channel",

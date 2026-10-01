@@ -1,6 +1,8 @@
 .PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
 
 FRONTEND_CRITICAL_VITEST := \
+	src/components/account/__tests__/clineAccountForm.spec.ts \
+	src/components/account/__tests__/ClineAccountModal.spec.ts \
 	src/views/admin/ops/__tests__/TokenGuardV2View.spec.ts \
 	src/features/channel-monitor-v2/__tests__/MonitorCandySettings.spec.ts \
 	src/features/channel-monitor-v2/__tests__/MonitorStatusCards.spec.ts \

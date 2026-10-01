@@ -7,6 +7,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    'frontend/src/components/account/ClineAccountModal.vue': ['buildClineAccountPayload', 'accountsAPI.create', 'accountsAPI.update', 'draft.apiKey ='],
+    'frontend/src/components/account/clineAccountForm.ts': ['cline_auth_type', 'cline_free_api_enabled: false', 'model_mapping: Object.fromEntries(entries)', 'before ='],
+    'frontend/src/views/admin/AccountsView.vue': ['<ClineAccountModal', 'showCline', 'clineModeLabel'],
+    'frontend/src/constants/platforms.ts': ["value: 'cline'"],
+    'Makefile': ['ClineAccountModal.spec.ts', 'clineAccountForm.spec.ts'],
     'backend/internal/domain/cline.go': ['PlatformCline = "cline"'],
     'backend/internal/pkg/cline/contract.go': ['func ValidateUpstreamModel(', 'ErrFreeAPIUnsupported', 'func ParseUsage(', 'func ParseCatalog('],
     'backend/internal/pkg/cline/ratelimit.go': ['func Classify(', 'func RateLimitKeys('],
@@ -21,13 +26,25 @@ REQUIRED = {
     'backend/internal/service/cline_response_guard.go': ['prepareClineResponseGuard(', 'decoder.UseNumber()', 'context.WithTimeout(context.WithoutCancel(ctx)', 'cline.GuardSSEBody(', 'cline.GuardJSONBody(', 'handleClineScopedUpstreamError('],
     'backend/internal/service/cline_platform_ratelimit.go': ['handleClineScopedUpstreamError(', 'SetClineRateLimitIfLater('],
     'backend/internal/repository/cline_account_state.go': ['SetClineRateLimitIfLater(', 'SaveClineStateIfUnchanged(', 'credentials=$5::jsonb', 'reset_authoritative', 'enqueueSchedulerOutbox('],
-    'backend/internal/repository/account_repo.go': ['service.NormalizeClineCredentials('],
+    'backend/internal/repository/account_repo.go': ['service.NormalizeClineCredentials(', 'service.PreserveClineStateExtra(', 'clineExtraUpdateSQL('],
     'backend/internal/pkg/cline/body_test.go': ['TestClineSSEFailurePreventsSuccessfulTerminal'],
     'backend/internal/pkg/cline/body_event_test.go': ['TestClineSSECompleteEventFailures', 'TestClineSSEEmptyDataHeartbeatAndMissingDone'],
     'backend/internal/pkg/cline/json_body_test.go': ['TestClineJSON200FailureAndBounds'],
     'backend/internal/pkg/cline/error_status_test.go': ['TestClineGenerationErrorStatusOnlyUsesErrorEnvelopes'],
     'backend/internal/service/cline_platform_test.go': ['TestClineAccountDoesNotBecomeDeepseek', 'TestClineCredentialsAndScopedRotation'],
     'backend/internal/service/cline_response_guard_test.go': ['TestClineResponseGuardFreeScopeUsesActualModel', 'TestClineResponseGuardFreezesCredentialsAndCancellation', 'TestClineResponseGuardNeverInventsQuotaFromOutput'],
+    'backend/internal/service/cline_routing.go': ['SupportsClineEndpointCapability(', 'ClineModelIDs('],
+    'backend/internal/service/cline_routing_test.go': ['TestClineRoutingRegistrationAndCapabilities', 'TestClineThreeProtocolHTTPForwarding', 'TestClineThreeProtocolFailuresNeverFinalizeSuccessfully', 'TestClineThreeProtocolRejectsUnentitledModelsBeforeNetwork', 'TestClineTokenCountNeverCallsNativeUpstream'],
+    'backend/internal/service/cline_account_probe.go': ['testClineAccountConnection(', 'sendCCUpstreamRequest(', 'ValidateClineOutboundBody('],
+    'backend/internal/service/account_test_service.go': ['s.testClineAccountConnection('],
+    'backend/internal/service/openai_gateway_scheduling.go': ['PlatformCline'],
+    'backend/internal/server/routes/gateway.go': ['service.PlatformCline'],
+    'backend/internal/repository/cline_scheduler_credentials.go': ['filterSchedulerAccountCredentials(', 'cline_auth_type'],
+    'backend/internal/repository/scheduler_cache.go': ['filterSchedulerAccountCredentials(&account)'],
+    'backend/internal/repository/cline_managed_extra.go': ['clineManagedExtraDeltaSQL(', "'cline_state' - 'model_rate_limits'"],
+    'backend/internal/repository/cline_postgres_integration_test.go': ['TestClinePostgresConcurrentScopedCAS', 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits', 'TestClinePostgresCreationCannotImportManagedState', 'TestClinePostgresMigrationAndQuotaSchema'],
+    'backend/internal/handler/cline_dispatch_test.go': ['TestClineStandaloneAndCompositeDispatch'],
+    'backend/internal/handler/admin/account_cline_registration_test.go': ['TestClineGroupAndCompositeRequestBindings'],
 }
 errors=[]
 for name, anchors in REQUIRED.items():

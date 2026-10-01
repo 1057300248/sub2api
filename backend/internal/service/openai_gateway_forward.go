@@ -1453,6 +1453,10 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 	if account == nil || account.Type != AccountTypeAPIKey {
 		return false
 	}
+	if account.IsCline() {
+		// Cline is CC-only even if stale/forged probe Extra claims native Responses.
+		return true
+	}
 	if account.IsOpenCodeGo() {
 		// Model protocol_rules are the authority. Probe Extra must not collapse
 		// Grok/GPT/Muse into Chat Completions.
