@@ -1,6 +1,7 @@
 package cline
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 )
@@ -8,21 +9,27 @@ import (
 var ErrStreamFailure = errors.New("cline upstream reported an explicit generation failure")
 
 // HasGenerationError inspects structural error fields only, not generated text.
+// Parse fields independently so a malformed sibling cannot hide an explicit
+// error envelope. Never inspect choices[].delta or generated tool arguments.
 func HasGenerationError(payload []byte) bool {
-	var p struct {
-		Error   json.RawMessage `json:"error"`
-		Choices []struct {
-			FinishReason string `json:"finish_reason"`
-		} `json:"choices"`
-	}
-	if json.Unmarshal(payload, &p) != nil {
+	var p map[string]json.RawMessage
+	if json.Unmarshal(payload, &p) != nil || p == nil {
 		return false
 	}
-	if len(p.Error) > 0 && string(p.Error) != "null" {
+	if raw, ok := p["error"]; ok && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return true
 	}
-	for _, choice := range p.Choices {
-		if choice.FinishReason == "error" {
+	var eventType string
+	if json.Unmarshal(p["type"], &eventType) == nil && (eventType == "error" || eventType == "response.failed") {
+		return true
+	}
+	var choices []map[string]json.RawMessage
+	if json.Unmarshal(p["choices"], &choices) != nil {
+		return false
+	}
+	for _, choice := range choices {
+		var finishReason string
+		if json.Unmarshal(choice["finish_reason"], &finishReason) == nil && finishReason == "error" {
 			return true
 		}
 	}

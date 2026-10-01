@@ -25,7 +25,15 @@ func (s *RateLimitService) handleClineScopedError(ctx context.Context, account *
 	if !account.IsCline() {
 		return false
 	}
-	upstreamModel := account.GetMappedModel(requestedModel)
+	return s.handleClineScopedUpstreamError(ctx, account, status, headers, body, account.GetMappedModel(requestedModel))
+}
+
+// Streaming callbacks already carry the exact outgoing model. Mapping it again
+// would charge the wrong Free scope when an upstream ID is also a public alias.
+func (s *RateLimitService) handleClineScopedUpstreamError(ctx context.Context, account *Account, status int, headers http.Header, body []byte, upstreamModel string) bool {
+	if !account.IsCline() {
+		return false
+	}
 	limit, handled := cline.Classify(status, headers, body, upstreamModel, time.Now())
 	if !handled {
 		return false

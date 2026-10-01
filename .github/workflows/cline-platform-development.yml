@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          unformatted="$(gofmt -l backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go backend/internal/repository/cline*.go backend/internal/server/api_contract_test.go backend/internal/reauthruntime/runtime_test.go)"
+          unformatted="$(gofmt -l backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go backend/internal/service/openai_gateway_cc_pipeline.go backend/internal/repository/cline*.go backend/internal/server/api_contract_test.go backend/internal/reauthruntime/runtime_test.go)"
           if [[ -n "$unformatted" ]]; then
             printf 'Files require gofmt:\n%s\n' "$unformatted"
             exit 1
@@ -66,11 +66,11 @@ jobs:
           from pathlib import Path
           events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-policy-tests.jsonl').read_text().splitlines() if line.strip()]
           passed = collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')
-          required = {'TestClineSSEFailurePreventsSuccessfulTerminal', 'TestClineSSEClosePropagatesSourceError', 'TestClineSSEFailureIsStickyAcrossSmallReads'}
+          required = {'TestClineSSEFailurePreventsSuccessfulTerminal', 'TestClineSSEClosePropagatesSourceError', 'TestClineSSEFailureIsStickyAcrossSmallReads', 'TestClineSSECompleteEventFailures', 'TestClineSSEEventBoundsAndTruncation', 'TestClineSSEMultilineAndLineEndings', 'TestClineSSEEmptyDataHeartbeatAndMissingDone', 'TestClineGenerationErrorIgnoresGeneratedFields', 'TestClineJSON200FailureAndBounds', 'TestClineJSONSuccessPreservesBytesAndClose', 'TestClineJSONClosePropagatesSourceError', 'TestClineGenerationErrorStatusOnlyUsesErrorEnvelopes'}
           missing = sorted(name for name in required if passed[name] != 3)
           if missing or any(e.get('Action') == 'skip' for e in events):
               raise SystemExit(f'policy tests missing, skipped or not repeated three times: {missing}')
-          print('Required Cline SSE tests executed three times with race detection.')
+          print('Required Cline SSE/JSON/error-envelope tests executed three times with race detection.')
           PY
       - name: Cline service and legacy cooldown regression tests
         working-directory: backend
@@ -83,7 +83,7 @@ jobs:
           from pathlib import Path
           events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-service-tests.jsonl').read_text().splitlines() if line.strip()]
           passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
-          required = {'TestClineAccountDoesNotBecomeDeepseek', 'TestClineCredentialsAndScopedRotation'}
+          required = {'TestClineAccountDoesNotBecomeDeepseek', 'TestClineCredentialsAndScopedRotation', 'TestClineResponseGuardPersistsScopedErrors', 'TestClineResponseGuardFreeScopeUsesActualModel', 'TestClineResponseGuardFreezesCredentialsAndCancellation', 'TestClineResponseGuardNeverInventsQuotaFromOutput', 'TestClineResponseGuardStreamingJSONAndIsolation'}
           if not required.issubset(passed) or any(e.get('Action') == 'skip' for e in events):
               raise SystemExit(f'Cline service tests missing or skipped: {sorted(required-passed)}')
           print('Cline service tests executed; compile-only packages are not reported as tested.')

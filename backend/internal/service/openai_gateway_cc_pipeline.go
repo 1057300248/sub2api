@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/cline"
 	"io"
 	"net/http"
 	"strings"
@@ -242,16 +241,16 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	guardResponse, err := s.prepareClineResponseGuard(ctx, account, body, stream)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
-	if account.IsCline() && resp.StatusCode < 400 && stream {
-		lineLimit := defaultMaxLineSize
-		if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
-			lineLimit = s.cfg.Gateway.MaxLineSize
-		}
-		resp.Body = cline.GuardSSEBody(resp.Body, lineLimit, nil)
+	if guardResponse != nil {
+		guardResponse(resp)
 	}
 	return resp, nil
 }
