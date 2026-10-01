@@ -8,7 +8,10 @@ import { getClineMetadata, refreshClineMetadata, type ClineMetadata } from '@/ap
 
 vi.mock('@/api/admin/clineMetadata', () => ({ getClineMetadata: vi.fn(), refreshClineMetadata: vi.fn() }))
 const fixture = (): ClineMetadata => ({ mode: 'pass', last_success_at: new Date().toISOString(), auth_type: 'api_key', quota_status: 'partial', credential_status: 'unknown', identity_verified: false, windows: [{ type: 'five_hour', percent_used: null }, { type: 'weekly', percent_used: 0 }, { type: 'monthly', percent_used: null }], catalog: { clinePass: [{ id: 'cline-pass/model' }], recommended: [], free: [{ id: 'vendor/free' }] }, catalog_status: 'stale', persisted: true, incremental_cost_usd: null })
-const setup = (accountId = 42) => mount(ClineMetadataPanel, { props: { accountId, mode: 'pass' }, global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en: { clineMetadata: en } } })] } })
+// The application uses runtime-only vue-i18n. Static message functions work
+// without enabling a message compiler in either the application or the tests.
+const messages = Object.fromEntries(Object.entries(en).map(([key, value]) => [key, () => value]))
+const setup = (accountId = 42) => mount(ClineMetadataPanel, { props: { accountId, mode: 'pass' }, global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en: { clineMetadata: messages } } })] } })
 
 beforeEach(() => { vi.resetAllMocks(); vi.mocked(getClineMetadata).mockResolvedValue(fixture()); vi.mocked(refreshClineMetadata).mockResolvedValue(fixture()) })
 

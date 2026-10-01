@@ -70,9 +70,15 @@ func runClineFailureBillingRegression(t *testing.T, terminalUsage bool) {
 				pricing["gpt-5.1"] = &LiteLLMModelPricing{InputCostPerToken: 2e-6, OutputCostPerToken: 5e-6}
 				pricing["cline-pass/model"] = &LiteLLMModelPricing{InputCostPerToken: 7e-6, OutputCostPerToken: 13e-6}
 				billing.billingService = NewBillingService(billing.cfg, &PricingService{pricingData: pricing})
+				// A real gateway key carries its resolved group. Declare the
+				// customer multiplier explicitly instead of depending on a
+				// partially initialized key's fallback configuration.
+				groupID := int64(91)
 				input := &OpenAIRecordUsageInput{
-					Result:  result,
-					APIKey:  &APIKey{ID: 9101},
+					Result: result,
+					APIKey: &APIKey{ID: 9101, GroupID: &groupID, Group: &Group{
+						ID: groupID, Platform: PlatformCline, RateMultiplier: 1.1, Hydrated: true,
+					}},
 					User:    &User{ID: 9102},
 					Account: a,
 					ChannelUsageFields: ChannelUsageFields{
@@ -103,6 +109,7 @@ func runClineFailureBillingRegression(t *testing.T, terminalUsage bool) {
 				require.InDelta(t, expectedTotal, usageRepo.lastLog.TotalCost, 1e-12)
 				require.InDelta(t, expectedActual, usageRepo.lastLog.ActualCost, 1e-12)
 				require.InDelta(t, expectedActual, billingRepo.lastCmd.BalanceCost, 1e-12)
+				require.InDelta(t, 1.1, usageRepo.lastLog.RateMultiplier, 1e-12)
 				require.Equal(t, 8, usageRepo.lastLog.InputTokens)
 				require.Equal(t, 4, usageRepo.lastLog.OutputTokens)
 
