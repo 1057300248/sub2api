@@ -28,10 +28,10 @@ func (r *accountRepository) SetClineRateLimitIfLater(ctx context.Context, accoun
 	}
 	key := service.ClineRateLimitScope(account, scope)
 	payload, err := json.Marshal(map[string]any{
-		"rate_limited_at": now.UTC().Format(time.RFC3339),
+		"rate_limited_at":     now.UTC().Format(time.RFC3339),
 		"rate_limit_reset_at": until.UTC().Format(time.RFC3339),
-		"reset_unix": until.Unix(),
-		"reason": reason,
+		"reset_unix":          until.Unix(),
+		"reason":              reason,
 		"reset_authoritative": authoritative,
 	})
 	if err != nil {
