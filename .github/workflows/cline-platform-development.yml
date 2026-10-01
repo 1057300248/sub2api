@@ -2,29 +2,66 @@ name: Cline platform development
 on:
   push:
     branches: ['codex/cline-platform-modular-20261001']
-    paths: ['.github/workflows/cline-platform-development.yml', 'tools/cline_platform_apply.py', 'tools/cline_platform_edits.json']
+    paths: ['.github/workflows/cline-platform-development.yml']
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  inspect:
+  go-dependencies:
     if: github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Export tracked source only
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Download only locked Go dependencies
+        working-directory: backend
         run: |
-          git rev-parse HEAD
-          mkdir -p /tmp/cline-source
-          git archive --format=tar HEAD -o /tmp/cline-source/source.tar
-          git rev-parse HEAD > /tmp/cline-source/commit.txt
-          sha256sum /tmp/cline-source/source.tar
+          go version
+          go mod download
+          test -z "$(git status --porcelain go.mod go.sum)"
+          mkdir -p /tmp/cline-deps
+          tar -czf /tmp/cline-deps/toolchain.tar.gz -C "$(go env GOROOT)" .
+          tar -czf /tmp/cline-deps/modules.tar.gz -C "$(go env GOMODCACHE)" .
+          sha256sum /tmp/cline-deps/*.tar.gz
       - uses: actions/upload-artifact@v4
         with:
-          name: cline-source-snapshot
-          path: /tmp/cline-source/
+          name: cline-go-dependencies
+          path: /tmp/cline-deps/
           retention-days: 1
-          if-no-files-found: error
+          compression-level: 0
+  frontend-dependencies:
+    if: github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Download only locked frontend dependencies
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          test -z "$(git status --porcelain package.json pnpm-lock.yaml)"
+          mkdir -p /tmp/cline-frontend-deps
+          tar -czf /tmp/cline-frontend-deps/node_modules.tar.gz node_modules
+          sha256sum /tmp/cline-frontend-deps/node_modules.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cline-frontend-dependencies
+          path: /tmp/cline-frontend-deps/
+          retention-days: 1
+          compression-level: 0
