@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          unformatted="$(gofmt -l backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go backend/internal/repository/cline*.go backend/internal/server/api_contract_test.go)"
+          unformatted="$(gofmt -l backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go backend/internal/repository/cline*.go backend/internal/server/api_contract_test.go backend/internal/reauthruntime/runtime_test.go)"
           if [[ -n "$unformatted" ]]; then
             printf 'Files require gofmt:\n%s\n' "$unformatted"
             exit 1
@@ -88,6 +88,22 @@ jobs:
               raise SystemExit(f'Cline service tests missing or skipped: {sorted(required-passed)}')
           print('Cline service tests executed; compile-only packages are not reported as tested.')
           PY
+      - name: Managed runtime readiness race regression
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -json -race -tags=integration -count=50 -run '^TestManagedProcessGetsOnlyWorkerEnvironmentAndStops$' ./internal/reauthruntime | tee "$RUNNER_TEMP/reauth-runtime-tests.jsonl"
+          python3 - <<'PYTEST'
+          import json, os
+          from pathlib import Path
+          events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'reauth-runtime-tests.jsonl').read_text().splitlines() if line.strip()]
+          name = 'TestManagedProcessGetsOnlyWorkerEnvironmentAndStops'
+          passed = sum(e.get('Action') == 'pass' and e.get('Test') == name for e in events)
+          if passed != 50 or any(e.get('Action') == 'skip' for e in events):
+              raise SystemExit(f'managed runtime regression missing or skipped: {passed}/50 passes')
+          print('Managed runtime readiness, environment isolation and stop verified 50 times with race detection.')
+          PYTEST
       - name: Settings API contract regression and server build
         working-directory: backend
         run: |

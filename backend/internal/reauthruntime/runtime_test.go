@@ -131,15 +131,25 @@ func TestManagedProcessGetsOnlyWorkerEnvironmentAndStops(t *testing.T) {
 	dir := filepath.Join(root, "1.2.3-linux-"+runtime.GOARCH)
 	require.NoError(t, os.MkdirAll(dir, 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "ready"), []byte("cached"), 0600))
-	script := "#!/bin/sh\nprintf '%s' \"$OPENAI_REAUTH_WORKER_TOKEN\" > worker-token\nprintf '%s' \"$DATABASE_PASSWORD\" > unrelated-secret\nprintf '%s' \"$OPENAI_REAUTH_CONCURRENCY\" > concurrency\nexec /bin/sleep 60\n"
+	script := "#!/bin/sh\nprintf '%s' \"$OPENAI_REAUTH_WORKER_TOKEN\" > worker-token\nprintf '%s' \"$DATABASE_PASSWORD\" > unrelated-secret\nprintf '%s' \"$OPENAI_REAUTH_CONCURRENCY\" > concurrency\nprintf 'ready' > observations-ready\nexec /bin/sleep 60\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "python"), []byte(script), 0700))
 	t.Setenv("OPENAI_REAUTH_CONCURRENCY", "4")
 	t.Setenv("DATABASE_PASSWORD", "must-not-inherit")
 	m := New(root, "1.2.3", "http://127.0.0.1:4040", "synthetic-worker-token")
 	m.Ensure()
 	defer m.Stop()
-	require.Eventually(t, func() bool { _, err := os.Stat(filepath.Join(dir, "unrelated-secret")); return err == nil }, time.Second, 10*time.Millisecond)
+	// The child can write files before cmd.Start returns and the parent publishes
+	// running. A partial file also does not prove that all environment captures
+	// are complete. Wait for both independent readiness signals, not a fixed delay.
+	require.Eventually(t, func() bool {
+		if m.Status().State != "running" {
+			return false
+		}
+		_, err := os.Stat(filepath.Join(dir, "observations-ready"))
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond, "worker output and manager state did not become ready")
 	require.Equal(t, "running", m.Status().State)
+	require.NotZero(t, m.Status().StartedAt)
 	got, err := os.ReadFile(filepath.Join(dir, "worker-token"))
 	require.NoError(t, err)
 	require.Equal(t, "synthetic-worker-token", string(got))
