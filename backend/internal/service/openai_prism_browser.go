@@ -107,7 +107,7 @@ func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.C
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "model is required"}})
 		return nil, errors.New("prism adapter model is required")
 	}
-	sessionID, err := prismBrowserSessionID(c, account.ID)
+	sessionID, err := prismBrowserSessionID(c, account.ID, body)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
 		return nil, err
@@ -209,44 +209,35 @@ func (s *OpenAIGatewayService) callPrismBrowserWithSession(ctx context.Context, 
 	return responseBody, resp.Header, resp.StatusCode, nil
 }
 
-func prismBrowserSessionID(c *gin.Context, accountID int64) (string, error) {
+// prismBrowserSessionID uses identities already sent by unmodified Codex clients.
+// A bare API key identifies a tenant, not a conversation: missing identity must
+// create a fresh project so unrelated requests cannot inherit project files.
+func prismBrowserSessionID(c *gin.Context, accountID int64, body []byte) (string, error) {
 	if c == nil || c.Request == nil {
 		return "", nil
 	}
-	var raw string
-	for _, header := range []string{"X-Prism-Session-ID", "session-id", "session_id"} {
-		values := c.Request.Header.Values(header)
-		if len(values) > 1 || (len(values) == 1 && values[0] == "" && header == "X-Prism-Session-ID") {
-			return "", errors.New("Prism session identity must contain one non-empty value")
+	for _, names := range [][]string{openAIThreadIdentityHeaders, openAISessionIdentityHeaders} {
+		for _, name := range names {
+			if len(c.Request.Header.Values(name)) > 1 {
+				return "", errors.New("Prism conversation identity headers must not be repeated")
+			}
 		}
-		if len(values) == 0 || values[0] == "" {
-			continue
-		}
-		if raw != "" && raw != values[0] {
-			return "", errors.New("Prism session identity headers conflict")
-		}
-		raw = values[0]
+	}
+	resolution := resolveOpenAIClientSessionIdentity(c, body)
+	switch resolution.metadata.Status {
+	case OpenAIClientSessionIdentityMissing:
+		return "", nil
+	case OpenAIClientSessionIdentityResolved:
+	default:
+		return "", errors.New("Prism conversation identity is invalid or conflicting")
 	}
 	keyID := getAPIKeyIDFromContext(c)
 	if keyID <= 0 || accountID <= 0 {
-		return "", nil
+		return "", errors.New("Prism session reuse requires an authenticated API key")
 	}
-	// Normal gateway requests do not need a client change: when no standard
-	// session header is present, bind them to a server-owned API-key/account
-	// scope. Admin account tests call the low-level method and stay stateless.
-	if raw == "" {
-		raw = "server-default"
-	}
-	if len(raw) > 128 {
-		return "", errors.New("Prism session identity must contain 1 to 128 printable ASCII characters")
-	}
-	for _, char := range raw {
-		if char < 33 || char > 126 {
-			return "", errors.New("Prism session identity must contain 1 to 128 printable ASCII characters")
-		}
-	}
-	// Never trust a client-selected cache key without binding it to the verified
-	// tenant and upstream account. Only this opaque digest crosses the adapter hop.
-	digest := sha256.Sum256([]byte(fmt.Sprintf("prism-session-v1:%d:%d:%s", keyID, accountID, raw)))
+	// The private adapter header is always derived here; client-supplied
+	// X-Prism-Session-ID values cannot select an existing cached context.
+	digest := sha256.Sum256([]byte(fmt.Sprintf("prism-session-v1:%d:%d:%s:%s",
+		keyID, accountID, resolution.identity.kind, resolution.identity.value)))
 	return hex.EncodeToString(digest[:]), nil
 }

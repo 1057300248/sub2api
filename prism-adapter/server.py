@@ -255,6 +255,7 @@ class BrowserRequest:
         self.request_id = ""
         self.polls = 0
         self.accepted = set()
+        self.deferred_poll = None
         self.terminal = None
         self.began = False
 
@@ -263,6 +264,12 @@ class BrowserRequest:
         try:
             body = request.post_data_json
             if request.url == BASE + STATUS:
+                # response.json() yields to Playwright's event loop. The page
+                # may poll before the start response callback has decoded its
+                # ID. Hold one route until that trusted ID is available.
+                if self.gate.sent and not self.request_id and self.deferred_poll is None and isinstance(body, dict):
+                    self.deferred_poll = route
+                    return
                 if (not self.terminal and self.gate.sent and self.request_id and isinstance(body, dict)
                         and body.get("request_id") == self.request_id):
                     self.accepted.add(request)
@@ -307,6 +314,9 @@ class BrowserRequest:
                 self.terminal = (response.status, result)
         except (ValueError, TypeError):
             pass
+        if self.request_id and self.deferred_poll is not None:
+            route, self.deferred_poll = self.deferred_poll, None
+            self.route(route)
 
     def run(self, prompt, cache_hit):
         page = self.session.page
@@ -478,11 +488,8 @@ class BrowserWorker:
                     try:
                         browser.prune()
                     except Exception:
-                        browser.close()
                         break
                     continue
-                if job is None:
-                    break
                 args, future = job
                 if self.stopping.is_set():
                     if not future.done():
@@ -498,7 +505,7 @@ class BrowserWorker:
                 except BaseException:
                     if not future.done():
                         future.set_exception(AdapterError(503, "prism_unavailable", "Prism browser worker stopped"))
-                    raise
+                    return
         finally:
             with self.lifecycle:
                 self.stopping.set()
@@ -506,7 +513,11 @@ class BrowserWorker:
                     _, future = self.jobs.get_nowait()
                     if not future.done():
                         future.set_exception(AdapterError(503, "prism_unavailable", "Prism browser worker stopped"))
-            browser.close()
+            try:
+                browser.close()
+            except Exception as error:
+                # Browser errors can contain page data; never dump their text.
+                print(json.dumps({"event": "prism_worker_close_error", "class": type(error).__name__}), file=sys.stderr, flush=True)
 
     def run(self, *args):
         if not self.busy.acquire(blocking=False):

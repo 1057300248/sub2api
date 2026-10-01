@@ -145,6 +145,31 @@ class SessionCacheTests(unittest.TestCase):
         self.submit = submit
         self.assertEqual(self.run_turn(), ("new-turn", "fresh answer"))
 
+    def test_early_poll_waits_for_trusted_start_id_before_dispatch(self):
+        routes = []
+        def submit(page):
+            page.browser_request(adapter.START, VALID_START)
+            # Playwright may reenter the route listener while response.json()
+            # is still reading the start response. No upstream ID is trusted yet.
+            routes.append(page.browser_request(adapter.STATUS, {"request_id": "early"}))
+            self.assertIsNone(routes[0].outcome)
+            page.server_response(adapter.START, {"request_id": "early"})
+            self.assertEqual(routes[0].outcome, "continued")
+            page.server_response(adapter.STATUS, completed("early"))
+        self.submit = submit
+        self.assertEqual(self.run_turn(), ("early", "ok"))
+
+    def test_early_poll_for_wrong_id_is_aborted_after_start_decodes(self):
+        def submit(page):
+            page.browser_request(adapter.START, VALID_START)
+            foreign = page.browser_request(adapter.STATUS, {"request_id": "foreign"})
+            page.server_response(adapter.START, {"request_id": "current"})
+            self.assertEqual(foreign.outcome, "aborted")
+            page.browser_request(adapter.STATUS, {"request_id": "current"})
+            page.server_response(adapter.STATUS, completed("current"))
+        self.submit = submit
+        self.assertEqual(self.run_turn(), ("current", "ok"))
+
     def test_wrong_project_never_leaves_browser(self):
         self.run_turn()
         routes = []
