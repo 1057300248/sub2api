@@ -650,6 +650,9 @@ export default {
       // OpenAI specific hints
       openai: {
         baseUrlHint: 'Leave default for official OpenAI API',
+        prismBrowser: 'Use Prism browser protocol automatically',
+        prismBrowserDesc: 'The server-managed Prism browser adapter handles requests after enabling this switch. No URL, cookie, or sandbox token is required here. Supported for OpenAI OAuth and API Key accounts.',
+        prismBrowserManagedEndpoint: 'Enabled: requests are routed to the server-managed Prism adapter.',
         apiKeyHint: 'Your OpenAI API Key',
         oauthPassthrough: 'Auto passthrough (auth only)',
         excelBPS: 'Excel / BPS protocol',

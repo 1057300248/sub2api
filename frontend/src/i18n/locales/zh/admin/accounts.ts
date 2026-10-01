@@ -768,6 +768,9 @@ export default {
       // OpenAI specific hints
       openai: {
         baseUrlHint: '留空使用官方 OpenAI API',
+        prismBrowser: '自动使用 Prism 浏览器协议',
+        prismBrowserDesc: '开启后由服务器固定的 Prism 浏览器适配器处理请求。无需填写地址、Cookie 或 sandbox token；适用于 OpenAI OAuth 和 API Key 账号。',
+        prismBrowserManagedEndpoint: '已启用：请求将自动发送到服务器的 Prism 适配器。',
         apiKeyHint: '您的 OpenAI API Key',
         oauthPassthrough: '自动透传（仅替换认证）',
         excelBPS: 'Excel / BPS 协议',
