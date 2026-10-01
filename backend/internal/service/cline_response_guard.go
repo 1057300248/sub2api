@@ -64,7 +64,7 @@ func (s *OpenAIGatewayService) prepareClineResponseGuard(ctx context.Context, ac
 			defer cancel()
 			s.rateLimitService.handleClineScopedUpstreamError(persistCtx, snapshot, status, headers, payload, request.Model)
 		}
-		mediaType, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+		mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 		if stream && (strings.EqualFold(mediaType, "text/event-stream") || strings.TrimSpace(resp.Header.Get("Content-Type")) == "") {
 			resp.Body = cline.GuardSSEBody(resp.Body, lineLimit, onError)
 		} else {
