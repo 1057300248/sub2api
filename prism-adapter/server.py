@@ -10,7 +10,7 @@ import os
 import re
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -324,7 +324,9 @@ def main():
     Handler.api_key = key
     Handler.state = State(os.environ.get("PRISM_ADAPTER_STATE_DIR", "/var/lib/sub2api-prism"))
     Handler.browser_turn = BrowserTurn(Handler.state, chrome)
-    HTTPServer(("127.0.0.1", 8319), Handler).serve_forever()
+    server = ThreadingHTTPServer(("127.0.0.1", 8319), Handler)
+    server.daemon_threads = True
+    server.serve_forever()
 
 
 if __name__ == "__main__":

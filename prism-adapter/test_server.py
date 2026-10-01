@@ -4,7 +4,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -56,7 +56,8 @@ class AdapterTests(unittest.TestCase):
 
         fake = FakeBrowser()
         handler = type("TestHandler", (adapter.Handler,), {"api_key": "test-key", "browser_turn": fake})
-        server = HTTPServer(("127.0.0.1", 0), handler)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        server.daemon_threads = True
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()
         try:
