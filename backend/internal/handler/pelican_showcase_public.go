@@ -126,8 +126,12 @@ func (s *pelicanPublicSnapshot) item(id int64) *pelicanPublicBody {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if element := s.items[id]; element != nil {
+		item, ok := element.Value.(pelicanPublicCachedItem)
+		if !ok {
+			return nil
+		}
 		s.lru.MoveToFront(element)
-		return element.Value.(pelicanPublicCachedItem).body
+		return item.body
 	}
 	return nil
 }
@@ -144,7 +148,10 @@ func (s *pelicanPublicSnapshot) put(id int64, body *pelicanPublicBody) {
 	}
 	for len(s.items) >= pelicanPublicMaxEntries || s.bytes+size > pelicanPublicMaxBytes {
 		element := s.lru.Back()
-		old := element.Value.(pelicanPublicCachedItem)
+		old, ok := element.Value.(pelicanPublicCachedItem)
+		if !ok {
+			return
+		}
 		s.bytes -= len(old.body.json) + len(old.body.gzip)
 		delete(s.items, old.id)
 		s.lru.Remove(element)
@@ -245,7 +252,11 @@ func (p *pelicanPublicCache) manifest(ctx context.Context) (*pelicanPublicSnapsh
 	if err != nil {
 		return nil, err
 	}
-	return value.(*pelicanPublicSnapshot), nil
+	snapshot, ok := value.(*pelicanPublicSnapshot)
+	if !ok || snapshot == nil {
+		return nil, fmt.Errorf("unexpected pelican manifest cache value %T", value)
+	}
+	return snapshot, nil
 }
 
 func (p *pelicanPublicCache) item(ctx context.Context, snapshot *pelicanPublicSnapshot, id int64) (*pelicanPublicBody, error) {
@@ -275,7 +286,11 @@ func (p *pelicanPublicCache) item(ctx context.Context, snapshot *pelicanPublicSn
 	if err != nil {
 		return nil, err
 	}
-	return value.(*pelicanPublicBody), nil
+	body, ok := value.(*pelicanPublicBody)
+	if !ok || body == nil {
+		return nil, fmt.Errorf("unexpected pelican item cache value %T", value)
+	}
+	return body, nil
 }
 
 // PublicList GET/HEAD /api/v1/public/pelican-showcase
