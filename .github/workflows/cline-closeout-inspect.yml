@@ -20,25 +20,33 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re, subprocess
-          queries = [
-            ('backend/internal/service/*.go', r'^func .*doOpenAIUpstream|^type HTTPUpstream|^type AdminService interface|^func .*enqueueSchedulerOutbox|^func .*ListAccounts|^func .*GetAccount\(', 45),
-            ('backend/internal/repository/*.go', r'^func .*UpdateCredentials|^func .*BulkUpdate\(|^func .*enqueueSchedulerOutbox|^func .*clientFromContext', 90),
-            ('backend/internal/repository/account_repo.go', r'input.Credentials|updates.Credentials|update.Credentials|params.Credentials|Credentials != nil', 12),
-            ('backend/internal/handler/openai_gateway_handler.go', r'usage.incomplete|[Ii]ncomplete|RecordUsage|recordUsage|bill', 7),
-            ('backend/internal/service/*account*data*.go', r'^func |[Pp]latform', 3),
-            ('backend/internal/service/*channel*monitor*.go', r'case Platform|validProviders|supportedProviders|PlatformOpenCodeGo', 3),
-            ('backend/internal/server/routes/admin.go', r'^func registerAccountRoutes|/:id/usage|/:id/test', 15),
+          ranges = {
+            'backend/internal/repository/account_repo.go': [(1,60),(510,600),(985,1045),(3490,3570)],
+            'backend/internal/service/channel_monitor_quota_fetcher.go': [(1,90),(185,255)],
+            'backend/internal/service/channel_monitor_validate.go': [(210,260)],
+            'backend/internal/handler/openai_gateway_handler.go': [(865,958),(1470,1570)],
+          }
+          for name, parts in ranges.items():
+            p=Path(name); lines=p.read_text().splitlines()
+            print('\nFILE',name,'BLOB',subprocess.check_output(['git','hash-object',name],text=True).strip())
+            for start,end in parts:
+              for n in range(start-1,min(end,len(lines))): print(f'{n+1}: {lines[n]}')
+          patterns = [
+            ('backend/internal/handler/admin/*data*.go', r'func .*validate|PlatformOpenCodeGo|PlatformDeepseek|case .*Platform|IsCNProvider'),
+            ('backend/internal/service/*billing*probe*.go', r'func .*ligible|func .*upported|func .*ProbeAccount|PlatformOpenCodeGo|PlatformDeepseek'),
+            ('backend/internal/service/cline*test.go', r'OpenAIGatewayService\{'),
+            ('backend/internal/service/openai_gateway*.go', r'^type OpenAIGatewayService struct'),
           ]
-          for glob, pattern, after in queries:
-            rx = re.compile(pattern)
+          for glob,pattern in patterns:
             for p in sorted(Path('.').glob(glob)):
-              if p.name.endswith('_test.go'): continue
-              lines = p.read_text().splitlines()
-              selected = set()
-              for n, line in enumerate(lines):
-                if rx.search(line): selected.update(range(max(0,n-2), min(len(lines),n+after)))
+              if p.name.endswith('_test.go') and 'cline' not in p.name: continue
+              lines=p.read_text().splitlines(); selected=set()
+              for n,line in enumerate(lines):
+                if re.search(pattern,line): selected.update(range(max(0,n-1),min(len(lines),n+18)))
               if selected:
-                print('\nFILE', p, 'BLOB', subprocess.check_output(['git','hash-object',str(p)],text=True).strip())
+                print('\nFILE',p,'BLOB',subprocess.check_output(['git','hash-object',str(p)],text=True).strip())
                 for n in sorted(selected): print(f'{n+1}: {lines[n]}')
+          print('RECENT MIGRATIONS', [p.name for p in sorted(Path('backend/migrations').glob('*.sql'))[-12:]])
+          print('SCHEMA FILES', [p.name for p in Path('backend/ent/schema').glob('*group*')])
           PY
           git diff --exit-code
