@@ -45,6 +45,50 @@ describe('Cline metadata safety', () => {
     expect(wrapper.findAll('button').find(b => b.text() === en.add)!.attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
+  it.each([
+    { name: 'explicit Pass model', mode: 'pass', id: 'cline-pass/model', enabled: true },
+    { name: 'explicit PAYG model', mode: 'payg', id: 'vendor/model', enabled: true },
+    { name: 'maximum length', mode: 'pass', id: 'cline-pass/' + 'a'.repeat(245), enabled: true },
+    { name: 'empty ID', mode: 'pass', id: '', enabled: false },
+    { name: 'empty Pass suffix', mode: 'pass', id: 'cline-pass/', enabled: false },
+    { name: 'wildcard', mode: 'pass', id: 'cline-pass/*', enabled: false },
+    { name: 'backslash', mode: 'pass', id: 'cline-pass/model\\suffix', enabled: false },
+    { name: 'NUL', mode: 'pass', id: 'cline-pass/model' + String.fromCharCode(0), enabled: false },
+    { name: 'ASCII whitespace', mode: 'pass', id: 'cline-pass/model name', enabled: false },
+    { name: 'Unicode whitespace', mode: 'pass', id: 'cline-pass/model\u00a0name', enabled: false },
+    { name: 'overlong ID', mode: 'pass', id: 'cline-pass/' + 'a'.repeat(246), enabled: false },
+    { name: 'PAYG target in Pass', mode: 'pass', id: 'vendor/model', enabled: false },
+    { name: 'Pass target in PAYG', mode: 'payg', id: 'cline-pass/model', enabled: false },
+    { name: 'Free is observation only', mode: 'free', id: 'vendor/free', enabled: false }
+  ])('validates catalog selection: $name', async ({ mode, id, enabled }) => {
+    const data = fixture()
+    data.catalog = { clinePass: [{ id }], recommended: [{ id }], free: [{ id }] }
+    vi.mocked(getClineMetadata).mockResolvedValueOnce(data)
+    const wrapper = setup()
+    try {
+      await wrapper.setProps({ mode })
+      await flushPromises()
+      const buttons = wrapper.findAll('button').filter(button => button.text() === en.add)
+      expect(buttons).toHaveLength(1)
+      expect(buttons[0].element.disabled).toBe(!enabled)
+      await buttons[0].trigger('click')
+      expect(wrapper.emitted('select')).toEqual(enabled ? [[id]] : undefined)
+      expect(refreshClineMetadata).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+  it('does not offer any catalog selection for unknown mode', async () => {
+    const wrapper = setup()
+    try {
+      await wrapper.setProps({ mode: 'unknown' })
+      await flushPromises()
+      expect(wrapper.findAll('button').filter(button => button.text() === en.add)).toHaveLength(0)
+      expect(wrapper.emitted('select')).toBeUndefined()
+    } finally {
+      wrapper.unmount()
+    }
+  })
   it('discards an old account response after switching accounts', async () => {
     let resolveOld!: (value: ClineMetadata) => void
     vi.mocked(getClineMetadata).mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))

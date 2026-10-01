@@ -87,7 +87,8 @@ const models = computed(() => {
   return (props.mode === 'pass' ? catalog.clinePass : props.mode === 'payg' ? catalog.recommended : props.mode === 'free' ? catalog.free : []) || []
 })
 function selectable(id: string): boolean {
-  if (!id || /[\s*\\\u0000]/u.test(id) || id.length > 256) return false
+  // Keep literal forbidden characters out of a Unicode regexp character class.
+  if (!id || id.length > 256 || /\s/u.test(id) || id.includes('*') || id.includes('\\') || id.includes(String.fromCharCode(0))) return false
   return props.mode === 'pass' ? id.startsWith('cline-pass/') && id.length > 11 : props.mode === 'payg' && !id.startsWith('cline-pass/')
 }
 </script>

@@ -109,7 +109,10 @@ func ClineMetadataForAccount(account *Account, now time.Time) *ClineMetadataView
 }
 
 func clineDateFresh(at *time.Time, now time.Time, ttl time.Duration) bool {
-	return at != nil && !at.After(now) && now.Sub(*at) < ttl
+	if at == nil || at.After(now) {
+		return false
+	}
+	return now.Sub(*at) < ttl
 }
 
 func safeClineMetadataCode(code string) string {
