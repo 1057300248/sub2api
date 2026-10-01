@@ -107,8 +107,14 @@ jobs:
               raise SystemExit('Draft or prerelease exists; inspect it before retrying')
           if 'HTTP 404' not in existing.stderr:
               raise SystemExit('Could not verify release absence: ' + existing.stderr)
-          runs = records(f'repos/{repo}/actions/workflows/release.yml/runs?per_page=100', 'workflow_runs')
-          if any(r.get('head_branch') == tag and r.get('head_sha') == sha and r.get('status') != 'completed' for r in runs):
+          runs = records(f'repos/{repo}/actions/runs?per_page=100', 'workflow_runs')
+          release_runs = [
+              r for r in runs
+              if r.get('path') == '.github/workflows/release.yml'
+              and r.get('head_branch') == tag
+              and r.get('head_sha') == sha
+          ]
+          if any(r.get('status') != 'completed' for r in release_runs):
               print('Release build already active; no duplicate dispatch')
           else:
               call('gh', 'workflow', 'run', 'release.yml', '--repo', repo, '--ref', tag, '-f', f'tag={tag}', '-f', 'simple_release=false', '-f', 'notify_release=false', '-f', 'dry_run=false')
