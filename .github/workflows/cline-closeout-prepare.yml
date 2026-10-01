@@ -2,7 +2,7 @@ name: Cline closeout development blob preparation
 on:
   push:
     branches: ['codex/cline-platform-modular-20261001']
-    paths: ['.github/workflows/cline-closeout-prepare.yml', '.wanchuan/cline-closeout-prepare.py']
+    paths: ['.github/workflows/cline-closeout-prepare.yml', '.wanchuan/cline-closeout-prepare.py', '.wanchuan/cline-closeout-wire.py']
 permissions:
   contents: write
 jobs:
@@ -27,7 +27,7 @@ jobs:
       - name: Prepare immutable reviewed source blobs only
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 .wanchuan/cline-closeout-prepare.py
+        run: python3 .wanchuan/cline-closeout-wire.py
       - uses: actions/upload-artifact@v4
         with:
           name: cline-closeout-blobs-${{ github.sha }}
