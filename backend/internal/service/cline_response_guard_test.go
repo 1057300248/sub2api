@@ -113,7 +113,11 @@ func TestClineResponseGuardFreezesCredentialsAndCancellation(t *testing.T) {
 	}
 	// Simulate an edit during upstream transport, before the guard sees a response.
 	a.Credentials["api_key"] = "rotated-key"
-	a.Credentials["model_mapping"].(map[string]any)["public-model"] = "cline-pass/changed"
+	mapping, ok := a.Credentials["model_mapping"].(map[string]any)
+	if !ok {
+		t.Fatal("test account model mapping has unexpected type")
+	}
+	mapping["public-model"] = "cline-pass/changed"
 	cancel()
 	_, err = clineGuardResponse(t, guard, "text/event-stream", "data: {\"error\":{\"code\":429}}\n\n")
 	if !errors.Is(err, cline.ErrStreamFailure) || len(repo.observations) != 1 {

@@ -162,7 +162,9 @@ func (b *guardedSSEBody) readEvent() ([]byte, error) {
 			if dataLines > 1 && len(trimmed) > 0 {
 				var compact bytes.Buffer
 				if bytes.Equal(trimmed, []byte("[DONE]")) {
-					compact.Write(trimmed)
+					if _, err := compact.Write(trimmed); err != nil {
+						return nil, err
+					}
 				} else if err := json.Compact(&compact, data); err != nil {
 					return nil, ErrInvalidSSEFrame
 				}
