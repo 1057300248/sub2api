@@ -460,10 +460,10 @@ func (s *AccountTestService) testPrismBrowserConnection(c *gin.Context, account 
 	}
 	response, _, status, err := s.openaiGatewayService.callPrismBrowser(c.Request.Context(), account, body)
 	if err != nil {
-		return s.sendErrorAndEnd(c, "Prism adapter request failed")
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Prism adapter request failed: %s", err.Error()))
 	}
 	if status != http.StatusOK {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Prism adapter returned HTTP %d", status))
+		return s.sendErrorAndEnd(c, prismBrowserAdapterErrorMessage(status, response))
 	}
 	if !gjson.ValidBytes(response) || gjson.GetBytes(response, "status").String() != "completed" {
 		return s.sendErrorAndEnd(c, "Prism adapter returned no completed response")

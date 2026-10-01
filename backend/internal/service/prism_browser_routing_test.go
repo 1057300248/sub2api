@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPrismBrowserResponsesURL(t *testing.T) {
@@ -151,5 +152,128 @@ func TestAccountUsesPrismBrowserRequiresServerAndAccountSwitch(t *testing.T) {
 	account.Type = AccountTypeAPIKey
 	if accountUsesPrismBrowser(account, cfg) {
 		t.Fatal("API key accounts must not use the OAuth Prism bridge")
+	}
+}
+
+func TestPrismBrowserAdapterMisconfigurationIsNotTheClientsAuthFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		body       string
+		wantStatus int
+	}{
+		{name: "bridge key mismatch", status: http.StatusUnauthorized, body: `{"error":{"type":"unauthorized"}}`, wantStatus: http.StatusBadGateway},
+		{name: "adapter path mismatch", status: http.StatusNotFound, body: `{"error":{"type":"not_found"}}`, wantStatus: http.StatusBadGateway},
+		{name: "request refused before dispatch", status: http.StatusUnprocessableEntity, body: `{"error":{"type":"unsupported_request","message":"Prism adapter does not yet support tools or server-side conversation state"}}`, wantStatus: http.StatusUnprocessableEntity},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+			s, account := prismTestService(server.URL)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+			_, err := s.forwardPrismBrowser(context.Background(), c, account, []byte(`{"model":"gpt-5.6-sol","input":"hi"}`), time.Now())
+
+			require.Error(t, err)
+			require.Equal(t, tc.wantStatus, w.Code)
+			if tc.wantStatus == http.StatusBadGateway {
+				require.Contains(t, w.Body.String(), `"prism_unavailable"`, "the client's own API key was not rejected")
+				return
+			}
+			require.JSONEq(t, tc.body, w.Body.String())
+		})
+	}
+}
+
+func TestPrismBrowserAccountTestExplainsAdapterRefusal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"error":{"type":"pending_turn","message":"Previous Prism turn outcome is unknown; inspect it before a new request"}}`)
+	}))
+	defer server.Close()
+	gateway, account := prismTestService(server.URL)
+	svc := &AccountTestService{openaiGatewayService: gateway}
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+		want    string
+	}{
+		{name: "adapter refusal", enabled: true, want: "Prism adapter returned HTTP 409 (pending_turn): Previous Prism turn outcome is unknown"},
+		{name: "gateway switch off", enabled: false, want: "Prism adapter request failed: prism adapter is disabled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gateway.cfg.Gateway.PrismBrowser.Enabled = tc.enabled
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/42/test", nil)
+
+			require.Error(t, svc.testPrismBrowserConnection(c, account, "gpt-5.6-sol", "hi"))
+			require.Contains(t, rec.Body.String(), tc.want)
+		})
+	}
+}
+
+// A WebSocket session placed on a Prism account is closed right after selection,
+// so the scheduler must keep such sessions on the other accounts, as it does for
+// Excel BPS models. HTTP requests still reach the Prism account.
+func TestPrismBrowserAccountsAreNotScheduledForWebSocketSessions(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(26001)
+	const prismID, nativeID = int64(26011), int64(26012)
+	accounts := []Account{
+		{ID: prismID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+			Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID},
+			Credentials: map[string]any{"access_token": "fixture-oauth"},
+			Extra:       map[string]any{"openai_prism_browser": true, "openai_oauth_responses_websockets_v2_enabled": true}},
+		{ID: nativeID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+			Concurrency: 1, Priority: 5, GroupIDs: []int64{groupID},
+			Credentials: map[string]any{"access_token": "fixture-oauth"},
+			Extra:       map[string]any{"openai_oauth_responses_websockets_v2_enabled": true}},
+	}
+	release := func(selection *AccountSelectionResult) {
+		if selection != nil && selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
+	}
+	for _, mode := range []string{"advanced", "load_batch", "priority"} {
+		t.Run(mode, func(t *testing.T) {
+			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			cfg := newSchedulerTestOpenAIWSV2Config()
+			cfg.Gateway.Scheduling.LoadBatchEnabled = mode == "load_batch"
+			svc := &OpenAIGatewayService{
+				accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+				cache:              &schedulerTestGatewayCache{},
+				cfg:                cfg,
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+			}
+			if mode == "advanced" {
+				svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("true")
+			}
+			// An earlier HTTP turn bound the session to the Prism account.
+			require.NoError(t, svc.setStickySessionAccountID(ctx, &groupID, "prism-ws-session", prismID, time.Hour))
+
+			selection, _, err := svc.SelectAccountWithSchedulerForCapability(ctx, &groupID, "", "prism-ws-session", "gpt-5.6-sol", nil,
+				OpenAIUpstreamTransportResponsesWebsocketV2Ingress, OpenAIEndpointCapabilityChatCompletions, false, false, true)
+			require.NoError(t, err)
+			release(selection)
+			require.Equal(t, nativeID, selection.Account.ID)
+
+			selection, _, err = svc.SelectAccountWithSchedulerForCapability(ctx, &groupID, "", "", "gpt-5.6-sol", map[int64]struct{}{nativeID: {}},
+				OpenAIUpstreamTransportResponsesWebsocketV2Ingress, OpenAIEndpointCapabilityChatCompletions, false, false, true)
+			release(selection)
+			require.Error(t, err, "the Prism account must not take a WebSocket session")
+
+			selection, _, err = svc.SelectAccountWithSchedulerForCapability(ctx, &groupID, "", "", "gpt-5.6-sol", map[int64]struct{}{nativeID: {}},
+				OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, false, true)
+			require.NoError(t, err)
+			release(selection)
+			require.Equal(t, prismID, selection.Account.ID)
+		})
 	}
 }
