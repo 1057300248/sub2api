@@ -130,6 +130,9 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
+	if err := service.NormalizeClineCredentials(account.Platform, account.Type, account.Credentials); err != nil {
+		return err
+	}
 	if err := createAccountRecord(ctx, r.client, account); err != nil {
 		return err
 	}
@@ -448,6 +451,9 @@ func (r *accountRepository) ListCRSAccountIDs(ctx context.Context) (map[string]i
 }
 
 func (r *accountRepository) Update(ctx context.Context, account *service.Account) error {
+	if err := service.NormalizeClineCredentials(account.Platform, account.Type, account.Credentials); err != nil {
+		return err
+	}
 	return r.updateAccount(ctx, account, nil, nil, account.RateMultiplier)
 }
 
