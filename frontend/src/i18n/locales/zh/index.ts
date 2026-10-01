@@ -1,4 +1,5 @@
 import clineAccount from './clineAccount'
+import clineMetadata from './clineMetadata'
 import priorityScheduling from './priorityScheduling'
 import qualityOps from './qualityOps'
 import accountOps from './accountOps'
@@ -19,6 +20,7 @@ import autoConfig from './autoConfig'
 
 export default {
   clineAccount,
+  clineMetadata,
   autoConfig,
   priorityScheduling,
   qualityOps,

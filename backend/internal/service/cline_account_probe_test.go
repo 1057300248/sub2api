@@ -34,7 +34,7 @@ func TestClineAdministrativeProbeUsesGuardedPipeline(t *testing.T) {
 				payload = "data: {\"choices\":[{\"finish_reason\":\"error\"}]}\n\ndata: [DONE]\n\n"
 			}
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(payload))}}
-			gateway := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+			gateway := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream, accountRepo: &clineAdmissionTestRepository{}}
 			s := &AccountTestService{accountRepo: &clineProbeAccountRepository{account: a}, openaiGatewayService: gateway}
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
@@ -60,7 +60,7 @@ func TestClineAdministrativeProbeRejectsImplicitModelsAndNativeModes(t *testing.
 	} {
 		a := clineRoutingAccount(t, tc.accountMode, cline.AuthAPIKey)
 		upstream := &httpUpstreamRecorder{}
-		s := &AccountTestService{openaiGatewayService: &OpenAIGatewayService{httpUpstream: upstream}}
+		s := &AccountTestService{openaiGatewayService: &OpenAIGatewayService{httpUpstream: upstream, accountRepo: &clineAdmissionTestRepository{}}}
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = httptest.NewRequest("POST", "/test", nil)
 		require.Error(t, s.testClineAccountConnection(c, a, tc.model, "hi", tc.mode))

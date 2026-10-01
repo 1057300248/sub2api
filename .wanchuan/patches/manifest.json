@@ -67,7 +67,17 @@
         "frontend/src/views/admin/AccountsView.vue",
         "frontend/src/components/account/__tests__/*Cline*",
         "frontend/src/components/account/__tests__/cline*",
-        "frontend/src/i18n/locales/*/clineAccount.ts"
+        "frontend/src/i18n/locales/*/clineAccount.ts",
+        "backend/internal/clinemigration/**",
+        "backend/cmd/cline-migrate/**",
+        "backend/migrations/26[4-6]_cline*.sql",
+        "backend/internal/server/routes/cline_admin.go",
+        "backend/internal/server/routes/admin.go",
+        "backend/internal/handler/admin/account_data.go",
+        "backend/internal/service/channel_monitor_quota_fetcher.go",
+        "backend/internal/service/channel_monitor_validate.go",
+        "frontend/src/api/admin/clineMetadata.ts",
+        "frontend/src/i18n/locales/*/clineMetadata.ts"
       ],
       "tests": [
         "python3 tools/verify_cline_platform.py",

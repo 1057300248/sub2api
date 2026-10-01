@@ -112,7 +112,7 @@ func TestClineThreeProtocolHTTPForwarding(t *testing.T) {
 							payload = fmt.Sprintf("data: {\"id\":\"chatcmpl-cline\",\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\ndata: [DONE]\n\n", model)
 						}
 						upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{media}}, Body: io.NopCloser(strings.NewReader(payload))}}
-						svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+						svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream, accountRepo: &clineAdmissionTestRepository{}}
 						body, path := clineProtocolRequest(protocol, stream)
 						rec := httptest.NewRecorder()
 						c, _ := gin.CreateTestContext(rec)
@@ -161,7 +161,7 @@ func TestClineThreeProtocolFailuresNeverFinalizeSuccessfully(t *testing.T) {
 				}
 				repo := &clineGuardLimitRepository{}
 				upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{media}}, Body: io.NopCloser(strings.NewReader(payload))}}
-				svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream, rateLimitService: &RateLimitService{accountRepo: repo}}
+				svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream, accountRepo: &clineAdmissionTestRepository{}, rateLimitService: &RateLimitService{accountRepo: repo}}
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest("POST", path, bytes.NewReader(body))
@@ -190,7 +190,7 @@ func TestClineThreeProtocolRejectsUnentitledModelsBeforeNetwork(t *testing.T) {
 			t.Run(mode+"/"+protocol, func(t *testing.T) {
 				a := clineRoutingAccount(t, mode, cline.AuthAPIKey)
 				upstream := &httpUpstreamRecorder{}
-				svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+				svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream, accountRepo: &clineAdmissionTestRepository{}}
 				body, path := clineProtocolRequest(protocol, false)
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
 				c.Request = httptest.NewRequest("POST", path, bytes.NewReader(body))
@@ -205,7 +205,7 @@ func TestClineThreeProtocolRejectsUnentitledModelsBeforeNetwork(t *testing.T) {
 
 func TestClineTokenCountNeverCallsNativeUpstream(t *testing.T) {
 	upstream := &httpUpstreamRecorder{}
-	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	svc := &OpenAIGatewayService{httpUpstream: upstream, accountRepo: &clineAdmissionTestRepository{}}
 	body := []byte(`{"model":"public-model","messages":[{"role":"user","content":"hello"}]}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)

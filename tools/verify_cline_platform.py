@@ -25,7 +25,7 @@ REQUIRED = {
     'backend/internal/service/openai_gateway_cc_pipeline.go': ['account.ValidateClineOutboundBody(body)', 's.prepareClineResponseGuard(ctx, account, body, stream)', 'guardResponse(resp)'],
     'backend/internal/service/cline_response_guard.go': ['prepareClineResponseGuard(', 'decoder.UseNumber()', 'context.WithTimeout(context.WithoutCancel(ctx)', 'cline.GuardSSEBody(', 'cline.GuardJSONBody(', 'handleClineScopedUpstreamError('],
     'backend/internal/service/cline_platform_ratelimit.go': ['handleClineScopedUpstreamError(', 'SetClineRateLimitIfLater('],
-    'backend/internal/repository/cline_account_state.go': ['SetClineRateLimitIfLater(', 'SaveClineStateIfUnchanged(', 'credentials=$5::jsonb', 'reset_authoritative', 'enqueueSchedulerOutbox('],
+    'backend/internal/repository/cline_account_state.go': ['SetClineRateLimitIfLater(', 'SaveClineStateIfUnchanged(', 'credentials=$5::jsonb', 'reset_authoritative', 'INSERT INTO scheduler_outbox'],
     'backend/internal/repository/account_repo.go': ['service.NormalizeClineCredentials(', 'service.PreserveClineStateExtra(', 'clineExtraUpdateSQL('],
     'backend/internal/pkg/cline/body_test.go': ['TestClineSSEFailurePreventsSuccessfulTerminal'],
     'backend/internal/pkg/cline/body_event_test.go': ['TestClineSSECompleteEventFailures', 'TestClineSSEEmptyDataHeartbeatAndMissingDone'],
@@ -46,6 +46,10 @@ REQUIRED = {
     'backend/internal/handler/cline_dispatch_test.go': ['TestClineStandaloneAndCompositeDispatch'],
     'backend/internal/handler/admin/account_cline_registration_test.go': ['TestClineGroupAndCompositeRequestBindings'],
 }
+
+for _name, _anchors in {'backend/internal/service/cline_metadata.go': ['RefreshClineMetadata(', 'WithHTTPUpstreamRedirectsDisabled', 'ClineMetadataForAccount('], 'backend/internal/service/openai_gateway_cc_pipeline.go': ['s.checkClineAdmission(ctx, account, body)'], 'backend/internal/repository/cline_metadata_repository.go': ['CheckClineAdmission(', 'cline_shared_limits', 'ClaimClineMetadataRefresh('], 'backend/internal/server/routes/admin.go': ['registerClineAccountRoutes(accounts, h)'], 'backend/internal/server/routes/cline_admin.go': ['GetClineMetadata', 'RefreshClineMetadata'], 'backend/internal/handler/admin/account_data.go': ['validateClineDataAccount(item)', 'portableClineExtra(acc.Platform'], 'backend/internal/clinemigration/migration.go': ['func Preview(', 'func Apply(', 'func Rollback(', 'pg_try_advisory_xact_lock', 'ALL_WORKERS_STOPPED'], 'backend/migrations/265_cline_credential_write_guard.sql': ['wanchuan_cline_guard_credentials'], 'frontend/src/components/account/ClineAccountModal.vue': ['ClineMetadataPanel']}.items():
+    REQUIRED.setdefault(_name, []).extend(_anchors)
+
 errors=[]
 for name, anchors in REQUIRED.items():
     path=ROOT/name

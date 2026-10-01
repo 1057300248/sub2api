@@ -1,24 +1,9 @@
 name: Cline platform development
-
-on:
-  push:
-    branches: ['codex/cline-platform-modular-20261001']
-    paths:
-      - '.github/workflows/cline-platform-development.yml'
-      - '.wanchuan/**'
-      - 'backend/**'
-      - 'tools/**'
-      - 'frontend/**'
-      - 'Makefile'
-  workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   integration:
     if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
@@ -27,111 +12,109 @@ jobs:
     env:
       EXPECTED_SHA: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: backend/go.mod
-          check-latest: false
-          cache-dependency-path: backend/go.sum
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - name: Check exact source and formatting without mutation
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          unformatted="$(gofmt -l backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go backend/internal/service/openai_gateway_cc_pipeline.go backend/internal/repository/cline*.go backend/internal/server/api_contract_test.go backend/internal/reauthruntime/runtime_test.go)"
-          if [[ -n "$unformatted" ]]; then
-            printf 'Files require gofmt:\n%s\n' "$unformatted"
-            exit 1
-          fi
-          git diff --check
-      - name: Verify module integrity and CI invariants
-        run: |
-          python3 -m pip install -r .github/release-tools/requirements-release.txt
-          python3 tools/verify_cline_platform.py
-          python3 tools/wanchuan_patchpack.py verify
-          python3 -m unittest discover -s tools -p 'test_wanchuan*.py'
-      - name: Policy and SSE race tests
-        working-directory: backend
-        shell: bash
-        run: |
-          set -euo pipefail
-          go test -json -race -tags=unit -count=3 ./internal/pkg/cline | tee "$RUNNER_TEMP/cline-policy-tests.jsonl"
-          python3 - <<'PY'
-          import collections, json, os
-          from pathlib import Path
-          events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-policy-tests.jsonl').read_text().splitlines() if line.strip()]
-          passed = collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')
-          required = {'TestClineSSEFailurePreventsSuccessfulTerminal', 'TestClineSSEClosePropagatesSourceError', 'TestClineSSEFailureIsStickyAcrossSmallReads', 'TestClineSSECompleteEventFailures', 'TestClineSSEEventBoundsAndTruncation', 'TestClineSSEMultilineAndLineEndings', 'TestClineSSEEmptyDataHeartbeatAndMissingDone', 'TestClineGenerationErrorIgnoresGeneratedFields', 'TestClineJSON200FailureAndBounds', 'TestClineJSONSuccessPreservesBytesAndClose', 'TestClineJSONClosePropagatesSourceError', 'TestClineGenerationErrorStatusOnlyUsesErrorEnvelopes'}
-          missing = sorted(name for name in required if passed[name] != 3)
-          if missing or any(e.get('Action') == 'skip' for e in events):
-              raise SystemExit(f'policy tests missing, skipped or not repeated three times: {missing}')
-          print('Required Cline SSE/JSON/error-envelope tests executed three times with race detection.')
-          PY
-      - name: Cline service and legacy cooldown regression tests
-        working-directory: backend
-        shell: bash
-        run: |
-          set -euo pipefail
-          go test -json -tags=unit -count=1 -run '^Test(Cline|ParseCline|SetCline|Handle429Cline)' ./internal/service | tee "$RUNNER_TEMP/cline-service-tests.jsonl"
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-service-tests.jsonl').read_text().splitlines() if line.strip()]
-          passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
-          required = {'TestClineAccountDoesNotBecomeDeepseek', 'TestClineCredentialsAndScopedRotation', 'TestClineResponseGuardPersistsScopedErrors', 'TestClineResponseGuardFreeScopeUsesActualModel', 'TestClineResponseGuardFreezesCredentialsAndCancellation', 'TestClineResponseGuardNeverInventsQuotaFromOutput', 'TestClineResponseGuardStreamingJSONAndIsolation', 'TestClineRoutingRegistrationAndCapabilities', 'TestClineThreeProtocolHTTPForwarding', 'TestClineThreeProtocolFailuresNeverFinalizeSuccessfully', 'TestClineThreeProtocolRejectsUnentitledModelsBeforeNetwork', 'TestClineTokenCountNeverCallsNativeUpstream', 'TestClineAdministrativeProbeUsesGuardedPipeline', 'TestClineAdministrativeProbeRejectsImplicitModelsAndNativeModes'}
-          if not required.issubset(passed) or any(e.get('Action') == 'skip' for e in events):
-              raise SystemExit(f'Cline service tests missing or skipped: {sorted(required-passed)}')
-          print('Cline service tests executed; compile-only packages are not reported as tested.')
-          PY
-      - name: Cline registration and write ownership regressions
-        working-directory: backend
-        shell: bash
-        run: |
-          set -euo pipefail
-          go test -json -tags=unit -count=1 -run '^TestCline' ./internal/repository ./internal/handler ./internal/handler/admin | tee "$RUNNER_TEMP/cline-registration-tests.jsonl"
-          python3 - <<'PYTEST'
-          import json, os
-          from pathlib import Path
-          events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-registration-tests.jsonl').read_text().splitlines() if line.strip()]
-          passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
-          required = {'TestClineSchedulerProjectionRetainsQuotaIdentity', 'TestClineAccountWriteEntryPointsValidateBeforeDatabase', 'TestClineLockedEditPreservesLatestManagedState', 'TestClineManagedExtraDeltaIsPlatformScoped', 'TestClineStandaloneAndCompositeDispatch', 'TestClineGroupAndCompositeRequestBindings'}
-          if not required.issubset(passed) or any(e.get('Action') == 'skip' for e in events):
-              raise SystemExit(f'Cline registration tests missing or skipped: {sorted(required-passed)}')
-          print('Cline registration, scheduler identity, probe and managed write-path regressions executed.')
-          PYTEST
-      - name: Managed runtime readiness race regression
-        working-directory: backend
-        shell: bash
-        run: |
-          set -euo pipefail
-          go test -json -race -tags=integration -count=50 -run '^TestManagedProcessGetsOnlyWorkerEnvironmentAndStops$' ./internal/reauthruntime | tee "$RUNNER_TEMP/reauth-runtime-tests.jsonl"
-          python3 - <<'PYTEST'
-          import json, os
-          from pathlib import Path
-          events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'reauth-runtime-tests.jsonl').read_text().splitlines() if line.strip()]
-          name = 'TestManagedProcessGetsOnlyWorkerEnvironmentAndStops'
-          passed = sum(e.get('Action') == 'pass' and e.get('Test') == name for e in events)
-          if passed != 50 or any(e.get('Action') == 'skip' for e in events):
-              raise SystemExit(f'managed runtime regression missing or skipped: {passed}/50 passes')
-          print('Managed runtime readiness, environment isolation and stop verified 50 times with race detection.')
-          PYTEST
-      - name: Settings API contract regression and server build
-        working-directory: backend
-        run: |
-          go test -v -tags=unit -count=1 -run '^TestAPIContracts$' ./internal/server
-          go build -o "$RUNNER_TEMP/sub2api-cline" ./cmd/server
-      - name: Verify checked source remained unchanged
-        run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          git diff --exit-code
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: backend/go.mod
+        check-latest: false
+        cache-dependency-path: backend/go.sum
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Check exact source and formatting without mutation
+      shell: bash
+      run: "set -euo pipefail\ntest \"$(git rev-parse HEAD)\" = \"$EXPECTED_SHA\"\nunformatted=\"$(gofmt -l backend/internal/clinemigration/*.go\
+        \ backend/cmd/cline-migrate/*.go backend/internal/handler/admin/account_cline*.go backend/internal/server/routes/cline_admin.go\
+        \ backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go backend/internal/service/openai_gateway_cc_pipeline.go\
+        \ backend/internal/repository/cline*.go backend/internal/server/api_contract_test.go backend/internal/reauthruntime/runtime_test.go)\"\
+        \nif [[ -n \"$unformatted\" ]]; then\n  printf 'Files require gofmt:\\n%s\\n' \"$unformatted\"\n  exit 1\nfi\ngit\
+        \ diff --check\n"
+    - name: Verify module integrity and CI invariants
+      run: 'python3 -m pip install -r .github/release-tools/requirements-release.txt
 
+        python3 tools/verify_cline_platform.py
+
+        python3 tools/wanchuan_patchpack.py verify
+
+        python3 -m unittest discover -s tools -p ''test_wanchuan*.py''
+
+        '
+    - name: Policy and SSE race tests
+      working-directory: backend
+      shell: bash
+      run: "set -euo pipefail\ngo test -json -race -tags=unit -count=3 ./internal/pkg/cline | tee \"$RUNNER_TEMP/cline-policy-tests.jsonl\"\
+        \npython3 - <<'PY'\nimport collections, json, os\nfrom pathlib import Path\nevents = [json.loads(line) for line in\
+        \ (Path(os.environ['RUNNER_TEMP'])/'cline-policy-tests.jsonl').read_text().splitlines() if line.strip()]\npassed =\
+        \ collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')\nrequired = {'TestClineTerminalFailurePreservesOnlyValidatedUsage',\
+        \ 'TestClineSSEFailurePreventsSuccessfulTerminal', 'TestClineSSEClosePropagatesSourceError', 'TestClineSSEFailureIsStickyAcrossSmallReads',\
+        \ 'TestClineSSECompleteEventFailures', 'TestClineSSEEventBoundsAndTruncation', 'TestClineSSEMultilineAndLineEndings',\
+        \ 'TestClineSSEEmptyDataHeartbeatAndMissingDone', 'TestClineGenerationErrorIgnoresGeneratedFields', 'TestClineJSON200FailureAndBounds',\
+        \ 'TestClineJSONSuccessPreservesBytesAndClose', 'TestClineJSONClosePropagatesSourceError', 'TestClineGenerationErrorStatusOnlyUsesErrorEnvelopes'}\n\
+        missing = sorted(name for name in required if passed[name] != 3)\nif missing or any(e.get('Action') == 'skip' for\
+        \ e in events):\n    raise SystemExit(f'policy tests missing, skipped or not repeated three times: {missing}')\nprint('Required\
+        \ Cline SSE/JSON/error-envelope tests executed three times with race detection.')\nPY\n"
+    - name: Cline service and legacy cooldown regression tests
+      working-directory: backend
+      shell: bash
+      run: "set -euo pipefail\ngo test -json -tags=unit -count=1 -run '^Test(Cline|ParseCline|SetCline|Handle429Cline)' ./internal/service\
+        \ | tee \"$RUNNER_TEMP/cline-service-tests.jsonl\"\npython3 - <<'PY'\nimport json, os\nfrom pathlib import Path\n\
+        events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-service-tests.jsonl').read_text().splitlines()\
+        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineTerminalFailureUsageIsNotLostOrDoubleCounted',\
+        \ 'TestClineMetadataRefreshUsesBoundedCredentialSafeGETs', 'TestClineMetadataErrorsPreserveUnknownAndLastValidCatalog',\
+        \ 'TestClineMetadataBoundariesAndPersistenceFailure', 'TestClineMetadataExpiryAndIdentityRotation', 'TestClineAdmissionFailsClosedWithoutDurableState',\
+        \ 'TestClineMonitorCannotTurnUnknownIntoHealthyZero', 'TestClinePartialFailurePreservesObservedUsageAndBillingIdentity',\
+        \ 'TestClineAccountDoesNotBecomeDeepseek', 'TestClineCredentialsAndScopedRotation', 'TestClineResponseGuardPersistsScopedErrors',\
+        \ 'TestClineResponseGuardFreeScopeUsesActualModel', 'TestClineResponseGuardFreezesCredentialsAndCancellation', 'TestClineResponseGuardNeverInventsQuotaFromOutput',\
+        \ 'TestClineResponseGuardStreamingJSONAndIsolation', 'TestClineRoutingRegistrationAndCapabilities', 'TestClineThreeProtocolHTTPForwarding',\
+        \ 'TestClineThreeProtocolFailuresNeverFinalizeSuccessfully', 'TestClineThreeProtocolRejectsUnentitledModelsBeforeNetwork',\
+        \ 'TestClineTokenCountNeverCallsNativeUpstream', 'TestClineAdministrativeProbeUsesGuardedPipeline', 'TestClineAdministrativeProbeRejectsImplicitModelsAndNativeModes'}\n\
+        if not required.issubset(passed) or any(e.get('Action') == 'skip' for e in events):\n    raise SystemExit(f'Cline\
+        \ service tests missing or skipped: {sorted(required-passed)}')\nprint('Cline service tests executed; compile-only\
+        \ packages are not reported as tested.')\nPY\n"
+    - name: Cline registration and write ownership regressions
+      working-directory: backend
+      shell: bash
+      run: "set -euo pipefail\ngo test -json -tags=unit -count=1 -run '^TestCline' ./internal/repository ./internal/handler\
+        \ ./internal/handler/admin | tee \"$RUNNER_TEMP/cline-registration-tests.jsonl\"\npython3 - <<'PYTEST'\nimport json,\
+        \ os\nfrom pathlib import Path\nevents = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-registration-tests.jsonl').read_text().splitlines()\
+        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineMetadataHandlerIsLocalAndRedacted',\
+        \ 'TestClinePortableDataRetainsModesButNotManagedGrants', 'TestClineSchedulerProjectionRetainsQuotaIdentity', 'TestClineAccountWriteEntryPointsValidateBeforeDatabase',\
+        \ 'TestClineLockedEditPreservesLatestManagedState', 'TestClineManagedExtraDeltaIsPlatformScoped', 'TestClineStandaloneAndCompositeDispatch',\
+        \ 'TestClineGroupAndCompositeRequestBindings'}\nif not required.issubset(passed) or any(e.get('Action') == 'skip'\
+        \ for e in events):\n    raise SystemExit(f'Cline registration tests missing or skipped: {sorted(required-passed)}')\n\
+        print('Cline registration, scheduler identity, probe and managed write-path regressions executed.')\nPYTEST\n"
+    - name: Managed runtime readiness race regression
+      working-directory: backend
+      shell: bash
+      run: "set -euo pipefail\ngo test -json -race -tags=integration -count=50 -run '^TestManagedProcessGetsOnlyWorkerEnvironmentAndStops$'\
+        \ ./internal/reauthruntime | tee \"$RUNNER_TEMP/reauth-runtime-tests.jsonl\"\npython3 - <<'PYTEST'\nimport json, os\n\
+        from pathlib import Path\nevents = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'reauth-runtime-tests.jsonl').read_text().splitlines()\
+        \ if line.strip()]\nname = 'TestManagedProcessGetsOnlyWorkerEnvironmentAndStops'\npassed = sum(e.get('Action') ==\
+        \ 'pass' and e.get('Test') == name for e in events)\nif passed != 50 or any(e.get('Action') == 'skip' for e in events):\n\
+        \    raise SystemExit(f'managed runtime regression missing or skipped: {passed}/50 passes')\nprint('Managed runtime\
+        \ readiness, environment isolation and stop verified 50 times with race detection.')\nPYTEST\n"
+    - name: Settings API contract regression and server build
+      working-directory: backend
+      run: 'go test -v -tags=unit -count=1 -run ''^TestAPIContracts$'' ./internal/server
+
+        go build -o "$RUNNER_TEMP/sub2api-cline" ./cmd/server
+
+
+        go test -v -tags=unit ./internal/clinemigration
+
+        go build -o "$RUNNER_TEMP/cline-migrate" ./cmd/cline-migrate
+
+        '
+    - name: Verify checked source remained unchanged
+      run: 'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+        git diff --exit-code
+
+        '
   postgres:
     if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
     runs-on: ubuntu-latest
@@ -141,35 +124,104 @@ jobs:
       GOMAXPROCS: '2'
       GOGC: '50'
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: backend/go.mod
-          check-latest: false
-          cache-dependency-path: backend/go.sum
-      - name: Actual Cline PostgreSQL CAS and migration regressions
-        working-directory: backend
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          docker info >/dev/null
-          go test -json -p 2 -tags=integration -count=3 -run '^TestClinePostgres' ./internal/repository | tee "$RUNNER_TEMP/cline-postgres-tests.jsonl"
-          python3 - <<'PYTEST'
-          import collections, json, os
-          from pathlib import Path
-          events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-postgres-tests.jsonl').read_text().splitlines() if line.strip()]
-          passed = collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')
-          required = {'TestClinePostgresConcurrentScopedCAS', 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits', 'TestClinePostgresCreationCannotImportManagedState', 'TestClinePostgresMigrationAndQuotaSchema'}
-          missing = sorted(name for name in required if passed[name] != 3)
-          if missing or any(e.get('Action') == 'skip' for e in events):
-              raise SystemExit(f'Cline PostgreSQL tests missing, skipped or not repeated: {missing}')
-          print('Actual Cline PostgreSQL concurrency, rotation, ownership and migrated schema verified three times.')
-          PYTEST
-      - name: Verify checked source remained unchanged
-        run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          git diff --exit-code
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: backend/go.mod
+        check-latest: false
+        cache-dependency-path: backend/go.sum
+    - name: Actual Cline PostgreSQL CAS and migration regressions
+      working-directory: backend
+      shell: bash
+      run: "set -euo pipefail\ntest \"$(git rev-parse HEAD)\" = \"$EXPECTED_SHA\"\ndocker info >/dev/null\ngo test -json -p\
+        \ 2 -tags=integration -count=3 -run '^TestClinePostgres' ./internal/repository | tee \"$RUNNER_TEMP/cline-postgres-tests.jsonl\"\
+        \npython3 - <<'PYTEST'\nimport collections, json, os\nfrom pathlib import Path\nevents = [json.loads(line) for line\
+        \ in (Path(os.environ['RUNNER_TEMP'])/'cline-postgres-tests.jsonl').read_text().splitlines() if line.strip()]\npassed\
+        \ = collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')\nrequired = {'TestClinePostgresIdentitySwitchDoesNotReattributeOldLimits',\
+        \ 'TestClinePostgresSharedSubjectLimitsAndRestart', 'TestClinePostgresRefreshLeaseAndObservationOrdering', 'TestClinePostgresOutboxFailureRollsBackState',\
+        \ 'TestClinePostgresDirectAndBulkCredentialGuards', 'TestClinePostgresAdmissionRejectsStaleCredentials', 'TestClinePostgresConcurrentScopedCAS',\
+        \ 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits',\
+        \ 'TestClinePostgresCreationCannotImportManagedState', 'TestClinePostgresMigrationAndQuotaSchema'}\nmissing = sorted(name\
+        \ for name in required if passed[name] != 3)\nif missing or any(e.get('Action') == 'skip' for e in events):\n    raise\
+        \ SystemExit(f'Cline PostgreSQL tests missing, skipped or not repeated: {missing}')\nprint('Actual Cline PostgreSQL\
+        \ concurrency, rotation, ownership and migrated schema verified three times.')\nPYTEST\n"
+    - name: Verify checked source remained unchanged
+      run: 'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+        git diff --exit-code
+
+        '
+  offline-migration:
+    if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLINE_MIGRATION_TEST_DSN: postgres://cline_fixture:fixture_only@127.0.0.1:55432/cline_fixture?sslmode=disable
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: backend/go.mod
+        cache-dependency-path: backend/go.sum
+    - name: Start isolated disposable migration database
+      run: docker run --detach --rm --name cline-migration-fixture -e POSTGRES_USER=cline_fixture -e POSTGRES_PASSWORD=fixture_only
+        -e POSTGRES_DB=cline_fixture -p 127.0.0.1:55432:5432 postgres:16
+    - name: Execute real migration transaction regressions
+      working-directory: backend
+      shell: bash
+      run: 'set -euo pipefail
+
+        go test -json -tags=integration -count=3 ./internal/clinemigration | tee "$RUNNER_TEMP/cline-migration-tests.jsonl"
+
+        python3 - <<''PYTEST''
+
+        import collections,json,os
+
+        from pathlib import Path
+
+        events=[json.loads(line) for line in (Path(os.environ[''RUNNER_TEMP''])/''cline-migration-tests.jsonl'').read_text().splitlines()
+        if line.strip()]
+
+        passed=collections.Counter(e.get(''Test'') for e in events if e.get(''Action'')==''pass'')
+
+        required={''TestClineMigrationPostgresApplyRollbackAndIdempotency'',''TestClineMigrationPostgresRejectsDriftAndUnsafeRollback'',''TestClineMigrationPostgresFailureIsAtomic'',''TestClineMigrationPostgresRequiresQuiescenceAndKeepsCooldown''}
+
+        missing=sorted(t for t in required if passed[t]!=3)
+
+        if missing or any(e.get(''Action'')==''skip'' for e in events):raise SystemExit(f''migration tests missing/skipped:
+        {missing}'')
+
+        print(''Four real PostgreSQL migration tests each passed three times; no live database used.'')
+
+        PYTEST
+
+        '
+    - name: Remove disposable migration database
+      if: always()
+      run: docker rm --force cline-migration-fixture || true
+    - name: Verify checked source remained unchanged
+      env:
+        EXPECTED_SHA: ${{ github.sha }}
+      run: 'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+        git diff --exit-code
+
+        '
+'on':
+  push:
+    branches:
+    - codex/cline-platform-modular-20261001
+    paths:
+    - .github/workflows/cline-platform-development.yml
+    - .wanchuan/**
+    - backend/**
+    - tools/**
+    - frontend/**
+    - Makefile
+  workflow_dispatch: null

@@ -31,6 +31,10 @@
         <label v-if="account" class="flex items-center gap-2 text-sm"><input v-model="draft.schedulable" type="checkbox" :disabled="draft.mode === 'free' || draft.mode === 'unknown'" />{{ t('clineAccount.schedulable') }}</label>
         <label class="block text-sm">{{ t('clineAccount.notes') }}<textarea v-model="draft.notes" class="input mt-1 w-full" rows="2" /></label>
       </fieldset>
+      <template v-if="account && show">
+        <button v-if="!showMetadata" type="button" class="btn btn-secondary" :disabled="saving" @click="showMetadata = true">{{ t('clineMetadata.open') }}</button>
+        <ClineMetadataPanel v-if="showMetadata" :account-id="account.id" :mode="draft.mode" @select="addCatalogModel" />
+      </template>
       <p class="text-xs text-gray-500">{{ t('clineAccount.noProbe') }}</p>
     </form>
     <template #footer><button class="btn btn-secondary" :disabled="saving" @click="close">{{ t('clineAccount.cancel') }}</button><button form="cline-account-form" type="submit" data-testid="cline-save" class="btn btn-primary" :disabled="saving">{{ t(saving ? 'clineAccount.saving' : 'clineAccount.save') }}</button></template>
@@ -42,6 +46,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account, AdminGroup, CreateAccountRequest } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ClineMetadataPanel from './ClineMetadataPanel.vue'
 import * as accountsAPI from '@/api/admin/accounts'
 import { buildClineAccountPayload, clineAccountDraft, ClineFormError } from './clineAccountForm'
 
@@ -50,8 +55,14 @@ const emit = defineEmits<{ close: []; saved: [] }>()
 const { t } = useI18n()
 const draft = reactive(clineAccountDraft())
 const saving = ref(false)
+const showMetadata = ref(false)
+function addCatalogModel(id: string) {
+  if (saving.value || draft.models.some(row => row.publicID === id)) return
+  draft.models.push({ publicID: id, upstreamID: id })
+}
 const error = ref('')
 watch(() => [props.show, props.account] as const, ([show]) => {
+  showMetadata.value = false
   if (!show) { draft.apiKey = ''; return }
   Object.assign(draft, clineAccountDraft(props.account))
   error.value = ''

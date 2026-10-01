@@ -44,7 +44,10 @@ func (s *RateLimitService) handleClineScopedUpstreamError(ctx context.Context, a
 		return true
 	}
 	if err := repo.SetClineRateLimitIfLater(ctx, account, limit.Scope, limit.Until(), limit.Kind, limit.ResetAt != nil); err != nil {
-		slog.Error("cline.scoped_limit_persist_failed", "account_id", account.ID, "scope", limit.Scope, "error", err)
+		slog.Error("cline.scoped_limit_persist_failed", "account_id", account.ID, "scope", limit.Scope)
+		if s.runtimeBlocker != nil {
+			s.runtimeBlocker.BlockAccountScheduling(account, time.Now().Add(5*time.Minute), "cline_state_persist_failed")
+		}
 	}
 	return true
 }

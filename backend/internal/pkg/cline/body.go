@@ -143,7 +143,7 @@ func (b *guardedSSEBody) readEvent() ([]byte, error) {
 			if b.onError != nil {
 				b.onError(payload)
 			}
-			return nil, ErrStreamFailure
+			return failureUsageEvent(data), ErrStreamFailure
 		}
 		if readErr != nil {
 			if !b.sawDone || dataLines > 0 || eventType != "" {

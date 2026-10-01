@@ -1,0 +1,22 @@
+export default {
+  title: 'Catalog and quota observations',
+  open: 'View Cline catalog and quota',
+  refresh: 'Refresh from Cline',
+  loading: 'Loading…',
+  savedCredential: 'Uses the saved account credential, not unsaved form values. Opening this panel reads local state only. Refresh performs metadata GETs, never inference.',
+  requestFailed: 'Metadata could not be refreshed. Retained values are historical observations; no zero usage or subscription status has been inferred.',
+  unknownNotice: 'Missing, expired or unavailable quota windows are unknown, not zero.',
+  passOnly: 'These subscription windows apply to Pass. This screen does not grant Free API access or infer a PAYG balance.',
+  five_hour: 'Five-hour usage',
+  weekly: 'Weekly usage',
+  monthly: 'Monthly usage',
+  resets: 'Reported reset:',
+  lastSuccess: 'Last successful quota observation:',
+  identityVerified: 'The upstream active-account identity was recently verified. Keys with the same verified active account share observed cooldowns.',
+  identityUnknown: 'Active-account identity is unverified or stale. This does not prove that the account has no quota restrictions.',
+  costNotice: 'Subscription reference token prices are not additional Pass charges. Existing downstream pricing is unchanged; incremental upstream cost is not inferred from this metadata.',
+  catalog: 'Model suggestions for the selected mode',
+  catalogNotice: 'Adding a model is explicit and does not grant entitlement. Saving still validates the full whitelist; refreshing never changes it.',
+  staleCatalog: 'The catalog is a last-valid cached observation, not a current availability guarantee.',
+  add: 'Add explicitly'
+}

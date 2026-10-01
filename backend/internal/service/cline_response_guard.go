@@ -35,6 +35,9 @@ func (s *OpenAIGatewayService) prepareClineResponseGuard(ctx context.Context, ac
 		return nil, fmt.Errorf("snapshot Cline request credentials: %w", err)
 	}
 	snapshot := &Account{ID: account.ID, Platform: account.Platform, Type: account.Type, Credentials: snapshotCredentials}
+	if state := account.GetClineState(); state != nil {
+		snapshot.Extra = map[string]any{ClineStateExtraKey: state}
+	}
 	var request struct {
 		Model string `json:"model"`
 	}
