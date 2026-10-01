@@ -37,3 +37,39 @@ jobs:
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
+  offline-go:
+    if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Cache public dependencies without editing source
+        working-directory: backend
+        env:
+          GOPROXY: https://proxy.golang.org
+          GOPRIVATE: ''
+          GONOPROXY: ''
+        run: |
+          set -euo pipefail
+          go mod download
+          git diff --exit-code
+          tar -czf "$RUNNER_TEMP/go-toolchain.tar.gz" -C "$(go env GOROOT)" .
+          tar -czf "$RUNNER_TEMP/go-modcache.tar.gz" -C "$(go env GOMODCACHE)" .
+          go version > "$RUNNER_TEMP/go-version.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cline-offline-go-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/go-toolchain.tar.gz
+            ${{ runner.temp }}/go-modcache.tar.gz
+            ${{ runner.temp }}/go-version.txt
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
