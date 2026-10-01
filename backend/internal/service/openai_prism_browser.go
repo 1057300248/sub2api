@@ -219,7 +219,7 @@ func prismBrowserSessionID(c *gin.Context, accountID int64, body []byte) (string
 	for _, names := range [][]string{openAIThreadIdentityHeaders, openAISessionIdentityHeaders} {
 		for _, name := range names {
 			if len(c.Request.Header.Values(name)) > 1 {
-				return "", errors.New("Prism conversation identity headers must not be repeated")
+				return "", errors.New("prism conversation identity headers must not be repeated")
 			}
 		}
 	}
@@ -229,11 +229,11 @@ func prismBrowserSessionID(c *gin.Context, accountID int64, body []byte) (string
 		return "", nil
 	case OpenAIClientSessionIdentityResolved:
 	default:
-		return "", errors.New("Prism conversation identity is invalid or conflicting")
+		return "", errors.New("prism conversation identity is invalid or conflicting")
 	}
 	keyID := getAPIKeyIDFromContext(c)
 	if keyID <= 0 || accountID <= 0 {
-		return "", errors.New("Prism session reuse requires an authenticated API key")
+		return "", errors.New("prism session reuse requires an authenticated API key")
 	}
 	// The private adapter header is always derived here; client-supplied
 	// X-Prism-Session-ID values cannot select an existing cached context.
