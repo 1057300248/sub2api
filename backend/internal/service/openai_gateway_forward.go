@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -102,6 +101,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	modelForBPS := gjson.GetBytes(body, "model").String()
+	if accountUsesPrismBrowser(account, s.cfg) {
+		return s.forwardPrismBrowser(ctx, c, account, body, startTime)
+	}
 	if c.GetBool(bpsAccountProbeRequiredContextKey) &&
 		(!account.IsExcelBPSEnabledForModel(modelForBPS) || account.excelBPSNativeFallbackReason(body) != "") {
 		return nil, errors.New("bps probe path is unavailable")
@@ -1661,17 +1663,12 @@ func shouldAdaptDeepSeekResponsesClientTools(account *Account, body []byte, comp
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
 	defer requesttiming.Observe(ctx, "build_upstream_request")()
-	prismBrowser := accountUsesPrismBrowser(account, s.cfg)
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {
 	case AccountTypeOAuth:
 		// OAuth accounts use ChatGPT internal API
-		if prismBrowser {
-			targetURL = prismBrowserResponsesURL(s.cfg.Gateway.PrismBrowser.BaseURL)
-		} else {
-			targetURL = chatgptCodexURL
-		}
+		targetURL = chatgptCodexURL
 	case AccountTypeSetupToken:
 		if account.IsOpenAIOAuthLike() {
 			targetURL = chatgptCodexURL
@@ -1708,32 +1705,18 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 
-	// Prism browser mode uses only the server-managed adapter key; it must not
-	// require the account OAuth token.
-	if !prismBrowser {
-		authHeaders, err := s.buildOpenAIAuthenticationHeaders(ctx, account, token)
-		if err != nil {
-			return nil, fmt.Errorf("build openai authentication headers: %w", err)
-		}
-		for key, values := range authHeaders {
-			for _, value := range values {
-				req.Header.Add(key, value)
-			}
-		}
+	authHeaders, err := s.buildOpenAIAuthenticationHeaders(ctx, account, token)
+	if err != nil {
+		return nil, fmt.Errorf("build openai authentication headers: %w", err)
 	}
-	if prismBrowser {
-		reqKey := strings.TrimSpace(s.cfg.Gateway.PrismBrowser.APIKey)
-		if reqKey == "" {
-			return nil, errors.New("prism browser adapter is enabled but its API key is not configured")
+	for key, values := range authHeaders {
+		for _, value := range values {
+			req.Header.Add(key, value)
 		}
-		req.Header.Set("Authorization", "Bearer "+reqKey)
-		// The adapter resolves Prism OAuth material by account ID. Tokens stay in
-		// the encrypted account store and never cross this request boundary.
-		req.Header.Set("X-Prism-Account-ID", strconv.FormatInt(account.ID, 10))
 	}
 
 	// Set headers specific to OAuth accounts (ChatGPT internal API)
-	if account.UsesOpenAICodexProtocol() && !prismBrowser {
+	if account.UsesOpenAICodexProtocol() {
 		// Required: set Host for ChatGPT API (must use req.Host, not Header.Set)
 		req.Host = "chatgpt.com"
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
@@ -1756,7 +1739,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	if err := s.applyOpenAICodexTicket(ctx, account, extractOpenAICodexTicketModel(body), req.Header); err != nil {
 		return nil, err
 	}
-	if account.UsesOpenAICodexProtocol() && !prismBrowser {
+	if account.UsesOpenAICodexProtocol() {
 		compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
 		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
@@ -1820,7 +1803,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 
 	// 终态收口：强制统一 OAuth 出站身份（User-Agent / originator / version 同源自洽）。
 	// 客户端自报身份不参与构造，浏览器型 UA 也因此不会再到达上游（原浏览器 UA 兜底已被吸收）。
-	if account.UsesOpenAICodexProtocol() && !prismBrowser {
+	if account.UsesOpenAICodexProtocol() {
 		enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
 	}
 

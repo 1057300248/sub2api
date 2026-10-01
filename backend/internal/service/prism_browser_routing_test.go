@@ -25,6 +25,26 @@ func TestPrismBrowserResponsesURL(t *testing.T) {
 	}
 }
 
+func TestPrismBrowserAdapterURLStaysOnLoopback(t *testing.T) {
+	valid := []string{"http://127.0.0.1:8319/v1", "http://[::1]:8319/v1/responses"}
+	for _, input := range valid {
+		if _, err := prismBrowserAdapterURL(input); err != nil {
+			t.Fatalf("valid adapter %q rejected: %v", input, err)
+		}
+	}
+	invalid := []string{
+		"https://127.0.0.1:8319/v1", "http://localhost:8319/v1",
+		"http://adapter.example:8319/v1", "http://127.0.0.2:8319/v1",
+		"http://127.0.0.1:8319/v1?next=evil", "http://user@127.0.0.1:8319/v1",
+		"http://127.0.0.1:8319/other", "http://127.0.0.1/v1",
+	}
+	for _, input := range invalid {
+		if _, err := prismBrowserAdapterURL(input); err == nil {
+			t.Fatalf("unsafe adapter %q accepted", input)
+		}
+	}
+}
+
 func TestAccountUsesPrismBrowserRequiresServerAndAccountSwitch(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Gateway.PrismBrowser.Enabled = true
