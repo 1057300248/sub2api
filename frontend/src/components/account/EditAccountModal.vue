@@ -6129,7 +6129,7 @@ const handleSubmit = async () => {
         if (prismBrowserEnabled.value) newExtra.openai_prism_browser = true
         else delete newExtra.openai_prism_browser
       }
-      if (props.account.type === 'apikey') {
+		if (props.account.type === 'apikey') {
         if (!openAITextGenerationCapabilityEnabled.value || openAIResponsesMode.value === 'auto') {
           delete newExtra.openai_responses_mode
         } else {
