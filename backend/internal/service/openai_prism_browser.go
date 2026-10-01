@@ -67,6 +67,33 @@ func prismBrowserAdapterURL(baseURL string) (string, error) {
 	return parsed.String(), nil
 }
 
+// prismBrowserAdapterMisconfigured reports the adapter's own authentication and
+// routing failures: the gateway and adapter disagree on the bridge key or path.
+// Passing those statuses through would tell the client its API key was rejected.
+func prismBrowserAdapterMisconfigured(status int) bool {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed:
+		return true
+	}
+	return false
+}
+
+// prismBrowserAdapterErrorMessage tells an admin why the adapter refused a test
+// turn (unsupported model, busy browser, retained pending turn). The adapter only
+// returns fixed error codes and messages, never credentials or prompt text.
+func prismBrowserAdapterErrorMessage(status int, body []byte) string {
+	code := strings.TrimSpace(gjson.GetBytes(body, "error.type").String())
+	message := strings.TrimSpace(gjson.GetBytes(body, "error.message").String())
+	switch {
+	case code != "" && message != "":
+		return fmt.Sprintf("Prism adapter returned HTTP %d (%s): %s", status, code, truncateString(message, 300))
+	case code != "":
+		return fmt.Sprintf("Prism adapter returned HTTP %d (%s)", status, code)
+	default:
+		return fmt.Sprintf("Prism adapter returned HTTP %d", status)
+	}
+}
+
 func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.Context, account *Account, body []byte, started time.Time) (*OpenAIForwardResult, error) {
 	if isOpenAIResponsesCompactPath(c) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "Prism adapter does not support responses/compact"}})
@@ -84,6 +111,10 @@ func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.C
 		return nil, err
 	}
 	if status != http.StatusOK {
+		if prismBrowserAdapterMisconfigured(status) {
+			c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "prism_unavailable", "message": "Prism adapter rejected the gateway; check the adapter key and endpoint"}})
+			return nil, fmt.Errorf("prism adapter returned HTTP %d", status)
+		}
 		c.Data(status, "application/json", responseBody)
 		return nil, fmt.Errorf("prism adapter returned HTTP %d", status)
 	}

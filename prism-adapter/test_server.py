@@ -1,9 +1,13 @@
+import contextlib
 import importlib.util
 import json
 import tempfile
 import threading
+import time
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -118,6 +122,191 @@ class AdapterTests(unittest.TestCase):
                        {"text": {"format": {"type": "json_schema"}}}):
             with self.assertRaises(adapter.AdapterError):
                 adapter.parse_prompt({"model": adapter.MODEL, "input": "hi", **fields})
+
+
+PROJECT = "0123abcd-0000-4000-8000-00000000abcd"
+VALID_START = {"metadata": {"model": adapter.MODEL, "reasoning_effort": "medium"}}
+
+
+class FakeRoute:
+    def __init__(self, request):
+        self.request = request
+        self.outcome = None
+
+    def continue_(self):
+        self.outcome = "continued"
+
+    def abort(self):
+        self.outcome = "aborted"
+
+
+class FakeMessage:
+    """A page request or response as the adapter's listeners see it."""
+
+    def __init__(self, path, body, status=200):
+        self.url = adapter.BASE + path
+        self.post_data_json = body
+        self.status = status
+
+    def json(self):
+        return self.post_data_json
+
+
+class FakeControl:
+    def __init__(self, page):
+        self.page = page
+
+    def click(self, **_kwargs):
+        pass
+
+    def wait_for(self, **_kwargs):
+        pass
+
+    def fill(self, _text):
+        pass
+
+    def press(self, key):
+        if key == "Enter":
+            self.page.on_submit(self.page)
+
+
+class FakePage:
+    """Prism's web page: project setup succeeds, on_submit plays the turn."""
+
+    def __init__(self, on_submit):
+        self.url = adapter.BASE
+        self.on_submit = on_submit
+        self.route_handler = None
+        self.listeners = {}
+        self.clock = 0.0
+
+    def set_default_timeout(self, _timeout):
+        pass
+
+    def route(self, _pattern, handler):
+        self.route_handler = handler
+
+    def goto(self, url, **_kwargs):
+        self.url = url
+
+    def wait_for_function(self, _expression, **_kwargs):
+        self.url = adapter.BASE + "/?u=" + PROJECT
+
+    def get_by_role(self, *_args, **_kwargs):
+        return FakeControl(self)
+
+    def locator(self, _selector):
+        return FakeControl(self)
+
+    def on(self, event, listener):
+        self.listeners[event] = listener
+
+    def wait_for_timeout(self, timeout):
+        self.clock += timeout / 1000
+
+    def browser_request(self, path, body):
+        """The page issues a request; it passes the listener and the route gate."""
+        request = FakeMessage(path, body)
+        self.listeners["request"](request)
+        route = FakeRoute(request)
+        self.route_handler(route)
+        return route
+
+    def server_response(self, path, body, status=200):
+        self.listeners["response"](FakeMessage(path, body, status))
+
+
+class FakeBrowser:
+    def __init__(self, page):
+        self.page = page
+
+    def new_context(self, **_kwargs):
+        return self
+
+    def add_cookies(self, _cookies):
+        pass
+
+    def new_page(self):
+        return self.page
+
+    def close(self):
+        pass
+
+
+def run_turn(state, on_submit):
+    page = FakePage(on_submit)
+    browser = FakeBrowser(page)
+    playwright = types.SimpleNamespace(chromium=types.SimpleNamespace(launch=lambda **_kwargs: browser))
+    clock = types.SimpleNamespace(monotonic=lambda: page.clock, time=time.time)
+    with mock.patch.object(adapter, "sync_playwright", lambda: contextlib.nullcontext(playwright)), \
+            mock.patch.object(adapter, "time", clock):
+        return adapter.BrowserTurn(state, "/fixture/chromium").run("300", "fixture-oauth", "[user]\nhi")
+
+
+class BrowserTurnTests(unittest.TestCase):
+    def test_turn_that_never_left_the_browser_releases_the_account(self):
+        # Enter was pressed but the page sent no start, e.g. the editor or
+        # model control had not initialized. Nothing reached Prism.
+        with tempfile.TemporaryDirectory() as directory:
+            state = adapter.State(directory)
+            with self.assertRaises(adapter.AdapterError) as raised:
+                run_turn(state, lambda page: None)
+            self.assertFalse((state.pending / "300").exists(), "nothing was submitted, so the account must not stay locked")
+            state.ensure_idle("300")
+            self.assertEqual(raised.exception.code, "start_not_sent")
+
+    def test_start_rejected_by_the_gate_releases_the_account(self):
+        routes = []
+
+        def submit(page):
+            routes.append(page.browser_request(adapter.START, {"metadata": {"model": adapter.MODEL, "reasoning_effort": "high"}}))
+
+        with tempfile.TemporaryDirectory() as directory:
+            state = adapter.State(directory)
+            with self.assertRaises(adapter.AdapterError) as raised:
+                run_turn(state, submit)
+            self.assertEqual([route.outcome for route in routes], ["aborted"])
+            self.assertFalse((state.pending / "300").exists(), "the aborted start never reached Prism")
+            self.assertEqual(raised.exception.code, "start_not_sent")
+
+    def test_submitted_turn_without_terminal_keeps_the_account_locked(self):
+        routes = []
+
+        def submit(page):
+            routes.append(page.browser_request(adapter.START, VALID_START))
+            page.server_response(adapter.START, {"request_id": "fixture-request", "turn_state": "fixture-state"})
+
+        with tempfile.TemporaryDirectory() as directory:
+            state = adapter.State(directory)
+            with self.assertRaises(adapter.AdapterError) as raised:
+                run_turn(state, submit)
+            self.assertEqual([route.outcome for route in routes], ["continued"])
+            self.assertEqual((raised.exception.status, raised.exception.code), (504, "unknown_outcome"))
+            journal = json.loads((state.pending / "300").read_text())
+            self.assertEqual((journal["request_id"], journal["turn_state"]), ("fixture-request", "fixture-state"))
+            with self.assertRaises(adapter.AdapterError) as locked:
+                state.ensure_idle("300")
+            self.assertEqual(locked.exception.status, 409)
+
+    def test_completed_turn_returns_text_and_releases_the_account(self):
+        routes = []
+
+        def submit(page):
+            routes.append(page.browser_request(adapter.START, VALID_START))
+            page.server_response(adapter.START, {"request_id": "fixture-request", "turn_state": "fixture-state-one"})
+            routes.append(page.browser_request(adapter.STATUS, {"request_id": "fixture-request", "turn_state": "fixture-state-one"}))
+            page.server_response(adapter.STATUS, {
+                "request_id": "fixture-request", "turn_state": "fixture-state-two", "status": "completed",
+                "response": {"status": "success", "payload": {"output": [{"type": "message", "content": [{"text": "21"}]}]}},
+            })
+
+        with tempfile.TemporaryDirectory() as directory:
+            state = adapter.State(directory)
+            self.assertEqual(run_turn(state, submit), ("fixture-request", "21"))
+            self.assertEqual([route.outcome for route in routes], ["continued", "continued"])
+            self.assertFalse((state.pending / "300").exists())
+            receipt = json.loads(next(state.receipts.iterdir()).read_text())
+            self.assertEqual((receipt["start_count"], receipt["status_count"]), (1, 1))
 
 
 if __name__ == "__main__":
