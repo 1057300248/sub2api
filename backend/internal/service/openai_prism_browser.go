@@ -29,17 +29,17 @@ func prismBrowserTerminal(body []byte, model string, stream bool) (string, error
 			}
 			data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
 			if !gjson.ValidBytes(data) {
-				return "", errors.New("Prism adapter returned invalid SSE JSON")
+				return "", errors.New("prism adapter returned invalid SSE JSON")
 			}
 			switch gjson.GetBytes(data, "type").String() {
 			case "response.created":
 			case "response.completed":
 				if terminal != nil {
-					return "", errors.New("Prism adapter returned repeated terminal events")
+					return "", errors.New("prism adapter returned repeated terminal events")
 				}
 				terminal = []byte(gjson.GetBytes(data, "response").Raw)
 			default:
-				return "", errors.New("Prism adapter returned unsupported SSE event")
+				return "", errors.New("prism adapter returned unsupported SSE event")
 			}
 		}
 	}
@@ -47,7 +47,7 @@ func prismBrowserTerminal(body []byte, model string, stream bool) (string, error
 		gjson.GetBytes(terminal, "model").String() != model ||
 		gjson.GetBytes(terminal, "output.0.content.0.text").String() == "" ||
 		gjson.GetBytes(terminal, "id").String() == "" {
-		return "", errors.New("Prism adapter returned an invalid terminal response")
+		return "", errors.New("prism adapter returned an invalid terminal response")
 	}
 	return gjson.GetBytes(terminal, "id").String(), nil
 }
@@ -55,10 +55,10 @@ func prismBrowserTerminal(body []byte, model string, stream bool) (string, error
 func prismBrowserAdapterURL(baseURL string) (string, error) {
 	parsed, err := url.Parse(prismBrowserResponsesURL(baseURL))
 	if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" {
-		return "", errors.New("Prism adapter must use a local HTTP endpoint")
+		return "", errors.New("prism adapter must use a local HTTP endpoint")
 	}
 	if ip := net.ParseIP(parsed.Hostname()); ip == nil || (!ip.Equal(net.ParseIP("127.0.0.1")) && !ip.Equal(net.IPv6loopback)) {
-		return "", errors.New("Prism adapter must bind to a numeric loopback address")
+		return "", errors.New("prism adapter must bind to a numeric loopback address")
 	}
 	port, err := strconv.Atoi(parsed.Port())
 	if err != nil || port < 1 || port > 65535 || parsed.Path != "/v1/responses" {
@@ -70,13 +70,13 @@ func prismBrowserAdapterURL(baseURL string) (string, error) {
 func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.Context, account *Account, body []byte, started time.Time) (*OpenAIForwardResult, error) {
 	if isOpenAIResponsesCompactPath(c) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "Prism adapter does not support responses/compact"}})
-		return nil, errors.New("Prism adapter does not support responses/compact")
+		return nil, errors.New("prism adapter does not support responses/compact")
 	}
 	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	stream := gjson.GetBytes(body, "stream").Bool()
 	if model == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "model is required"}})
-		return nil, errors.New("Prism adapter model is required")
+		return nil, errors.New("prism adapter model is required")
 	}
 	responseBody, upstreamHeaders, status, err := s.callPrismBrowser(ctx, account, body)
 	if err != nil {
@@ -85,7 +85,7 @@ func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.C
 	}
 	if status != http.StatusOK {
 		c.Data(status, "application/json", responseBody)
-		return nil, fmt.Errorf("Prism adapter returned HTTP %d", status)
+		return nil, fmt.Errorf("prism adapter returned HTTP %d", status)
 	}
 	responseID, err := prismBrowserTerminal(responseBody, model, stream)
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.C
 
 func (s *OpenAIGatewayService) callPrismBrowser(ctx context.Context, account *Account, body []byte) ([]byte, http.Header, int, error) {
 	if !accountUsesPrismBrowser(account, s.cfg) {
-		return nil, nil, 0, errors.New("Prism adapter is disabled; native fallback is prohibited")
+		return nil, nil, 0, errors.New("prism adapter is disabled; native fallback is prohibited")
 	}
 	endpoint, err := prismBrowserAdapterURL(s.cfg.Gateway.PrismBrowser.BaseURL)
 	if err != nil {
@@ -121,7 +121,7 @@ func (s *OpenAIGatewayService) callPrismBrowser(ctx context.Context, account *Ac
 	}
 	key := strings.TrimSpace(s.cfg.Gateway.PrismBrowser.APIKey)
 	if key == "" {
-		return nil, nil, 0, errors.New("Prism adapter key is not configured")
+		return nil, nil, 0, errors.New("prism adapter key is not configured")
 	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
@@ -149,15 +149,15 @@ func (s *OpenAIGatewayService) callPrismBrowser(ctx context.Context, account *Ac
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("Prism adapter request failed: %w", err)
+		return nil, nil, 0, fmt.Errorf("prism adapter request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, prismBrowserMaxResponseBytes+1))
 	if err != nil || len(responseBody) > prismBrowserMaxResponseBytes {
-		return nil, nil, 0, errors.New("Prism adapter response exceeded limit")
+		return nil, nil, 0, errors.New("prism adapter response exceeded limit")
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		return nil, nil, 0, errors.New("Prism adapter redirected unexpectedly")
+		return nil, nil, 0, errors.New("prism adapter redirected unexpectedly")
 	}
 	return responseBody, resp.Header, resp.StatusCode, nil
 }

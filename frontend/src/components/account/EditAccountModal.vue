@@ -54,7 +54,6 @@
             v-model="editBaseUrl"
             type="text"
             class="input"
-            :disabled="prismBrowserEnabled"
             :placeholder="
               account.platform === 'openai'
                 ? 'https://api.openai.com'
@@ -6129,6 +6128,8 @@ const handleSubmit = async () => {
       if (props.account.type === 'oauth') {
         if (prismBrowserEnabled.value) newExtra.openai_prism_browser = true
         else delete newExtra.openai_prism_browser
+      }
+      if (props.account.type === 'apikey') {
         if (!openAITextGenerationCapabilityEnabled.value || openAIResponsesMode.value === 'auto') {
           delete newExtra.openai_responses_mode
         } else {
