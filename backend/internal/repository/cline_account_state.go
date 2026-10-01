@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -26,7 +27,13 @@ func (r *accountRepository) SetClineRateLimitIfLater(ctx context.Context, accoun
 		return err
 	}
 	key := service.ClineRateLimitScope(account, scope)
-	payload, err := json.Marshal(map[string]any{"rate_limited_at": now.UTC().Format(time.RFC3339), "rate_limit_reset_at": until.UTC().Format(time.RFC3339), "reset_unix": until.Unix(), "reason": reason, "reset_authoritative": authoritative})
+	payload, err := json.Marshal(map[string]any{
+		"rate_limited_at": now.UTC().Format(time.RFC3339),
+		"rate_limit_reset_at": until.UTC().Format(time.RFC3339),
+		"reset_unix": until.Unix(),
+		"reason": reason,
+		"reset_authoritative": authoritative,
+	})
 	if err != nil {
 		return err
 	}
@@ -46,7 +53,7 @@ func (r *accountRepository) SetClineRateLimitIfLater(ctx context.Context, accoun
 	if err != nil || affected == 0 {
 		return err
 	}
-	r.syncSchedulerAccountSnapshot(ctx, account.ID)
+	r.notifyClineStateChanged(ctx, account.ID)
 	return nil
 }
 
@@ -70,6 +77,15 @@ func (r *accountRepository) SaveClineStateIfUnchanged(ctx context.Context, accou
 	if err != nil || affected == 0 {
 		return false, err
 	}
-	r.syncSchedulerAccountSnapshot(ctx, account.ID)
+	r.notifyClineStateChanged(ctx, account.ID)
 	return true, nil
+}
+
+// Match other scheduler-visible account updates: refresh the shared snapshot and
+// enqueue invalidation for other workers instead of updating this process only.
+func (r *accountRepository) notifyClineStateChanged(ctx context.Context, id int64) {
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		slog.Error("cline.scheduler_outbox_failed", "account_id", id, "error", err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
 }

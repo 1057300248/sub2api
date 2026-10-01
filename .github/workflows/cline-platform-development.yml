@@ -2,7 +2,13 @@ name: Cline platform development
 on:
   push:
     branches: ['codex/cline-platform-modular-20261001']
-    paths: ['.github/workflows/cline-platform-development.yml', 'backend/**/cline*', 'backend/internal/pkg/cline/**', 'tools/cline_platform_apply.py']
+    paths:
+      - '.github/workflows/cline-platform-development.yml'
+      - '.wanchuan/patches/manifest.json'
+      - 'backend/**/cline*'
+      - 'backend/internal/pkg/cline/**'
+      - 'tools/cline_platform_apply.py'
+      - 'tools/verify_cline_platform.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -30,6 +36,10 @@ jobs:
         run: |
           gofmt -w backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go backend/internal/repository/cline*.go
           git diff --check
+      - name: Verify module integrity and existing patchpack
+        run: |
+          python3 tools/verify_cline_platform.py
+          python3 -m unittest discover -s tools -p 'test_wanchuan_patchpack.py'
       - name: Policy and SSE race tests
         working-directory: backend
         run: go test -race -count=3 ./internal/pkg/cline
@@ -49,22 +59,7 @@ jobs:
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add backend/internal tools/cline_platform_apply.py
-            git commit -m 'feat(cline): wire validated account and scoped limit boundaries'
+            git commit -m 'chore(cline): format verified module integration'
             git push origin "HEAD:$target"
           fi
           git rev-parse HEAD
-      - name: Inspect remaining registration boundaries
-        if: always()
-        run: |
-          python3 - <<'PY'
-          import pathlib,re,subprocess
-          pattern=re.compile(r'PlatformOpenCodeGo|opencode_go|func requiresDeepSeekChatReasoning|func .*ObserverCanManage|func .*GetAccount\(')
-          for name in subprocess.check_output(['git','ls-files'],text=True).splitlines():
-            p=pathlib.Path(name)
-            if not name.startswith(('backend/internal/','backend/ent/schema/','frontend/src/')) or p.suffix not in ('.go','.ts','.vue'):continue
-            if '_test.go' in name or '.test.' in name or '/i18n/' in name or '/locales/' in name:continue
-            lines=p.read_text().splitlines();hits=[i for i,line in enumerate(lines) if pattern.search(line)]
-            if not hits:continue
-            print('\nSITE',name)
-            for i in sorted({j for i in hits for j in range(max(0,i-2),min(len(lines),i+4))}):print(f'{i+1}: {lines[i]}')
-          PY

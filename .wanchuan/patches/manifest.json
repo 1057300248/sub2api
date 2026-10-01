@@ -6,6 +6,32 @@
   "integration_branch": "wanchuan/stable",
   "modules": [
     {
+      "id": "cline-platform",
+      "mode": "source-overlay",
+      "review_on_upstream_touch": true,
+      "protected_globs": [
+        "backend/internal/domain/cline.go",
+        "backend/internal/pkg/cline/**",
+        "backend/internal/service/cline*.go",
+        "backend/internal/service/account.go",
+        "backend/internal/service/domain_constants.go",
+        "backend/internal/service/model_rate_limit.go",
+        "backend/internal/service/ratelimit_service.go",
+        "backend/internal/service/openai_gateway_cc_pipeline.go",
+        "backend/internal/repository/*account*.go",
+        "backend/internal/handler/admin/account_cline*.go",
+        "backend/migrations/263_cline_platform.sql",
+        "frontend/src/components/account/Cline*.vue",
+        "frontend/src/components/account/cline*.ts",
+        "tools/verify_cline_platform.py"
+      ],
+      "tests": [
+        "python3 tools/verify_cline_platform.py",
+        "go test -race ./internal/pkg/cline -count=3",
+        "go test -tags=unit ./internal/service -run '^TestCline' -count=1"
+      ]
+    },
+    {
       "id": "cline-rate-limit-cas",
       "mode": "source-overlay",
       "review_on_upstream_touch": true,
@@ -29,9 +55,7 @@
         "backend/internal/handler/dto/*account*.go",
         "backend/internal/repository/*account*.go"
       ],
-      "tests": [
-        "python3 tools/verify_custom_patch_alignment.py"
-      ]
+      "tests": ["python3 tools/verify_custom_patch_alignment.py"]
     },
     {
       "id": "model-compat-overlays",
@@ -42,9 +66,7 @@
         "backend/internal/pkg/antigravity/**",
         "backend/internal/pkg/apicompat/**"
       ],
-      "tests": [
-        "python3 tools/verify_custom_patch_alignment.py"
-      ]
+      "tests": ["python3 tools/verify_custom_patch_alignment.py"]
     },
     {
       "id": "operations-ui",
@@ -56,9 +78,7 @@
         "frontend/src/views/admin/**",
         "frontend/src/features/channel-monitor-v2/**"
       ],
-      "tests": [
-        "make test-frontend"
-      ]
+      "tests": ["make test-frontend"]
     },
     {
       "id": "fork-update-channel",
