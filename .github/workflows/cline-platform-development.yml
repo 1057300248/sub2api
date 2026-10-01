@@ -1,0 +1,45 @@
+name: Cline platform development
+
+on:
+  push:
+    branches: ['codex/cline-platform-modular-20261001']
+    paths:
+      - '.github/workflows/cline-platform-development.yml'
+      - 'tools/cline_platform_apply.py'
+      - 'tools/cline_platform_edits.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Inspect exact platform integration sites
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, hashlib, subprocess
+          print('HEAD', subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip())
+          patterns = re.compile(r'PlatformDeepseek|PlatformOpenCodeGo|[\x22\x27]deepseek[\x22\x27]|parseClineRateLimitResetAt|setClineRateLimited|SetModelRateLimit|IsModelRateLimited')
+          for name in subprocess.check_output(['git','ls-files'], text=True).splitlines():
+              p = pathlib.Path(name)
+              if not name.startswith(('backend/internal/','backend/migrations/','frontend/src/')) or p.suffix not in ('.go','.ts','.vue','.sql'):
+                  continue
+              if '/ent/' in name or '_test.go' in name or '.test.' in name or '/i18n/' in name:
+                  continue
+              lines = p.read_text().splitlines()
+              matches = [i for i,line in enumerate(lines) if patterns.search(line)]
+              if not matches:
+                  continue
+              print('\nFILE', name, 'SHA256', hashlib.sha256(p.read_bytes()).hexdigest())
+              indexes = sorted({j for i in matches for j in range(max(0,i-2),min(len(lines),i+4))})
+              for i in indexes:
+                  print(f'{i+1}: {lines[i]}')
+          PY
