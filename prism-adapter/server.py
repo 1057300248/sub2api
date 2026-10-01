@@ -220,6 +220,7 @@ class BrowserTurn:
         self.state.ensure_idle(account_id)
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(executable_path=self.chrome, headless=True, chromium_sandbox=True)
+            began = False
             try:
                 context = browser.new_context(user_agent=USER_AGENT, service_workers="block")
                 context.add_cookies([{"name": "prism_oai_access_token", "value": token,
@@ -309,12 +310,15 @@ class BrowserTurn:
                 page.on("response", on_response)
                 textarea.fill(prompt)
                 self.state.begin(account_id, project)
+                began = True
                 gate.armed = True
                 textarea.press("Enter")
                 deadline = time.monotonic() + 240
                 while time.monotonic() < deadline and not terminal and not gate.error:
                     page.wait_for_timeout(500)
-                if not gate.sent or gate.error or len(starts) != 1 or starts[0] != MODEL:
+                if not gate.sent:
+                    raise AdapterError(502, "start_not_sent", "Prism did not submit the turn; no request was sent upstream")
+                if gate.error or len(starts) != 1 or starts[0] != MODEL:
                     raise AdapterError(502, "unexpected_start", "Prism did not start exactly one turn with the requested model")
                 if not terminal:
                     raise AdapterError(504, "unknown_outcome", "Prism turn has no terminal result; pending state retained")
@@ -333,6 +337,12 @@ class BrowserTurn:
                 return request_id, result
             finally:
                 browser.close()
+                # The gate is the only way a start leaves the browser. If it never
+                # released one, nothing reached Prism and the outcome is known, so
+                # the account must not stay locked behind a 409. Checked after
+                # close so a start released while closing still keeps the lock.
+                if began and not gate.sent:
+                    self.state.finish(account_id)
 
 
 def response_payload(request_id, text):

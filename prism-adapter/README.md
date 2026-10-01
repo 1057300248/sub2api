@@ -9,6 +9,7 @@
 - 客户端无需传 `project_id`。适配器每次新建空白 Prism 项目，因为新 chat tab 不会清空已有项目文件。请求之间不复用项目内容；项目创建和服务端 sandbox 由 Prism 官方页面完成。
 - 网页的 start 请求在发送前校验模型和 reasoning effort，只允许一次。浏览器尝试重复 start 会被拦截。status 响应会将最新 request ID 和 `turn_state` 更新到权限为 `0600` 的待决文件。
 - 结果不明确时保留待决文件，后续请求返回 409。没有自动删除待决文件或重放模型请求的逻辑。自动续接轮询、取消和结果恢复尚未实现；运营人员必须先确认原请求结局。
+- start 从未离开浏览器（页面没有发出，或被门控拦下）时结局是确定的：适配器清除待决文件并返回 `start_not_sent`，账号不会因此被锁。
 - 终态回执只保留 request ID、模型、请求次数、时间和答案摘要，不记录 prompt、答案正文、Cookie 或 OAuth token。待决文件含敏感 `turn_state`，不能公开或提交。
 - 成功结果 `usage: null`，不会估算官方 token 数。SSE 只包含 created/completed 事件，不产生伪造的 token delta。主网关发现 usage 不可用时拒绝将它记录为零 token 或据此扣费，所以这是未计费的试验通道。
 - 仅允许 `http://127.0.0.1:<port>/v1` 或 `http://[::1]:<port>/v1` 作为适配器地址；不使用环境代理、账号代理、HTTP 重定向或通用插件链传递 OAuth token。适配器默认只监听 IPv4 回环 `127.0.0.1:8319`。
