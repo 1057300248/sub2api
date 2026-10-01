@@ -54,7 +54,6 @@
             v-model="editBaseUrl"
             type="text"
             class="input"
-            :disabled="prismBrowserEnabled"
             :placeholder="
               account.platform === 'openai'
                 ? 'https://api.openai.com'
@@ -5533,6 +5532,7 @@ const handleSubmit = async () => {
         ...currentCredentials,
         base_url: newBaseUrl
       }
+
       // 国产供应商：模式与协议写入凭据（决定额度/余额探测与转发端点/格式）。
       if (isCNApiKeyAccount.value) {
         newCredentials.account_mode = currentOpenCodeOrCNMode()
@@ -6129,6 +6129,8 @@ const handleSubmit = async () => {
       if (props.account.type === 'oauth') {
         if (prismBrowserEnabled.value) newExtra.openai_prism_browser = true
         else delete newExtra.openai_prism_browser
+      }
+		if (props.account.type === 'apikey') {
         if (!openAITextGenerationCapabilityEnabled.value || openAIResponsesMode.value === 'auto') {
           delete newExtra.openai_responses_mode
         } else {
