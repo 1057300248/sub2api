@@ -55,6 +55,7 @@ func runClineFailureBillingRegression(t *testing.T, terminalUsage bool) {
 				require.Equal(t, 8, result.Usage.InputTokens)
 				require.Equal(t, 4, result.Usage.OutputTokens)
 				require.Equal(t, "gpt-5.1", result.Model)
+				require.Equal(t, "cline-pass/model", result.BillingModel)
 				require.Equal(t, "cline-pass/model", result.UpstreamModel)
 				require.Contains(t, rec.Body.String(), "partial answer")
 				for _, terminal := range []string{"[DONE]", "response.completed", "message_stop"} {
@@ -87,16 +88,13 @@ func runClineFailureBillingRegression(t *testing.T, terminalUsage bool) {
 						BillingModelSource: source,
 					},
 				}
-				// The existing Messages bridge carries the account-mapped
-				// BillingModel explicitly. Requested billing must override it;
-				// upstream billing must retain it. Other bridges currently carry
-				// the original billing model. Do not rewrite those contracts here.
+				// All three bridges retain the mapped billing model. Requested
+				// billing explicitly overrides it; upstream billing retains it.
+				// Expected amounts are independent arithmetic, not values copied
+				// from the billing service under test.
 				expectedTotal := 8*2e-6 + 4*5e-6
-				if protocol == "messages" {
-					require.Equal(t, "cline-pass/model", result.BillingModel)
-					if source == BillingModelSourceUpstream {
-						expectedTotal = 8*7e-6 + 4*13e-6
-					}
+				if source == BillingModelSourceUpstream {
+					expectedTotal = 8*7e-6 + 4*13e-6
 				}
 				expectedActual := expectedTotal * 1.1
 				require.NoError(t, billing.RecordUsage(context.Background(), input))
