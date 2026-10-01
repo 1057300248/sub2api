@@ -1,0 +1,39 @@
+name: Cline exact-source development snapshot
+
+on:
+  push:
+    branches: ['codex/cline-platform-modular-20261001']
+    paths: ['.github/workflows/cline-development-snapshot.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Export tracked source only
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git archive --format=tar.gz --output="$RUNNER_TEMP/source.tar.gz" HEAD
+          printf '%s\n' "$EXPECTED_SHA" > "$RUNNER_TEMP/source-sha.txt"
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cline-source-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/source.tar.gz
+            ${{ runner.temp }}/source-sha.txt
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
