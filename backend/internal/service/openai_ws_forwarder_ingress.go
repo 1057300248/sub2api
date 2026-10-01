@@ -565,7 +565,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	useHTTPBridge := forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID)
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 	stateStore := s.getOpenAIWSStateStore()
-	groupID := getOpenAIGroupIDFromContext(c)
+	groupID, enforceGroup := openAITurnAdmissionGroupFromContext(c)
 	apiKeyID := getAPIKeyIDFromContext(c)
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	sessionHash := ""
@@ -848,7 +848,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		WSURL:   wsURL,
 		Headers: wsHeaders,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
-			latest, err := s.admitOpenAITurnForGroup(factoryCtx, groupID, account, firstRoutingFields[0].String())
+			latest, err := s.admitOpenAITurnForGroup(factoryCtx, groupID, enforceGroup, account, firstRoutingFields[0].String())
 			if err != nil {
 				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
 					factoryCtx,
@@ -877,7 +877,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return s.bindOpenAIWSHandshake(account, firstRoutingFields[0].String(), headers)
 		},
 		CheckBinding: func(checkCtx context.Context, binding *openAIWSTurnBinding) error {
-			latest, err := s.admitOpenAITurnForGroup(checkCtx, groupID, account, firstRoutingFields[0].String())
+			latest, err := s.admitOpenAITurnForGroup(checkCtx, groupID, enforceGroup, account, firstRoutingFields[0].String())
 			if err != nil {
 				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
 					checkCtx,
