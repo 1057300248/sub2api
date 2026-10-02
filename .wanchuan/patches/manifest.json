@@ -80,7 +80,10 @@
         "frontend/src/i18n/locales/*/clineMetadata.ts",
         "backend/internal/repository/account_create_atomic.go",
         "backend/internal/service/admin_account.go",
-        "backend/internal/service/openai_gateway_chat_completions_raw.go"
+        "backend/internal/service/openai_gateway_chat_completions_raw.go",
+        "backend/internal/service/openai_gateway_responses_chat_fallback.go",
+        "backend/internal/service/openai_gateway_messages_chat_fallback.go",
+        "backend/internal/handler/openai_chat_completions.go"
       ],
       "tests": [
         "python3 tools/verify_cline_platform.py",
@@ -88,6 +91,7 @@
         "go test -tags=unit ./internal/service -run '^TestCline' -count=1",
         "go test -tags=unit ./internal/repository ./internal/handler ./internal/handler/admin -run '^TestCline' -count=1",
         "go test -tags=integration ./internal/repository -run '^TestClinePostgres' -count=3",
+        "go test -tags=integration ./internal/handler -run '^TestClineHTTPHandlersDurableBillingAndTermination$' -count=1",
         "make test-frontend-critical"
       ]
     },

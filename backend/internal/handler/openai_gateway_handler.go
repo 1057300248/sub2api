@@ -967,6 +967,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				}
 			})
 		}
+		if finishClineForward(c, account, result, err, submitResponsesUsage, func() {
+			h.handleStreamingAwareError(c, http.StatusGatewayTimeout, "request_timeout", "Request deadline exceeded", streamStarted || c.Writer.Written())
+		}) {
+			return
+		}
 		if err != nil {
 			if service.IsOpenAITurnAdmissionError(err) {
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "admission_unavailable", "Account eligibility changed; please retry with complete context", streamStarted)
@@ -1577,6 +1582,11 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					).Error("openai_messages.record_usage_failed", zap.Error(err))
 				}
 			})
+		}
+		if finishClineForward(c, account, result, err, submitMessagesUsage, func() {
+			h.anthropicStreamingAwareError(c, http.StatusGatewayTimeout, "request_timeout", "Request deadline exceeded", streamStarted || c.Writer.Written())
+		}) {
+			return
 		}
 		if err != nil {
 			if result != nil && result.ImageCount > 0 {

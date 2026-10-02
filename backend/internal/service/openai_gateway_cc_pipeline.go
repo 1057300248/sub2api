@@ -196,10 +196,11 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	var lifetime *clineRequestLifetime
 	if account.IsCline() {
-		lifetime = newClineRequestLifetime(ctx, clineDrainGrace, clineRequestCeiling)
+		var clientContext context.Context
 		if c != nil && c.Request != nil {
-			lifetime.watch(c.Request.Context())
+			clientContext = c.Request.Context()
 		}
+		lifetime = newClineRequestLifetime(ctx, clineDrainGrace, clineRequestCeiling, clientContext)
 		upstreamCtx, releaseUpstreamCtx = lifetime.ctx, lifetime.close
 	}
 	bodyOwnsLifetime := false
@@ -348,7 +349,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 		emit(&chunk)
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := clineBodyReadError(resp.Body, scanner.Err()); err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn(logPrefix+": stream read error",
 				zap.Error(err),

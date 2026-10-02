@@ -273,6 +273,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	clientDisconnected := false
 
 	writeEvents := func(events []apicompat.ResponsesStreamEvent) {
+		clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
 		// Cache the original completed reasoning items before this write boundary;
 		// clients can return the opaque item ID for DeepSeek tool-history replay.
 		if suppressSummary {
@@ -293,6 +294,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			}
 			if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 				clientDisconnected = true
+				beginClineBodyDrain(resp.Body)
 				logger.L().Debug("openai responses chat fallback: client disconnected, continuing to drain upstream for billing",
 					zap.Error(err),
 					zap.String("request_id", requestID),
@@ -309,6 +311,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		writeEvents(events)
 	})
 
+	clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
 	if scan.Err != nil {
 		return &OpenAIForwardResult{
 			RequestID:                   requestID,
@@ -323,6 +326,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			Stream:                      true,
 			Duration:                    time.Since(startTime),
 			FirstTokenMs:                scan.FirstTokenMs,
+			ClientDisconnect:            clineBodyDisconnectResult(resp.Body, clientDisconnected),
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
 	if err := state.ValidateToolCallArguments(); err != nil {
@@ -339,6 +343,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			Stream:                      true,
 			Duration:                    time.Since(startTime),
 			FirstTokenMs:                scan.FirstTokenMs,
+			ClientDisconnect:            clineBodyDisconnectResult(resp.Body, clientDisconnected),
 		}, fmt.Errorf("invalid tool call arguments from upstream: %w", err)
 	}
 
@@ -354,6 +359,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		writeStreamHeaders()
 		if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err != nil {
 			clientDisconnected = true
+			beginClineBodyDrain(resp.Body)
 		}
 		if !clientDisconnected {
 			c.Writer.Flush()
@@ -376,6 +382,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		Stream:                      true,
 		Duration:                    time.Since(startTime),
 		FirstTokenMs:                scan.FirstTokenMs,
+		ClientDisconnect:            clineBodyDisconnectResult(resp.Body, clientDisconnected),
 	}, nil
 }
 

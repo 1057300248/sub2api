@@ -16,24 +16,26 @@ const clineRequestCeiling = 30 * time.Minute
 // The independent absolute ceiling remains a distinct upstream timeout.
 var ErrClineDrainTimeout = fmt.Errorf("cline disconnected response drain deadline exceeded: %w", context.Canceled)
 var ErrClineRequestTimeout = errors.New("cline upstream request lifetime exceeded")
+var ErrClineCallerDeadline = fmt.Errorf("cline caller deadline exceeded: %w", context.DeadlineExceeded)
 
 // Each request owns its timers and cancellation. Parent cancellation starts a
 // grace period, not an unbounded detached read. The overall ceiling also covers
 // transports waiting for response headers and lost cancellation notifications.
 // This does not extend the downstream client's timeout or lower first-token time.
 type clineRequestLifetime struct {
-	ctx         context.Context
-	cancel      context.CancelCauseFunc
-	mu          sync.Mutex
-	closed      bool
-	draining    bool
-	drainTimer  *time.Timer
-	totalTimer  *time.Timer
-	stopParents []func() bool
-	grace       time.Duration
+	ctx            context.Context
+	cancel         context.CancelCauseFunc
+	mu             sync.Mutex
+	closed         bool
+	draining       bool
+	drainTimer     *time.Timer
+	stopParents    []func() bool
+	parents        []context.Context
+	deadlineCancel context.CancelFunc
+	grace          time.Duration
 }
 
-func newClineRequestLifetime(parent context.Context, grace, ceiling time.Duration) *clineRequestLifetime {
+func newClineRequestLifetime(parent context.Context, grace, ceiling time.Duration, otherParents ...context.Context) *clineRequestLifetime {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -43,13 +45,26 @@ func newClineRequestLifetime(parent context.Context, grace, ceiling time.Duratio
 	if ceiling <= 0 {
 		ceiling = clineRequestCeiling
 	}
-	ctx, cancel := context.WithCancelCause(context.WithoutCancel(parent))
-	lifetime := &clineRequestLifetime{ctx: ctx, cancel: cancel, grace: grace}
-	lifetime.totalTimer = time.AfterFunc(ceiling, func() { cancel(ErrClineRequestTimeout) })
-	lifetime.watch(parent)
-	// A parent already canceled at entry must not wait for goroutine scheduling.
-	if parent.Err() != nil {
-		lifetime.beginDrain()
+	parents := []context.Context{parent}
+	for _, other := range otherParents {
+		if other != nil {
+			parents = append(parents, other)
+		}
+	}
+	deadline, deadlineCause := time.Now().Add(ceiling), ErrClineRequestTimeout
+	for _, p := range parents {
+		if d, ok := p.Deadline(); ok && !d.After(deadline) {
+			deadline, deadlineCause = d, ErrClineCallerDeadline
+		}
+	}
+	// Detach cancellation only: reattach the earliest explicit deadline before
+	// constructing the request. It remains active even if a parent is canceled
+	// early and its original deadline timer is consequently stopped.
+	deadlineCtx, release := context.WithDeadlineCause(context.WithoutCancel(parent), deadline, deadlineCause)
+	ctx, cancel := context.WithCancelCause(deadlineCtx)
+	lifetime := &clineRequestLifetime{ctx: ctx, cancel: cancel, grace: grace, parents: parents, deadlineCancel: release}
+	for _, p := range parents {
+		lifetime.watch(p)
 	}
 	return lifetime
 }
@@ -73,15 +88,13 @@ func (l *clineRequestLifetime) close() {
 	if l.drainTimer != nil {
 		l.drainTimer.Stop()
 	}
-	if l.totalTimer != nil {
-		l.totalTimer.Stop()
-	}
 	stops := l.stopParents
 	l.mu.Unlock()
 	for _, stop := range stops {
 		stop()
 	}
 	l.cancel(context.Canceled)
+	l.deadlineCancel()
 }
 
 type clineLifetimeBody struct {
@@ -123,7 +136,7 @@ func (l *clineRequestLifetime) watch(parent context.Context) {
 	if parent == nil {
 		return
 	}
-	stop := context.AfterFunc(parent, l.beginDrain)
+	stop := context.AfterFunc(parent, func() { l.parentStopped(parent) })
 	l.mu.Lock()
 	if l.closed {
 		l.mu.Unlock()
@@ -133,6 +146,65 @@ func (l *clineRequestLifetime) watch(parent context.Context) {
 	l.stopParents = append(l.stopParents, stop)
 	l.mu.Unlock()
 	if parent.Err() != nil {
-		l.beginDrain()
+		l.parentStopped(parent)
 	}
+}
+
+func (l *clineRequestLifetime) parentStopped(parent context.Context) {
+	if parent.Err() == context.DeadlineExceeded {
+		// The independent deadline context owns this cancellation so Err(), as
+		// well as Cause(), stays DeadlineExceeded rather than Canceled.
+		return
+	}
+	cause := context.Cause(parent)
+	if cause == context.Canceled {
+		l.beginDrain()
+	} else if cause != nil {
+		// A service-defined abort cause is not evidence of client disconnect.
+		l.cancel(cause)
+	}
+}
+
+// These helpers are deliberately scoped to bodies owned by the Cline send
+// boundary; other providers keep their existing streaming behavior.
+func clineBodyClientDisconnected(body io.ReadCloser, writeFailed bool) bool {
+	bounded, ok := body.(*clineLifetimeBody)
+	if !ok {
+		return writeFailed
+	}
+	l := bounded.lifetime
+	cause := context.Cause(l.ctx)
+	if errors.Is(cause, context.DeadlineExceeded) || errors.Is(cause, ErrClineRequestTimeout) {
+		return false
+	}
+	if writeFailed {
+		return true
+	}
+	l.mu.Lock()
+	draining := l.draining
+	l.mu.Unlock()
+	if draining {
+		return true
+	}
+	for _, parent := range l.parents {
+		if parent.Err() == context.Canceled && context.Cause(parent) == context.Canceled {
+			l.beginDrain()
+			return true
+		}
+	}
+	return errors.Is(cause, ErrClineDrainTimeout)
+}
+
+func clineBodyDisconnectResult(body io.ReadCloser, writeFailed bool) bool {
+	_, owned := body.(*clineLifetimeBody)
+	return owned && clineBodyClientDisconnected(body, writeFailed)
+}
+
+func clineBodyReadError(body io.ReadCloser, readErr error) error {
+	if bounded, ok := body.(*clineLifetimeBody); ok {
+		if cause := context.Cause(bounded.lifetime.ctx); cause != nil {
+			return cause
+		}
+	}
+	return readErr
 }

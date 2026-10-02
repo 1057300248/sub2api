@@ -50,6 +50,17 @@ REQUIRED = {
 for _name, _anchors in {'backend/internal/service/cline_metadata.go': ['RefreshClineMetadata(', 'WithHTTPUpstreamRedirectsDisabled', 'ClineMetadataForAccount('], 'backend/internal/service/openai_gateway_cc_pipeline.go': ['s.checkClineAdmission(ctx, account, body)'], 'backend/internal/repository/cline_metadata_repository.go': ['CheckClineAdmission(', 'cline_shared_limits', 'ClaimClineMetadataRefresh('], 'backend/internal/server/routes/admin.go': ['registerClineAccountRoutes(accounts, h)'], 'backend/internal/server/routes/cline_admin.go': ['GetClineMetadata', 'RefreshClineMetadata'], 'backend/internal/handler/admin/account_data.go': ['validateClineDataAccount(item)', 'portableClineExtra(acc.Platform'], 'backend/internal/clinemigration/migration.go': ['func Preview(', 'func Apply(', 'func Rollback(', 'pg_try_advisory_xact_lock', 'ALL_WORKERS_STOPPED'], 'backend/migrations/265_cline_credential_write_guard.sql': ['wanchuan_cline_guard_credentials'], 'frontend/src/components/account/ClineAccountModal.vue': ['ClineMetadataPanel']}.items():
     REQUIRED.setdefault(_name, []).extend(_anchors)
 
+for name, anchors in {
+    'backend/internal/service/cline_request_lifetime.go': ['context.WithDeadlineCause(', 'p.Deadline()', 'ErrClineCallerDeadline', 'clineBodyDisconnectResult('],
+    'backend/internal/service/openai_gateway_responses_chat_fallback.go': ['beginClineBodyDrain(resp.Body)', 'ClientDisconnect:', 'clineBodyClientDisconnected(resp.Body, clientDisconnected)'],
+    'backend/internal/service/openai_gateway_messages_chat_fallback.go': ['beginClineBodyDrain(resp.Body)', 'clineBodyClientDisconnected(resp.Body, clientDisconnected)'],
+    'backend/internal/handler/cline_forward_termination.go': ['func finishClineForward(', 'ErrClineCallerDeadline', 'submit(result)'],
+    'backend/internal/handler/openai_gateway_handler.go': ['finishClineForward(c, account, result, err, submitResponsesUsage', 'finishClineForward(c, account, result, err, submitMessagesUsage'],
+    'backend/internal/handler/openai_chat_completions.go': ['finishClineForward(c, account, result, err, submitChatUsage'],
+    'backend/internal/handler/cline_http_lifecycle_integration_test.go': ['TestClineHTTPHandlersDurableBillingAndTermination', 'repository.ApplyMigrations', 'repository.NewUsageBillingRepository', 'router.ServeHTTP', 'usage_billing_dedup'],
+}.items():
+    REQUIRED.setdefault(name, []).extend(anchors)
+
 errors=[]
 for name, anchors in REQUIRED.items():
     path=ROOT/name

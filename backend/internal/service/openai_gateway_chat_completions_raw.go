@@ -317,10 +317,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	var terminal openAIRawStreamTerminalState
 
 	writeLine := func(line string) {
-		if account.IsCline() && c.Request.Context().Err() != nil {
-			clientDisconnected = true
-			beginClineBodyDrain(resp.Body)
-		}
+		clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
 		if clientDisconnected {
 			return
 		}
@@ -404,10 +401,11 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
+			ClientDisconnect:              clineBodyDisconnectResult(resp.Body, clientDisconnected),
 		}
 	}
 
-	scanErr := scanner.Err()
+	scanErr := clineBodyReadError(resp.Body, scanner.Err())
 	if scanErr != nil && !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
 		logger.L().Warn("openai chat_completions raw: stream read error",
 			zap.Error(scanErr),
@@ -420,6 +418,15 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	clientAborted := clientDisconnected ||
 		errors.Is(scanErr, context.Canceled) ||
 		errors.Is(scanErr, context.DeadlineExceeded)
+	if account.IsCline() {
+		clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
+		clientAborted = clientDisconnected
+		// Never turn a caller deadline into success, failover, or a lost usage
+		// result. The handler classifies caller deadlines independently.
+		if scanErr != nil && (clientAborted || errors.Is(scanErr, context.DeadlineExceeded)) {
+			return resultWithUsage(), scanErr
+		}
+	}
 
 	// A Cline error remains a failure even after a usage or finish chunk.
 	// The generic terminal detector treats usage as a terminal signal, but

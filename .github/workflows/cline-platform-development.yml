@@ -28,7 +28,7 @@ jobs:
         python-version: '3.12'
     - name: Check exact source and formatting without mutation
       shell: bash
-      run: "set -euo pipefail\ntest \"$(git rev-parse HEAD)\" = \"$EXPECTED_SHA\"\nunformatted=\"$(gofmt -l backend/internal/repository/account_create_atomic.go\
+      run: "set -euo pipefail\ntest \"$(git rev-parse HEAD)\" = \"$EXPECTED_SHA\"\nunformatted=\"$(gofmt -l backend/internal/handler/cline*.go backend/internal/repository/account_create_atomic.go\
         \ backend/internal/clinemigration/*.go backend/cmd/cline-migrate/*.go backend/internal/handler/admin/account_cline*.go\
         \ backend/internal/server/routes/cline_admin.go backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go\
         \ backend/internal/service/openai_gateway_cc_pipeline.go backend/internal/repository/cline*.go backend/internal/server/api_contract_test.go\
@@ -64,7 +64,7 @@ jobs:
       run: "set -euo pipefail\ngo test -json -tags=unit -count=1 -run '^Test(Cline|ParseCline|SetCline|Handle429Cline)' ./internal/service\
         \ | tee \"$RUNNER_TEMP/cline-service-tests.jsonl\"\npython3 - <<'PY'\nimport json, os\nfrom pathlib import Path\n\
         events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-service-tests.jsonl').read_text().splitlines()\
-        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineNonstreamEnvelopeProtocolsAndBilling','TestClineNonstreamMalformedEnvelopeNeverReturnsEmptySuccess','TestClineDrainGraceRetainsLateUsageAndStops','TestClineDrainDeadlineInterruptsBlockedHTTPRead','TestClineRequestCeilingCoversHeadersAndConcurrentCleanup','TestClineWriteDisconnectStartsDrainWithoutParentCancellation','TestClineTerminalFailureUsageIsNotLostOrDoubleCounted',\
+        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineDeadlinePreemptsDrainEvenAfterEarlyCancel','TestClineDeadlineFromEitherParentAndAlreadyExpired','TestClineDeadlineDoesNotRelabelServiceAbortAsDisconnect','TestClineDeadlineInterruptsHeadersAndBodyOverHTTP','TestClineWriterFailureAllBridgesStartDrainAndRetainUsage','TestClineNonstreamEnvelopeProtocolsAndBilling','TestClineNonstreamMalformedEnvelopeNeverReturnsEmptySuccess','TestClineDrainGraceRetainsLateUsageAndStops','TestClineDrainDeadlineInterruptsBlockedHTTPRead','TestClineRequestCeilingCoversHeadersAndConcurrentCleanup','TestClineWriteDisconnectStartsDrainWithoutParentCancellation','TestClineTerminalFailureUsageIsNotLostOrDoubleCounted',\
         \ 'TestClineMetadataRefreshUsesBoundedCredentialSafeGETs', 'TestClineMetadataErrorsPreserveUnknownAndLastValidCatalog',\
         \ 'TestClineMetadataBoundariesAndPersistenceFailure', 'TestClineMetadataExpiryAndIdentityRotation', 'TestClineAdmissionFailsClosedWithoutDurableState',\
         \ 'TestClineMonitorCannotTurnUnknownIntoHealthyZero', 'TestClinePartialFailurePreservesObservedUsageAndBillingIdentity',\
@@ -82,7 +82,7 @@ jobs:
       run: "set -euo pipefail\ngo test -json -tags=unit -count=1 -run '^TestCline' ./internal/repository ./internal/handler\
         \ ./internal/handler/admin | tee \"$RUNNER_TEMP/cline-registration-tests.jsonl\"\npython3 - <<'PYTEST'\nimport json,\
         \ os\nfrom pathlib import Path\nevents = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-registration-tests.jsonl').read_text().splitlines()\
-        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineMetadataHandlerIsLocalAndRedacted',\
+        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineForwardTerminationKeepsDeadlineSeparate','TestClineMetadataHandlerIsLocalAndRedacted',\
         \ 'TestClinePortableDataRetainsModesButNotManagedGrants', 'TestClineSchedulerProjectionRetainsQuotaIdentity', 'TestClineAccountWriteEntryPointsValidateBeforeDatabase',\
         \ 'TestClineLockedEditPreservesLatestManagedState', 'TestClineManagedExtraDeltaIsPlatformScoped', 'TestClineStandaloneAndCompositeDispatch',\
         \ 'TestClineGroupAndCompositeRequestBindings'}\nif not required.issubset(passed) or any(e.get('Action') == 'skip'\
@@ -115,7 +115,7 @@ jobs:
       shell: bash
       run: 'set -euo pipefail
 
-        go test -race -tags=unit -count=3 -run ''^TestCline(Drain|RequestCeiling|WriteDisconnect)'' ./internal/service
+        go test -race -tags=unit -count=3 -run ''^TestCline(Deadline|WriterFailure|Drain|RequestCeiling|WriteDisconnect)'' ./internal/service
 
         '
     - name: Verify checked source remained unchanged
@@ -158,6 +158,23 @@ jobs:
         \ for name in required if passed[name] != 3)\nif missing or any(e.get('Action') == 'skip' for e in events):\n    raise\
         \ SystemExit(f'Cline PostgreSQL tests missing, skipped or not repeated: {missing}')\nprint('Actual Cline PostgreSQL\
         \ concurrency, rotation, ownership and migrated schema verified three times.')\nPYTEST\n"
+    - name: Real HTTP handlers and durable PostgreSQL billing
+      working-directory: backend
+      shell: bash
+      run: |
+        set -euo pipefail
+        go test -json -p 2 -tags=integration -count=1 -run '^TestClineHTTPHandlersDurableBillingAndTermination$' ./internal/handler | tee "$RUNNER_TEMP/cline-handler-ledger-tests.jsonl"
+        python3 - <<'PYTEST'
+        import json, os
+        from pathlib import Path
+        events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-handler-ledger-tests.jsonl').read_text().splitlines() if line.strip()]
+        root = 'TestClineHTTPHandlersDurableBillingAndTermination'
+        required = {root + '/' + protocol + '/' + scenario for protocol in ('chat', 'responses', 'messages') for scenario in ('complete', 'cancel_then_usage', 'writer_stall', 'deadline')}
+        passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
+        if not required.issubset(passed) or root not in passed or any(e.get('Action') == 'skip' for e in events):
+            raise SystemExit(f'HTTP handler/ledger cases missing or skipped: {sorted(required-passed)}')
+        print('12 real HTTP-handler/forwarding/SQL billing cases passed; no live account or NewAPI deployment used.')
+        PYTEST
     - name: Verify checked source remained unchanged
       run: 'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
