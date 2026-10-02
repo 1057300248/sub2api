@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 import server as api
 from multiplex_browser import MultiplexBrowser
 from multiplex_runtime import AsyncBrowserWorker
+from smoke_model_fixture import PICKER
 
 
 APP = '''const originalFetch = window.fetch.bind(window);
@@ -25,16 +26,16 @@ window.fetch = (...args) => originalFetch(...args);
 window.SentinelSDK = {token: async () => 'fixture-only'};'''
 
 
-PAGE = '''<script src="/fixture-app.js"></script><button onclick="document.querySelector('[role=menuitem]').hidden=false">New</button>
+PAGE = PICKER + '''<script src="/fixture-app.js"></script><button onclick="document.querySelector('[role=menuitem]').hidden=false">New</button>
 <button role="menuitem" hidden onclick="location.href='/?u='+crypto.randomUUID()">Blank project</button>
-<button onclick="window.chat=[]">New chat tab</button><button>5.6 Sol</button>
+<button onclick="window.chat=[]">New chat tab</button>
 <textarea placeholder="Ask anything"></textarea><script>
 window.chat=[];
 document.querySelector('textarea').addEventListener('keydown', async (e) => {
   if (e.key !== 'Enter') return;
   e.preventDefault(); window.chat.push(e.target.value);
   const result = await fetch('/api/llm/response_with_tools_start', {
-    method:'POST', body:JSON.stringify({metadata:{model:'gpt-5.6-sol',reasoning_effort:'medium',
+    method:'POST', body:JSON.stringify({metadata:{model:currentModel,reasoning_effort:currentEffort,
     projectId:new URL(location.href).searchParams.get('u')},input:window.chat})
   }).then(r=>r.json());
   await fetch('/api/llm/response_with_tools_status', {method:'POST',
@@ -78,7 +79,8 @@ class Fixture(BaseHTTPRequestHandler):
                     return
                 rid = uuid.uuid4().hex
                 self.server.jobs[rid] = {'input':body['input'][0], 'project':body['metadata']['projectId'],
-                    'state':uuid.uuid4().hex, 'polls':0}
+                    'state':uuid.uuid4().hex, 'polls':0, 'model':body['metadata']['model'],
+                    'effort':body['metadata']['reasoning_effort']}
                 # Keep model jobs open until the whole burst has started. A
                 # serial executor cannot finish the first job to release slots.
                 if len(self.server.jobs) == self.server.target:
@@ -143,12 +145,15 @@ def main():
         started = time.monotonic()
         try:
             def call(index):
-                payload = json.dumps({'model':api.MODEL,'input':f'fixture-{index}'}).encode()
+                model, effort = list(api.MODELS)[index % 4], list(api.EFFORTS)[(index // 4) % 4]
+                payload = json.dumps({'model':model,'reasoning':{'effort':effort},'input':f'fixture-{index}'}).encode()
                 headers = {'Authorization':'Bearer fixture-bridge', 'Content-Type':'application/json',
                     'X-Prism-Account-ID':'300', 'X-Prism-OAuth-Token':'synthetic-fixture-token'}
                 with urlopen(Request(f'http://127.0.0.1:{gateway.server_port}/v1/responses', data=payload, headers=headers), timeout=150) as response:
                     data = json.load(response)
-                assert data['model'] == api.MODEL and data['usage'] is None
+                assert data['model'] == model and data['reasoning']['effort'] == effort and data['usage'] is None
+                job = upstream.jobs[data['id'].removeprefix('resp_prism_')]
+                assert (job['model'], job['effort']) == (model, effort)
                 assert data['output'][0]['content'][0]['text'] == f'[user]\nfixture-{index}'
                 return data['id']
             with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
@@ -158,6 +163,10 @@ def main():
             assert len({job['project'] for job in upstream.jobs.values()}) == args.concurrency
             assert not list(state.pending.iterdir())
             assert len(list(state.receipts.iterdir())) == args.concurrency
+            for path in state.receipts.iterdir():
+                receipt = json.loads(path.read_text())
+                job = upstream.jobs[receipt['request_id']]
+                assert (receipt['model'], receipt['reasoning_effort']) == (job['model'], job['effort'])
             async def finish_observer():
                 observer.cancel()
                 return await observer

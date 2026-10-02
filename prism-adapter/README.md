@@ -2,7 +2,9 @@
 
 关联 [Issue #256](https://github.com/ranxi2001/sub2api/issues/256)。账号编辑页的 Prism 开关复用现有 OpenAI OAuth 凭据，通过回环适配服务访问 Prism 网页。管理员账号测试与 HTTP `/v1/responses` 共用后端凭据获取及适配器请求函数。
 
-当前只支持 `gpt-5.6-sol`、`medium` 和普通文本输入。`tools`、`additional_tools`、图片、工具结果、`previous_response_id`、background、structured output、compact 和原生 WebSocket 不支持。此版本不能替代带工具的 Codex 会话；P2 工具闭环、Codex CLI 端到端验收仍待实现。
+文本请求接受 `gpt-6.1-sol`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-6-luna` 四个精确模型 ID，以及 `low`、`medium`、`high`、`xhigh` 思考强度（省略时为 `medium`）。能否调用仍取决于该 OAuth 账号在 Prism 页面中实际可选的模型和强度；不把静态支持列表当作账号权益证明。`tools`、`additional_tools`、图片、工具结果、`previous_response_id`、background、structured output、compact 和原生 WebSocket 不支持。此版本不能替代带工具的 Codex 会话；P2 工具闭环、Codex CLI 端到端验收仍待实现。
+
+每个请求先通过官方页面选择模型和思考强度，再核对 start 元数据中的实际值。缓存命中也重新检查，响应与终态回执保留本次模型和强度；并发请求不修改全局默认值，也不将新模型静默替换为 `gpt-5.6-sol`。账号页面没有对应选项时，发送前返回 `model_unavailable` 或 `reasoning_unavailable`（HTTP 422）；未知模型 ID 返回 `unsupported_model`。Beta 开关属于 Prism 账号设置，适配器不会自动修改它；开启 Beta 或在配置接口看到模型名都不能替代真实调用验收。
 
 ## 协议边界
 
@@ -83,7 +85,7 @@ python3 prism-adapter/smoke_multiplex.py --chrome /absolute/path/to/chrome-headl
 2. 对该 OAuth 账号通过管理员测试入口请求 `gpt-5.6-sol`。必须观察 `test_start → content → test_complete(success=true)`，不能只看 HTTP 200。
 3. 检查回执的 `start_count=1`、实际模型和终态；使用数学题时核对最终答案。项目必须是空白项目，不能用已有答案的项目评估推理能力。
 4. 保持 Codex 原有请求不变，用同一会话连续提交两个不同文本请求，检查第二次回执的 `session_cache_hit=true`。换线程、换 API Key、换账号时不能命中旧会话。无标识请求和管理员测试始终使用新项目。
-5. Astra 等其他模型返回 422；适配器不可用时不能退回原生 Codex 上游。工具请求也应明确拒绝。
+5. 分别验证四个模型及所需强度，核对响应、回执和实际发出的 start 一致。Astra 等未适配模型返回 422；账号缺少选项时也明确拒绝，不降级模型。适配器不可用时不能退回原生 Codex 上游，工具请求也应明确拒绝。
 
 本地离线检查：
 
@@ -99,6 +101,6 @@ go test ./internal/service -run 'TestPrismBrowser|TestAccountUsesPrism' -count=1
 python3 prism-adapter/smoke_browser.py --chrome /absolute/path/to/chromium
 ```
 
-该脚本验证三次 start、同会话一次缓存命中、两个独立项目以及新聊天不重复提交历史。它验证浏览器机制，不能替代真实账号糖果测试或证明模型能力。
+该脚本验证三次不同模型/强度的 start、同会话一次缓存命中、两个独立项目以及新聊天不重复提交历史。`smoke_multiplex.py` 按四模型与四档强度混合发送请求，同时核对实际 start、响应和回执参数。这些脚本验证浏览器机制，不能替代真实账号糖果测试或证明模型能力。
 
 项目会保留在账号的 Prism 工作区内，本版不自动批量删除项目。大规模使用前需要项目回收、账号代理、动态模型目录、计费策略和 P2 工具闭环的独立实现及验收。默认保持总开关关闭；真实用户流量应等待这些边界完善。

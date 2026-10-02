@@ -182,6 +182,21 @@ class WorkerTests(unittest.TestCase):
 
 
 class EngineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_concurrent_gates_reject_a_valid_model_from_another_request(self):
+        engine = SimpleNamespace(api=adapter)
+        starts = [multiplex_browser.BrowserStart(engine, None, None, None, model, 'high') for model in adapter.MODELS]
+        async def verify(start):
+            start.armed, start.project = True, 'project'
+            route = mock.Mock(abort=mock.AsyncMock(), continue_=mock.AsyncMock())
+            other = next(model for model in adapter.MODELS if model != start.model)
+            route.request = SimpleNamespace(url=adapter.BASE+adapter.START, method='POST',
+                post_data_json={'metadata':{'model':other,'reasoning_effort':'high','projectId':'project'}})
+            await start.route(route)
+            self.assertFalse(start.sent)
+            route.continue_.assert_not_awaited()
+            route.abort.assert_awaited_once()
+        await asyncio.gather(*(verify(start) for start in starts))
+
     async def test_project_id_must_be_confirmed_by_the_official_api(self):
         actor = multiplex_browser.AccountBrowser(SimpleNamespace(api=adapter), '300', 'fixture')
         actor.page = SimpleNamespace(evaluate=mock.AsyncMock(return_value={'status':200,'data':{'uuid':'wrong'}}))
@@ -258,7 +273,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 return actor
             engine.account = account
             class Start:
-                def __init__(self, engine, actor, journal, session):
+                def __init__(self, engine, actor, journal, session, model, effort):
                     self.sent = self.violation = self.cache_hit = False
                     self.request_id = 'fixture-request'
                     self.project = 'fixture-project'
@@ -309,7 +324,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 return actor
             engine.account = account
             class Start:
-                def __init__(self, engine, actor, journal, session):
+                def __init__(self, engine, actor, journal, session, model, effort):
                     self.journal = journal
                     self.request_id = journal.local_id
                     self.project = 'fixture-project'

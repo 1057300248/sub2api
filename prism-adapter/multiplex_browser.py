@@ -8,7 +8,6 @@ remain in the per-conversation journal.
 import asyncio
 import hashlib
 import json
-import re
 import time
 import uuid
 from collections import OrderedDict
@@ -19,6 +18,7 @@ from playwright.async_api import async_playwright
 
 from multiplex_runtime import Admission, TurnJournal
 from browser_gate import BrowserGate
+from model_selection import select_options_async
 
 
 POLL_JS = """async ({origin, path, body}) => {
@@ -155,9 +155,10 @@ class AccountBrowser:
 
 class BrowserStart:
     """A single editor page exists only through start and the first poll body."""
-    def __init__(self, engine, actor, journal, session_id):
+    def __init__(self, engine, actor, journal, session_id, model=None, effort='medium'):
         self.engine, self.actor, self.journal, self.api = engine, actor, journal, engine.api
         self.session_id = session_id
+        self.model, self.effort = model if model is not None else self.api.MODEL, effort
         self.page = None
         self.project = None
         self.armed = self.sent = self.closed = False
@@ -177,7 +178,7 @@ class BrowserStart:
             if request.url == self.api.BASE + self.api.START:
                 metadata = body.get('metadata') if isinstance(body, dict) else None
                 if (not self.closed and self.armed and not self.sent and isinstance(metadata, dict)
-                        and metadata.get('model') == self.api.MODEL and metadata.get('reasoning_effort') == 'medium'
+                        and metadata.get('model') == self.model and metadata.get('reasoning_effort') == self.effort
                         and metadata.get('projectId') == self.project and request.method == 'POST'):
                     self.sent = True
                     self.start_request = request
@@ -240,11 +241,11 @@ class BrowserStart:
         self.phase = 'waiting_editor'
         textarea = page.locator('textarea[placeholder="Ask anything"]')
         await textarea.wait_for(state='visible', timeout=60000)
-        self.phase = 'waiting_model'
-        await page.get_by_role('button', name=re.compile(r'5\.6 Sol')).wait_for(state='visible', timeout=60000)
+        self.phase = 'selecting_model_and_effort'
+        await select_options_async(page, self.model, self.effort, self.api.AdapterError)
         self.phase = 'submitting'
         await textarea.fill(prompt)
-        self.journal.update(stage='submitting', project_id=self.project)
+        self.journal.update(stage='submitting', project_id=self.project, model=self.model, reasoning_effort=self.effort)
         self.armed = True
         await textarea.press('Enter')
         self.phase = 'awaiting_start'
@@ -314,7 +315,8 @@ class MultiplexBrowser:
             actor.refs += 1
             return actor
 
-    async def run(self, account_id, token, prompt, session_id=None):
+    async def run(self, account_id, token, prompt, session_id=None, model=None, effort='medium'):
+        model = self.api.MODEL if model is None else model
         async with self.admission.enter(account_id, session_id):
             journal = TurnJournal(self.state, self.api, account_id, session_id)
             actor = start = None
@@ -322,7 +324,7 @@ class MultiplexBrowser:
             try:
                 journal.begin()
                 actor = await self.account(account_id, token)
-                start = BrowserStart(self, actor, journal, session_id)
+                start = BrowserStart(self, actor, journal, session_id, model, effort)
                 async with self.bootstrap:
                     current_memory = cgroup_memory_bytes()
                     if current_memory is not None and current_memory >= 750 * 1024 * 1024:
@@ -354,7 +356,7 @@ class MultiplexBrowser:
                         jitter = int(journal.local_id[:2], 16) / 255 * 0.25
                         await asyncio.sleep(self.poll_seconds + jitter)
                 result = self.api.terminal_text(data)
-                self.state.receipt(account_id, start.request_id, 1, polls, result, start.cache_hit)
+                self.state.receipt(account_id, start.request_id, 1, polls, result, start.cache_hit, model=model, effort=effort)
                 journal.finish()
                 if isinstance(result, self.api.AdapterError):
                     raise result
