@@ -54,11 +54,12 @@ PRISM_ADAPTER_MODE=multiplex
 PRISM_ADAPTER_MAX_INFLIGHT=20
 PRISM_ADAPTER_ACCOUNT_MAX_INFLIGHT=20
 PRISM_ADAPTER_MAX_QUEUED=30
+PRISM_ADAPTER_BOOTSTRAP_CONCURRENCY=1
 ```
 
 用户的 Codex、模型名和请求不需要修改。并发总数和单账号上限均不超过 30，单账号上限不能大于总上限；队列允许 0-60 个请求，等待超过 15 秒返回 429，尚未提交模型请求。三路管理员糖果测试使用独立请求，不需要客户端会话头。同一有标识的对话仍顺序执行，其他对话可以并行。
 
-新执行器使用一个浏览器、一个账号上下文，以及最多两个短期项目准备页面。官方页面仍负责新建项目、创建聊天和发出唯一一次 start；取得可信 request ID 后，在发送前捕获该页面的首个 status 请求体，关闭准备页面，由常驻账号页面的 `window.fetch` 接管轮询。只有登记过的精确 status 请求体会被放行，不合成 start、复用验证头或重新提交未知结果。项目缓存只保留会话对应的项目 ID，不为每个并发请求保留浏览器页面。
+新执行器使用一个浏览器、一个账号上下文，默认只保留一个短期项目准备页面（`PRISM_ADAPTER_BOOTSTRAP_CONCURRENCY` 可设 1-2）。官方页面仍负责新建项目、创建聊天和发出唯一一次 start；取得可信 request ID 后，在发送前捕获该页面的首个 status 请求体，关闭准备页面，由同源 `favicon.svg` 轻量页面的 `window.fetch` 接管轮询；只有 start 使用官方编辑页及其验证流程，不复制 start 的验证头到 status。轻量页面必须返回 200/image/svg+xml，否则在准备 start 前拒绝请求。只有登记过的精确 status 请求体会被放行，不合成 start、复用验证头或重新提交未知结果。项目缓存只保留会话对应的项目 ID，不为每个并发请求保留浏览器页面。
 
 当前最多同时驻留一个账号上下文；另一个账号在它繁忙时会被拒绝，账号池多上下文调度不属于本轮范围。凭据更新必须等旧上下文在飞请求结束才能替换，期间返回 429，不强行关闭旧请求。空闲回收沿用 `PRISM_ADAPTER_SESSION_TTL_SECONDS`，存活满 900 秒且无活动请求也会回收；到期不会中断在飞任务。
 
@@ -74,7 +75,7 @@ python3 prism-adapter/smoke_multiplex.py --chrome /absolute/path/to/chrome-headl
 python3 prism-adapter/smoke_multiplex.py --chrome /absolute/path/to/chrome-headless-shell --concurrency 30
 ```
 
-此脚本通过真实 HTTP 入口、项目准备、start/status 移交和 journal，验证并发任务各自只提交一次、项目和状态不串线，页面峰值不超过 3。模型结果由本地模拟服务生成，不可用来声称真实 Prism 20/30 并发或“不降智”已验收。真实试用应先验证 1/3 并发，再逐步升到 20/30，同时记录上游终态、正确答案、耗时和整个 systemd cgroup 的内存峰值；不得在生产服务器构建。
+此脚本通过真实 HTTP 入口、项目准备、start/status 移交和 journal，验证并发任务各自只提交一次、项目和状态不串线，默认页面峰值不超过 2（准备并发设 2 时不超过 3）。模型结果由本地模拟服务生成，不可用来声称真实 Prism 20/30 并发或“不降智”已验收。真实试用应先验证 1/3 并发，再逐步升到 20/30，同时记录上游终态、正确答案、耗时和整个 systemd cgroup 的内存峰值；不得在生产服务器构建。
 
 ## 验收
 

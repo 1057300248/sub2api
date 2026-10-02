@@ -52,6 +52,9 @@ class Fixture(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_GET(self):
+        if self.path == '/favicon.svg':
+            self.reply(200, '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>', 'image/svg+xml')
+            return
         self.reply(200, PAGE, 'text/html')
 
     def do_POST(self):

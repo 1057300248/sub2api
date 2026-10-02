@@ -83,7 +83,13 @@ class AccountBrowser:
             self.page = await self.context.new_page()
             self.page.set_default_timeout(60000)
             await self.page.route('**/api/llm/**', self.route)
-            await self.page.goto(self.api.BASE, wait_until='domcontentloaded', timeout=60000)
+            # Polling needs same-origin cookies, not another full Prism editor.
+            # The official project page still owns start and SDK verification.
+            response = await self.page.goto(self.api.BASE + '/favicon.svg', wait_until='domcontentloaded', timeout=60000)
+            content_type = await response.header_value('content-type') if response else ''
+            if (not response or response.status != 200 or not (content_type or '').startswith('image/svg+xml')
+                    or not self.page.url.startswith(self.api.BASE + '/')):
+                raise self.api.AdapterError(503, 'poll_carrier_unavailable', 'Prism lightweight polling page is unavailable')
         except BaseException:
             await self.close()
             raise
@@ -238,7 +244,7 @@ class BrowserStart:
 
 class MultiplexBrowser:
     def __init__(self, state, chrome, api, active=20, per_account=20, queued=30,
-                 wait_seconds=15, bootstrap=2, accounts=1, idle_seconds=300, poll_seconds=2):
+                 wait_seconds=15, bootstrap=1, accounts=1, idle_seconds=300, poll_seconds=2):
         if not 1 <= bootstrap <= 2 or not 1 <= accounts <= 2 or not 30 <= idle_seconds <= 900:
             raise ValueError('invalid Prism browser limits')
         self.state, self.chrome, self.api = state, chrome, api

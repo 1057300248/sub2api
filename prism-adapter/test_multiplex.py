@@ -158,6 +158,34 @@ class WorkerTests(unittest.TestCase):
 
 
 class EngineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_poll_carrier_rejects_full_application_html_before_start(self):
+        engine = SimpleNamespace(api=adapter)
+        actor = multiplex_browser.AccountBrowser(engine, '300', 'fixture')
+        page = mock.Mock()
+        page.route = mock.AsyncMock()
+        page.url = adapter.BASE + '/favicon.svg'
+        page.goto = mock.AsyncMock(return_value=SimpleNamespace(status=200,
+            header_value=mock.AsyncMock(return_value='text/html')))
+        context = mock.Mock(add_cookies=mock.AsyncMock(),new_page=mock.AsyncMock(return_value=page),close=mock.AsyncMock())
+        browser = SimpleNamespace(new_context=mock.AsyncMock(return_value=context))
+        with self.assertRaises(adapter.AdapterError) as raised:
+            await actor.open(browser, 'fixture')
+        self.assertEqual(raised.exception.code, 'poll_carrier_unavailable')
+        context.close.assert_awaited_once()
+        self.assertIsNone(actor.context)
+
+    async def test_memory_pressure_only_retires_idle_accounts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = multiplex_browser.MultiplexBrowser(adapter.State(directory), 'fixture', adapter)
+            idle = SimpleNamespace(refs=0,used=float('inf'),created=float('inf'),close=mock.AsyncMock())
+            active = SimpleNamespace(refs=1,used=0,created=0,close=mock.AsyncMock())
+            engine.actors = {'idle':idle,'active':active}
+            with mock.patch.object(multiplex_browser, 'cgroup_memory_bytes', lambda:800*1024*1024):
+                await engine.prune()
+            idle.close.assert_awaited_once()
+            active.close.assert_not_awaited()
+            self.assertEqual(engine.actors, {'active':active})
+
     async def test_browser_gate_preserves_model_project_and_single_start_budget(self):
         engine = SimpleNamespace(api=adapter)
         for change in ({'model':'gpt-6-astra'}, {'reasoning_effort':'low'}, {'projectId':'another'}):

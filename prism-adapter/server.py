@@ -679,13 +679,16 @@ def main():
         active = int(os.environ.get("PRISM_ADAPTER_MAX_INFLIGHT", "20"))
         per_account = int(os.environ.get("PRISM_ADAPTER_ACCOUNT_MAX_INFLIGHT", str(active)))
         queued = int(os.environ.get("PRISM_ADAPTER_MAX_QUEUED", "30"))
+        bootstrap = int(os.environ.get("PRISM_ADAPTER_BOOTSTRAP_CONCURRENCY", "1"))
+        if not 1 <= bootstrap <= 2:
+            raise SystemExit("PRISM_ADAPTER_BOOTSTRAP_CONCURRENCY must be 1 or 2")
         # Validate before starting the worker so invalid settings fail startup.
         api = sys.modules[__name__]
         Admission(api, active, per_account, queued)
         Handler.serialize_requests = False
         Handler.browser_turn = AsyncBrowserWorker(lambda: MultiplexBrowser(
             Handler.state, chrome, api, active=active, per_account=per_account,
-            queued=queued, idle_seconds=idle_seconds), api)
+            queued=queued, bootstrap=bootstrap, idle_seconds=idle_seconds), api)
     else:
         raise SystemExit("PRISM_ADAPTER_MODE must be browser or multiplex")
     server = ThreadingHTTPServer(("127.0.0.1", 8319), Handler)
