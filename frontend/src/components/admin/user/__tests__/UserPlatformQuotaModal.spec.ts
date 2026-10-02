@@ -137,7 +137,7 @@ describe('UserPlatformQuotaModal', () => {
         : item)
       expect(apiMocks.updatePlatformQuotas).toHaveBeenCalledTimes(1)
       expect(apiMocks.updatePlatformQuotas).toHaveBeenCalledWith(99, expect.arrayContaining(expected))
-      expect(apiMocks.updatePlatformQuotas.mock.calls[0][1]).toHaveLength(10)
+      expect(apiMocks.updatePlatformQuotas.mock.calls[0][1]).toHaveLength(11)
       expect(w.emitted('success')).toHaveLength(1)
       w.unmount()
     },
