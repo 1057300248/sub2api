@@ -182,6 +182,20 @@ class WorkerTests(unittest.TestCase):
 
 
 class EngineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_project_id_must_be_confirmed_by_the_official_api(self):
+        actor = multiplex_browser.AccountBrowser(SimpleNamespace(api=adapter), '300', 'fixture')
+        actor.page = SimpleNamespace(evaluate=mock.AsyncMock(return_value={'status':200,'data':{'uuid':'wrong'}}))
+        with self.assertRaises(adapter.AdapterError) as raised:
+            await actor.create_project()
+        self.assertEqual(raised.exception.code, 'project_creation_failed')
+        async def confirmed(_script, args):
+            self.assertEqual(args['path'], '/api/projects')
+            self.assertEqual(set(args['body']), {'project_uuid','title'})
+            return {'status':200,'data':{'uuid':args['body']['project_uuid']}}
+        actor.page.evaluate = confirmed
+        project = await actor.create_project()
+        self.assertIsNotNone(adapter.PROJECT_ID.fullmatch(project))
+
     async def test_poll_carrier_requires_the_official_fetch_wrapper_before_start(self):
         engine = SimpleNamespace(api=adapter)
         actor = multiplex_browser.AccountBrowser(engine, '300', 'fixture')

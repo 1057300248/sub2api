@@ -69,6 +69,9 @@ class Fixture(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         with self.server.lock:
+            if self.path == '/api/projects':
+                self.reply(200, json.dumps({'uuid':body['project_uuid']}))
+                return
             if self.path == api.START:
                 if len(body['input']) != 1:
                     self.reply(409, '{"error":"duplicate input"}')

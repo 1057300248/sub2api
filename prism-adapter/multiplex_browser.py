@@ -10,9 +10,10 @@ import hashlib
 import json
 import re
 import time
+import uuid
 from collections import OrderedDict
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
@@ -132,6 +133,18 @@ class AccountBrowser:
         finally:
             self.expected.pop(key, None)
 
+    async def create_project(self):
+        # This UUID is the official projects API's client-assigned idempotency
+        # key. Never use it for model metadata unless the server confirms it.
+        project = str(uuid.uuid4())
+        result = await self.page.evaluate(POLL_JS, {'origin':self.api.BASE, 'path':'/api/projects',
+            'body':{'project_uuid':project, 'title':'Untitled'}})
+        data = result.get('data') if isinstance(result, dict) else None
+        if (not isinstance(result, dict) or result.get('status') != 200
+                or not isinstance(data, dict) or data.get('uuid') != project):
+            raise self.api.AdapterError(502, 'project_creation_failed', 'Prism did not confirm the new project; model request was not submitted')
+        return project
+
     async def close(self):
         context, self.context = self.context, None
         self.page = None
@@ -155,6 +168,7 @@ class BrowserStart:
         self.start_response = asyncio.get_running_loop().create_future()
         self.poll_body = asyncio.get_running_loop().create_future()
         self.cache_hit = False
+        self.phase = 'initializing'
 
     async def route(self, route):
         try:
@@ -206,6 +220,7 @@ class BrowserStart:
                 self.start_response.set_result(None)
 
     async def run(self, prompt):
+        self.phase = 'opening_project_page'
         page = self.page = await self.actor.context.new_page()
         page.set_default_timeout(60000)
         self.gate = await BrowserGate.install(self.actor.context, page, self.api.BASE, self.route)
@@ -215,29 +230,31 @@ class BrowserStart:
             self.project, _ = entry
             self.cache_hit = True
             await page.goto(self.api.BASE + '/?u=' + self.project + '&pg=1', wait_until='domcontentloaded', timeout=60000)
+            self.phase = 'opening_fresh_chat'
             await page.get_by_role('button', name='New chat tab', exact=True).click(timeout=60000)
         else:
-            await page.goto(self.api.BASE, wait_until='domcontentloaded', timeout=60000)
-            await page.get_by_role('button', name='New', exact=True).click(timeout=60000)
-            await page.get_by_role('menuitem', name='Blank project').click(timeout=60000)
-            await page.wait_for_function("new URL(location.href).searchParams.has('u')", timeout=60000)
-            self.project = parse_qs(urlparse(page.url).query).get('u', [''])[0]
-            if not self.api.PROJECT_ID.fullmatch(self.project):
-                raise self.api.AdapterError(502, 'invalid_project', 'Prism returned an invalid project')
+            self.phase = 'creating_project'
+            self.project = await self.actor.create_project()
+            self.phase = 'loading_project'
             await page.goto(self.api.BASE + '/?u=' + self.project + '&pg=1', wait_until='domcontentloaded', timeout=60000)
+        self.phase = 'waiting_editor'
         textarea = page.locator('textarea[placeholder="Ask anything"]')
         await textarea.wait_for(state='visible', timeout=60000)
+        self.phase = 'waiting_model'
         await page.get_by_role('button', name=re.compile(r'5\.6 Sol')).wait_for(state='visible', timeout=60000)
+        self.phase = 'submitting'
         await textarea.fill(prompt)
         self.journal.update(stage='submitting', project_id=self.project)
         self.armed = True
         await textarea.press('Enter')
+        self.phase = 'awaiting_start'
         data = await asyncio.wait_for(asyncio.shield(self.start_response), timeout=90)
         if data is None or self.violation:
             raise self.api.AdapterError(502, 'invalid_start', 'Prism start did not return a valid identity; inspect pending state')
         self.journal.update(stage='polling', request_id=self.request_id, turn_state=data.get('turn_state'))
         if self.api.terminal_text(data) is not None:
             return data, None
+        self.phase = 'awaiting_poll_handoff'
         body = await asyncio.wait_for(asyncio.shield(self.poll_body), timeout=30)
         if self.violation:
             raise self.api.AdapterError(502, 'unexpected_start', 'Prism attempted an unexpected model start')
@@ -311,7 +328,14 @@ class MultiplexBrowser:
                     if current_memory is not None and current_memory >= 750 * 1024 * 1024:
                         raise self.api.AdapterError(429, 'resource_pressure', 'Prism memory budget is busy; request was not submitted')
                     try:
-                        data, body = await start.run(prompt)
+                        try:
+                            data, body = await start.run(prompt)
+                        except self.api.AdapterError:
+                            raise
+                        except Exception:
+                            disposition = 'inspect pending state' if start.sent else 'model request was not submitted'
+                            raise self.api.AdapterError(502, 'preparation_failed',
+                                'Prism preparation failed at ' + start.phase + '; ' + disposition) from None
                     finally:
                         await start.close()
                     if start.violation:
