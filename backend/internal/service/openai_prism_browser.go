@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -105,7 +107,12 @@ func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.C
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "model is required"}})
 		return nil, errors.New("prism adapter model is required")
 	}
-	responseBody, upstreamHeaders, status, err := s.callPrismBrowser(ctx, account, body)
+	sessionID, err := prismBrowserSessionID(c, account.ID, body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+		return nil, err
+	}
+	responseBody, upstreamHeaders, status, err := s.callPrismBrowserWithSession(ctx, account, body, sessionID)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "prism_unavailable", "message": "Prism adapter unavailable; request was not replayed"}})
 		return nil, err
@@ -143,6 +150,12 @@ func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.C
 }
 
 func (s *OpenAIGatewayService) callPrismBrowser(ctx context.Context, account *Account, body []byte) ([]byte, http.Header, int, error) {
+	// Admin account tests always use a fresh project, even when a client sends
+	// a session header. A previous answer must not contaminate a capability test.
+	return s.callPrismBrowserWithSession(ctx, account, body, "")
+}
+
+func (s *OpenAIGatewayService) callPrismBrowserWithSession(ctx context.Context, account *Account, body []byte, sessionID string) ([]byte, http.Header, int, error) {
 	if !accountUsesPrismBrowser(account, s.cfg) {
 		return nil, nil, 0, errors.New("prism adapter is disabled; native fallback is prohibited")
 	}
@@ -169,6 +182,9 @@ func (s *OpenAIGatewayService) callPrismBrowser(ctx context.Context, account *Ac
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("X-Prism-Account-ID", strconv.FormatInt(account.ID, 10))
 	req.Header.Set("X-Prism-OAuth-Token", token)
+	if sessionID != "" {
+		req.Header.Set("X-Prism-Session-ID", sessionID)
+	}
 	// The token must never pass through an account proxy, environment proxy,
 	// plugin transport, or an HTTP redirect.
 	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true}
@@ -191,4 +207,37 @@ func (s *OpenAIGatewayService) callPrismBrowser(ctx context.Context, account *Ac
 		return nil, nil, 0, errors.New("prism adapter redirected unexpectedly")
 	}
 	return responseBody, resp.Header, resp.StatusCode, nil
+}
+
+// prismBrowserSessionID uses identities already sent by unmodified Codex clients.
+// A bare API key identifies a tenant, not a conversation: missing identity must
+// create a fresh project so unrelated requests cannot inherit project files.
+func prismBrowserSessionID(c *gin.Context, accountID int64, body []byte) (string, error) {
+	if c == nil || c.Request == nil {
+		return "", nil
+	}
+	for _, names := range [][]string{openAIThreadIdentityHeaders, openAISessionIdentityHeaders} {
+		for _, name := range names {
+			if len(c.Request.Header.Values(name)) > 1 {
+				return "", errors.New("prism conversation identity headers must not be repeated")
+			}
+		}
+	}
+	resolution := resolveOpenAIClientSessionIdentity(c, body)
+	switch resolution.metadata.Status {
+	case OpenAIClientSessionIdentityMissing:
+		return "", nil
+	case OpenAIClientSessionIdentityResolved:
+	default:
+		return "", errors.New("prism conversation identity is invalid or conflicting")
+	}
+	keyID := getAPIKeyIDFromContext(c)
+	if keyID <= 0 || accountID <= 0 {
+		return "", errors.New("prism session reuse requires an authenticated API key")
+	}
+	// The private adapter header is always derived here; client-supplied
+	// X-Prism-Session-ID values cannot select an existing cached context.
+	digest := sha256.Sum256([]byte(fmt.Sprintf("prism-session-v1:%d:%d:%s:%s",
+		keyID, accountID, resolution.identity.kind, resolution.identity.value)))
+	return hex.EncodeToString(digest[:]), nil
 }

@@ -33,6 +33,120 @@ func TestPrismBrowserResponsesURL(t *testing.T) {
 	}
 }
 
+func TestPrismBrowserSessionIDUsesExistingCodexIdentity(t *testing.T) {
+	identity := func(keyID, accountID int64, headers map[string]string, body string) (string, error) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		c.Set("api_key", &APIKey{ID: keyID})
+		for k, v := range headers {
+			c.Request.Header.Set(k, v)
+		}
+		return prismBrowserSessionID(c, accountID, []byte(body))
+	}
+	first, err := identity(7, 42, map[string]string{"session-id": "fixture"}, "{}")
+	require.NoError(t, err)
+	require.Len(t, first, 64)
+	for _, tc := range []struct {
+		name             string
+		keyID, accountID int64
+		headers          map[string]string
+		body             string
+		same             bool
+	}{
+		{"same session header alias", 7, 42, map[string]string{"session_id": "fixture"}, "{}", true},
+		{"same session body", 7, 42, nil, `{"client_metadata":{"session_id":"fixture"}}`, true},
+		{"private header cannot override", 7, 42, map[string]string{"session-id": "fixture", "X-Prism-Session-ID": "forged"}, "{}", true},
+		{"other key", 8, 42, map[string]string{"session-id": "fixture"}, "{}", false},
+		{"other account", 7, 43, map[string]string{"session-id": "fixture"}, "{}", false},
+		{"other session", 7, 42, map[string]string{"session-id": "different"}, "{}", false},
+		{"thread wins over shared session", 7, 42, map[string]string{"session-id": "fixture"}, `{"client_metadata":{"thread_id":"thread-a"}}`, false},
+		{"thread namespace differs", 7, 42, map[string]string{"conversation_id": "fixture"}, "{}", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := identity(tc.keyID, tc.accountID, tc.headers, tc.body)
+			require.NoError(t, err)
+			require.NotEmpty(t, got)
+			require.Equal(t, tc.same, first == got)
+		})
+	}
+	threadA, err := identity(7, 42, map[string]string{"session-id": "shared"}, `{"client_metadata":{"thread_id":"a"}}`)
+	require.NoError(t, err)
+	threadB, err := identity(7, 42, map[string]string{"session-id": "shared"}, `{"client_metadata":{"thread_id":"b"}}`)
+	require.NoError(t, err)
+	require.NotEqual(t, threadA, threadB)
+	for _, headers := range []map[string]string{nil, {"X-Prism-Session-ID": first}} {
+		got, err := identity(7, 42, headers, "{}")
+		require.NoError(t, err)
+		require.Empty(t, got, "without a conversation, unrelated requests must use fresh projects")
+	}
+	_, err = identity(0, 42, map[string]string{"session-id": "fixture"}, "{}")
+	require.Error(t, err)
+}
+
+func TestPrismBrowserSessionIDRejectsAmbiguousIdentity(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set("api_key", &APIKey{ID: 7})
+	c.Request.Header.Add("session_id", "one")
+	c.Request.Header.Add("session_id", "two")
+	_, err := prismBrowserSessionID(c, 42, nil)
+	require.Error(t, err)
+	c.Request.Header.Del("session_id")
+	c.Request.Header.Set("session-id", "one")
+	c.Request.Header.Set("session_id", "two")
+	_, err = prismBrowserSessionID(c, 42, nil)
+	require.Error(t, err)
+	c.Request.Header.Del("session_id")
+	_, err = prismBrowserSessionID(c, 42, []byte(`{"client_metadata":{"session_id":"conflict"}}`))
+	require.Error(t, err)
+}
+
+func TestPrismBrowserSessionForwardAndStatelessAdminTest(t *testing.T) {
+	const body = `{"model":"gpt-5.6-sol","input":"fixture"}`
+	const terminal = `{"id":"resp_fixture","status":"completed","model":"gpt-5.6-sol","usage":null,"output":[{"content":[{"text":"21"}]}]}`
+	requests := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, err := io.ReadAll(r.Body)
+		if err != nil || string(got) != body {
+			t.Error("adapter did not receive the original request body")
+		}
+		requests <- r.Header.Get("X-Prism-Session-ID")
+		_, _ = io.WriteString(w, terminal)
+	}))
+	defer server.Close()
+	s, account := prismTestService(server.URL)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("session-id", "fixture-session")
+	c.Request.Header.Set("X-Prism-Session-ID", "forged-adapter-key")
+	c.Set("api_key", &APIKey{ID: 7})
+	expected, err := prismBrowserSessionID(c, account.ID, []byte(body))
+	require.NoError(t, err)
+	_, err = s.forwardPrismBrowser(context.Background(), c, account, []byte(body), time.Now())
+	require.NoError(t, err)
+	require.Equal(t, expected, <-requests)
+	require.NotEqual(t, "fixture-session", expected)
+	_, _, _, err = s.callPrismBrowser(context.Background(), account, []byte(body))
+	require.NoError(t, err)
+	require.Empty(t, <-requests, "admin tests always create a fresh project")
+}
+
+func TestPrismBrowserInvalidSessionDoesNotDispatch(t *testing.T) {
+	s, account := prismTestService("http://127.0.0.1:1")
+	for _, value := range []string{"with\tcontrol", "with\ncontrol", strings.Repeat("x", 256)} {
+		t.Run(value, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Request.Header.Set("session-id", value)
+			c.Set("api_key", &APIKey{ID: 7})
+			_, err := s.forwardPrismBrowser(context.Background(), c, account, []byte(`{"model":"gpt-5.6-sol","input":"fixture"}`), time.Now())
+			require.Error(t, err)
+			require.Equal(t, http.StatusBadRequest, w.Code, "invalid identity must be rejected before contacting the adapter")
+		})
+	}
+}
+
 func prismTestService(endpoint string) (*OpenAIGatewayService, *Account) {
 	cfg := &config.Config{}
 	cfg.Gateway.PrismBrowser = config.GatewayPrismBrowserConfig{Enabled: true, BaseURL: endpoint + "/v1", APIKey: "fixture-bridge-key"}
