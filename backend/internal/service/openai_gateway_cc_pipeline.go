@@ -264,6 +264,13 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
+		if lifetime != nil {
+			cause := context.Cause(lifetime.ctx)
+			if errors.Is(cause, ErrClineCallerDeadline) || errors.Is(cause, ErrClineDrainTimeout) {
+				// Preserve caller termination before generic transport failover/health logic.
+				return nil, cause
+			}
+		}
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	if guardResponse != nil {

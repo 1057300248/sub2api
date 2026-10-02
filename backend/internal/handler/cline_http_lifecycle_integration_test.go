@@ -56,11 +56,21 @@ func TestClineHTTPHandlersDurableBillingAndTermination(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	require.NoError(t, repository.ApplyMigrations(ctx, db))
 	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	// Enable the real scheduler in this disposable database. A healthy control
+	// must record a sample, otherwise zero health samples on cancellation would
+	// be a vacuous assertion against an unconfigured scheduler.
+	settings := service.NewSettingService(repository.NewSettingRepository(client), &config.Config{})
+	original, err := settings.GetAllSettings(ctx)
+	require.NoError(t, err)
+	enabled := *original
+	enabled.OpenAIAdvancedSchedulerEnabled = true
+	require.NoError(t, settings.UpdateSettings(ctx, &enabled))
+	t.Cleanup(func() { require.NoError(t, settings.UpdateSettings(context.Background(), original)) })
 	for _, protocol := range []string{"responses", "messages", "chat"} {
 		t.Run(protocol, func(t *testing.T) {
 			t.Parallel()
-			for _, scenario := range []string{"complete", "cancel_then_usage", "writer_stall", "deadline"} {
-				t.Run(scenario, func(t *testing.T) { exerciseClineHTTPHandler(t, client, db, protocol, scenario) })
+			for _, scenario := range []string{"complete", "cancel_then_usage", "writer_stall", "deadline", "deadline_headers"} {
+				t.Run(scenario, func(t *testing.T) { exerciseClineHTTPHandler(t, client, db, settings, protocol, scenario) })
 			}
 		})
 	}
@@ -87,6 +97,7 @@ type clineHTTPFixtureUpstream struct {
 	service.HTTPUpstream
 	scenario       string
 	cancel         context.CancelFunc
+	abort          chan struct{}
 	calls          atomic.Int32
 	requestContext context.Context
 	closed         atomic.Int32
@@ -95,6 +106,14 @@ type clineHTTPFixtureUpstream struct {
 func (u *clineHTTPFixtureUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	u.calls.Add(1)
 	u.requestContext = req.Context()
+	if u.scenario == "deadline_headers" {
+		select {
+		case <-req.Context().Done():
+			return nil, context.Cause(req.Context())
+		case <-u.abort:
+			return nil, io.ErrClosedPipe
+		}
+	}
 	payload := "data: {\"id\":\"cline-handler\",\"model\":\"cline-pass/model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"fixture answer\"}}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":4,\"total_tokens\":12}}\n\n"
 	hang := u.scenario == "writer_stall" || u.scenario == "deadline"
 	if !hang {
@@ -103,7 +122,7 @@ func (u *clineHTTPFixtureUpstream) Do(req *http.Request, _ string, _ int64, _ in
 	if u.scenario == "cancel_then_usage" {
 		u.cancel()
 	}
-	body := &clineHTTPFixtureBody{reader: strings.NewReader(payload), ctx: req.Context(), hang: hang, closed: &u.closed, delay: u.scenario == "cancel_then_usage"}
+	body := &clineHTTPFixtureBody{reader: strings.NewReader(payload), ctx: req.Context(), hang: hang, closed: &u.closed, delay: u.scenario == "cancel_then_usage", abort: u.abort}
 	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"cline-handler-" + u.scenario}}, Body: body}, nil
 }
 
@@ -111,6 +130,7 @@ type clineHTTPFixtureBody struct {
 	reader      *strings.Reader
 	ctx         context.Context
 	hang, delay bool
+	abort       <-chan struct{}
 	closed      *atomic.Int32
 }
 
@@ -131,8 +151,12 @@ func (b *clineHTTPFixtureBody) Read(p []byte) (int, error) {
 	if !b.hang {
 		return 0, io.EOF
 	}
-	<-b.ctx.Done()
-	return 0, context.Cause(b.ctx)
+	select {
+	case <-b.ctx.Done():
+		return 0, context.Cause(b.ctx)
+	case <-b.abort:
+		return 0, io.ErrClosedPipe
+	}
 }
 func (b *clineHTTPFixtureBody) Close() error { b.closed.Add(1); return nil }
 
@@ -144,7 +168,7 @@ type clineHTTPBrokenWriter struct {
 func (w *clineHTTPBrokenWriter) Write([]byte) (int, error) { w.failures++; return 0, io.ErrClosedPipe }
 func (w *clineHTTPBrokenWriter) Flush()                    {}
 
-func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, protocol, scenario string) {
+func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, settings *service.SettingService, protocol, scenario string) {
 	t.Helper()
 	ctx := context.Background()
 	name := protocol + "-" + scenario
@@ -187,16 +211,17 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, pr
 	ledger := &clineHTTPObservedLedger{UsageBillingRepository: repository.NewUsageBillingRepository(client, db)}
 	parent, cancel := context.WithCancel(ctx)
 	defer cancel()
-	if scenario == "deadline" {
+	if strings.HasPrefix(scenario, "deadline") {
 		var stop context.CancelFunc
 		parent, stop = context.WithTimeout(parent, time.Second)
 		defer stop()
 	}
-	upstream := &clineHTTPFixtureUpstream{scenario: scenario, cancel: cancel}
+	upstream := &clineHTTPFixtureUpstream{scenario: scenario, cancel: cancel, abort: make(chan struct{})}
 	slots := &concurrencyCacheMock{acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }, acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }}
 	concurrency := service.NewConcurrencyService(slots)
 	rateLimits := service.NewRateLimitService(accounts, nil, cfg, nil, nil)
-	gateway := service.NewOpenAIGatewayService(accounts, nil, repository.NewUsageLogRepository(client, db), ledger, users, subs, nil, nil, cfg, nil, concurrency, service.NewBillingService(cfg, pricing), rateLimits, cache, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
+	rateLimits.SetSettingService(settings)
+	gateway := service.NewOpenAIGatewayService(accounts, nil, repository.NewUsageLogRepository(client, db), ledger, users, subs, nil, nil, cfg, nil, concurrency, service.NewBillingService(cfg, pricing), rateLimits, cache, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, settings, nil)
 	h := NewOpenAIGatewayHandler(gateway, concurrency, cache, service.NewAPIKeyService(keys, users, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 	var reason string
 	router := gin.New()
@@ -227,16 +252,34 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, pr
 		writer = broken
 	}
 	started := time.Now()
-	router.ServeHTTP(writer, req)
+	finished := make(chan struct{})
+	go func() { defer close(finished); router.ServeHTTP(writer, req) }()
+	select {
+	case <-finished:
+	case <-time.After(45 * time.Second):
+		cancel()
+		// Stop only the synthetic source; never weaken the production timeout.
+		close(upstream.abort)
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+		}
+		t.Fatal("handler exceeded the bounded disconnect acceptance deadline")
+	}
 	t.Logf("%s/%s: elapsed=%v status=%d reason=%s", protocol, scenario, time.Since(started), rec.Code, reason)
 	require.Equal(t, int32(1), upstream.calls.Load(), "no failover for a disconnected caller; body=%s", rec.Body.String())
-	require.Equal(t, int32(1), upstream.closed.Load(), "upstream body must close exactly once")
+	if scenario == "deadline_headers" {
+		require.Zero(t, upstream.closed.Load(), "no response body was obtained")
+		require.Equal(t, http.StatusGatewayTimeout, rec.Code)
+	} else {
+		require.Equal(t, int32(1), upstream.closed.Load(), "upstream body must close exactly once")
+	}
 	require.Error(t, upstream.requestContext.Err(), "request resources remain live after handler return")
 	require.Equal(t, int32(1), atomic.LoadInt32(&slots.releaseAccountCalled))
 	require.Equal(t, int32(1), atomic.LoadInt32(&slots.releaseUserCalled))
 	if scenario == "complete" {
 		require.Empty(t, reason)
-	} else if scenario == "deadline" {
+	} else if strings.HasPrefix(scenario, "deadline") {
 		require.Equal(t, "deadline_exceeded", reason)
 		require.ErrorIs(t, context.Cause(upstream.requestContext), service.ErrClineCallerDeadline)
 		require.NotContains(t, rec.Body.String(), "response.completed")
@@ -266,6 +309,16 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, pr
 	ledger.mu.Lock()
 	calls, last := ledger.calls, ledger.last
 	ledger.mu.Unlock()
+	if scenario == "deadline_headers" {
+		require.Zero(t, calls, "no observed usage must not manufacture a debit")
+		var balance float64
+		require.NoError(t, db.QueryRowContext(ctx, "SELECT balance FROM users WHERE id=$1", user.ID).Scan(&balance))
+		require.Equal(t, 100.0, balance)
+		var count int
+		require.NoError(t, db.QueryRowContext(ctx, "SELECT count(*) FROM usage_billing_dedup WHERE api_key_id=$1", key.ID).Scan(&count))
+		require.Zero(t, count)
+		return
+	}
 	require.Equal(t, 1, calls, "real handler must invoke durable billing once")
 	require.NotNil(t, last)
 	const charge = 2 * (8*0.000002 + 4*0.000005)

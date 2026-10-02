@@ -64,7 +64,7 @@ jobs:
       run: "set -euo pipefail\ngo test -json -tags=unit -count=1 -run '^Test(Cline|ParseCline|SetCline|Handle429Cline)' ./internal/service\
         \ | tee \"$RUNNER_TEMP/cline-service-tests.jsonl\"\npython3 - <<'PY'\nimport json, os\nfrom pathlib import Path\n\
         events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-service-tests.jsonl').read_text().splitlines()\
-        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineDeadlinePreemptsDrainEvenAfterEarlyCancel','TestClineDeadlineFromEitherParentAndAlreadyExpired','TestClineDeadlineDoesNotRelabelServiceAbortAsDisconnect','TestClineDeadlineInterruptsHeadersAndBodyOverHTTP','TestClineWriterFailureAllBridgesStartDrainAndRetainUsage','TestClineNonstreamEnvelopeProtocolsAndBilling','TestClineNonstreamMalformedEnvelopeNeverReturnsEmptySuccess','TestClineDrainGraceRetainsLateUsageAndStops','TestClineDrainDeadlineInterruptsBlockedHTTPRead','TestClineRequestCeilingCoversHeadersAndConcurrentCleanup','TestClineWriteDisconnectStartsDrainWithoutParentCancellation','TestClineTerminalFailureUsageIsNotLostOrDoubleCounted',\
+        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineDeadlineSendPreservesCauseBeforeHeaders','TestClineDeadlinePreemptsDrainEvenAfterEarlyCancel','TestClineDeadlineFromEitherParentAndAlreadyExpired','TestClineDeadlineDoesNotRelabelServiceAbortAsDisconnect','TestClineDeadlineInterruptsHeadersAndBodyOverHTTP','TestClineWriterFailureAllBridgesStartDrainAndRetainUsage','TestClineNonstreamEnvelopeProtocolsAndBilling','TestClineNonstreamMalformedEnvelopeNeverReturnsEmptySuccess','TestClineDrainGraceRetainsLateUsageAndStops','TestClineDrainDeadlineInterruptsBlockedHTTPRead','TestClineRequestCeilingCoversHeadersAndConcurrentCleanup','TestClineWriteDisconnectStartsDrainWithoutParentCancellation','TestClineTerminalFailureUsageIsNotLostOrDoubleCounted',\
         \ 'TestClineMetadataRefreshUsesBoundedCredentialSafeGETs', 'TestClineMetadataErrorsPreserveUnknownAndLastValidCatalog',\
         \ 'TestClineMetadataBoundariesAndPersistenceFailure', 'TestClineMetadataExpiryAndIdentityRotation', 'TestClineAdmissionFailsClosedWithoutDurableState',\
         \ 'TestClineMonitorCannotTurnUnknownIntoHealthyZero', 'TestClinePartialFailurePreservesObservedUsageAndBillingIdentity',\
@@ -169,11 +169,11 @@ jobs:
         from pathlib import Path
         events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-handler-ledger-tests.jsonl').read_text().splitlines() if line.strip()]
         root = 'TestClineHTTPHandlersDurableBillingAndTermination'
-        required = {root + '/' + protocol + '/' + scenario for protocol in ('chat', 'responses', 'messages') for scenario in ('complete', 'cancel_then_usage', 'writer_stall', 'deadline')}
+        required = {root + '/' + protocol + '/' + scenario for protocol in ('chat', 'responses', 'messages') for scenario in ('complete', 'cancel_then_usage', 'writer_stall', 'deadline', 'deadline_headers')}
         passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
         if not required.issubset(passed) or root not in passed or any(e.get('Action') == 'skip' for e in events):
             raise SystemExit(f'HTTP handler/ledger cases missing or skipped: {sorted(required-passed)}')
-        print('12 real HTTP-handler/forwarding/SQL billing cases passed; no live account or NewAPI deployment used.')
+        print('15 real HTTP-handler/forwarding/SQL billing cases passed; no live account or NewAPI deployment used.')
         PYTEST
     - name: Verify checked source remained unchanged
       run: 'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
