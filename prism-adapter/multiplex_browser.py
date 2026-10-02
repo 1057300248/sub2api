@@ -367,6 +367,9 @@ class MultiplexBrowser:
                         actor.projects.popitem(last=False)
                 succeeded = True
                 return start.request_id, result
+            except Exception as error:
+                error.not_submitted = start is None or not start.sent
+                raise
             finally:
                 try:
                     if start is not None:
