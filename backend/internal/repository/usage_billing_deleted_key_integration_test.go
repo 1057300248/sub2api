@@ -16,6 +16,8 @@ import (
 
 // The request has already captured its billing command when the owner deletes
 // the key. Replaying that interleaving must charge once and keep the key revoked.
+// As upstream #7816 does, a deleted key's own quota and rate-limit counters are
+// skipped while the user's balance or subscription is still charged.
 func TestUsageBillingRepositoryApply_SettlesSoftDeletedAPIKey(t *testing.T) {
 	for _, subscriptionBilling := range []bool{false, true} {
 		for _, limits := range []struct {
@@ -139,10 +141,10 @@ func TestUsageBillingRepositoryApply_SettlesSoftDeletedAPIKey(t *testing.T) {
 						"SELECT quota_used, usage_5h, usage_1d, usage_7d, key, status, deleted_at FROM api_keys WHERE id = $1", key.ID).
 						Scan(&quotaUsed, &usage5h, &usage1d, &usage7d, &keyAfter, &statusAfter, &deletedAfter))
 					expectedQuota, expectedWindow := 0.0, 0.0
-					if limits.quota {
+					if limits.quota && !deleted {
 						expectedQuota = 1.25
 					}
-					if limits.window {
+					if limits.window && !deleted {
 						expectedWindow = 1.25
 					}
 					require.InDelta(t, expectedQuota, quotaUsed, 1e-8)
