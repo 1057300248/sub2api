@@ -232,6 +232,9 @@ class FakePage:
     def wait_for_function(self, _expression, **_kwargs):
         self.url = adapter.BASE + "/?u=" + PROJECT
 
+    def evaluate(self, _expression):
+        return True
+
     def get_by_role(self, *_args, **_kwargs):
         return FakeControl(self, _kwargs.get("name"))
 

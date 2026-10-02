@@ -13,6 +13,18 @@ window.currentModel='gpt-5.6-sol'; window.currentEffort='medium';
 const modelLabels={'gpt-6.1-sol':'6.1 Sol','gpt-5.6-sol':'5.6 Sol',
  'gpt-5.6-terra':'5.6 Terra','gpt-6-luna':'6 Luna'};
 const effortLabels={low:'Low',medium:'Medium',high:'High',xhigh:'Extra high'};
+const fixtureUser={userID:'synthetic-fixture-user',custom:{beta_program_enrolled:true}};
+let catalogReady=false;
+window.__STATSIG__={instances:{fixture:{
+ loadingStatus:'Ready',
+ getContext:()=>({user:fixtureUser}),
+ updateUserAsync:async (user)=>{
+  if(user!==fixtureUser)throw new Error('user attributes were replaced');
+  catalogReady=true;
+  document.querySelectorAll('#models button').forEach(e=>e.hidden=false);
+  currentModel='gpt-6.1-sol'; selected();
+ }
+}}};
 function submenu(id) {
  for(const name of ['models','efforts']) document.getElementById(name).hidden=name!==id;
 }
@@ -26,6 +38,7 @@ function selected() {
 for(const [id,labels] of [['models',modelLabels],['efforts',effortLabels]]) {
  for(const [value,label] of Object.entries(labels)) {
   const option=document.createElement('button'); option.setAttribute('role','menuitem');
+  option.hidden=id==='models' && value!=='gpt-5.6-sol' && !catalogReady;
   option.innerText=label; option.onclick=()=>{
    if(id==='models')window.currentModel=value; else window.currentEffort=value;
    selected();

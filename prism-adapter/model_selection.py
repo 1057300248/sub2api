@@ -24,6 +24,25 @@ MODEL_MENU = re.compile(r'^(?:Model|模型)(?:\s|$)', re.I)
 EFFORT_MENU = re.compile(r'^(?:Effort|Reasoning effort|推理强度)(?:\s|$)', re.I)
 OPTION_TIMEOUT = 10000
 
+# Prism can finish SDK initialization while its React provider still holds
+# isLoading=true. A same-user SDK update refreshes the provider from the real
+# account evaluations. Never override gates, model lists or user attributes.
+CATALOG_READY = """() => {
+  const clients = Object.values(window.__STATSIG__?.instances || {}).filter(c =>
+    typeof c.getContext === 'function' && typeof c.updateUserAsync === 'function');
+  return clients.length === 1 && clients[0].loadingStatus === 'Ready';
+}"""
+REFRESH_CATALOG = """async () => {
+  const clients = Object.values(window.__STATSIG__?.instances || {}).filter(c =>
+    typeof c.getContext === 'function' && typeof c.updateUserAsync === 'function');
+  if (clients.length !== 1 || clients[0].loadingStatus !== 'Ready') return false;
+  const client = clients[0], user = client.getContext().user;
+  if (!user || typeof user.userID !== 'string' || !user.userID) return false;
+  await client.updateUserAsync(user, {timeoutMs:8000});
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  return client.loadingStatus === 'Ready';
+}"""
+
 
 def patterns(model, effort):
     return (re.compile(r'^' + re.escape(MODELS[model]) + r'(?:\s|$)'),
@@ -36,6 +55,12 @@ def selection_error(error, kind, value):
 
 
 def select_options(page, model, effort, error):
+    try:
+        page.wait_for_function(CATALOG_READY, timeout=30000)
+        if page.evaluate(REFRESH_CATALOG) is not True:
+            raise ValueError('catalog unavailable')
+    except Exception:
+        raise error(503, 'model_catalog_unavailable', 'Prism account model catalog is not ready; no model request was submitted') from None
     model_pattern, effort_pattern = patterns(model, effort)
     trigger = page.get_by_role('button', name=TRIGGER)
     trigger.wait_for(state='visible', timeout=60000)
@@ -59,6 +84,12 @@ def select_options(page, model, effort, error):
 
 
 async def select_options_async(page, model, effort, error):
+    try:
+        await page.wait_for_function(CATALOG_READY, timeout=30000)
+        if await page.evaluate(REFRESH_CATALOG) is not True:
+            raise ValueError('catalog unavailable')
+    except Exception:
+        raise error(503, 'model_catalog_unavailable', 'Prism account model catalog is not ready; no model request was submitted') from None
     model_pattern, effort_pattern = patterns(model, effort)
     trigger = page.get_by_role('button', name=TRIGGER)
     await trigger.wait_for(state='visible', timeout=60000)
