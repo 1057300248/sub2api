@@ -66,7 +66,7 @@ jobs:
       run: "set -euo pipefail\ngo test -json -tags=unit -count=1 -run '^Test(Cline|ParseCline|SetCline|Handle429Cline)' ./internal/service\
         \ | tee \"$RUNNER_TEMP/cline-service-tests.jsonl\"\npython3 - <<'PY'\nimport json, os\nfrom pathlib import Path\n\
         events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-service-tests.jsonl').read_text().splitlines()\
-        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineLegacyCustomParametersStayRequestScoped','TestClineLegacyThreeProtocolParametersSurviveLowering','TestClineWrappedLimitPreservesAuditAndStopsSameAccountRetry','TestClineDeadlineSendPreservesCauseBeforeHeaders','TestClineDeadlinePreemptsDrainEvenAfterEarlyCancel','TestClineDeadlineFromEitherParentAndAlreadyExpired','TestClineDeadlineDoesNotRelabelServiceAbortAsDisconnect','TestClineDeadlineInterruptsHeadersAndBodyOverHTTP','TestClineWriterFailureAllBridgesStartDrainAndRetainUsage','TestClineNonstreamEnvelopeProtocolsAndBilling','TestClineNonstreamMalformedEnvelopeNeverReturnsEmptySuccess','TestClineDrainGraceRetainsLateUsageAndStops','TestClineDrainDeadlineInterruptsBlockedHTTPRead','TestClineRequestCeilingCoversHeadersAndConcurrentCleanup','TestClineWriteDisconnectStartsDrainWithoutParentCancellation','TestClineTerminalFailureUsageIsNotLostOrDoubleCounted',\
+        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineCustomParametersProtectAllProtocolFieldsAndCaseAliases','TestClineLegacyCustomParametersStayRequestScoped','TestClineLegacyThreeProtocolParametersSurviveLowering','TestClineWrappedLimitPreservesAuditAndStopsSameAccountRetry','TestClineDeadlineSendPreservesCauseBeforeHeaders','TestClineDeadlinePreemptsDrainEvenAfterEarlyCancel','TestClineDeadlineFromEitherParentAndAlreadyExpired','TestClineDeadlineDoesNotRelabelServiceAbortAsDisconnect','TestClineDeadlineInterruptsHeadersAndBodyOverHTTP','TestClineWriterFailureAllBridgesStartDrainAndRetainUsage','TestClineNonstreamEnvelopeProtocolsAndBilling','TestClineNonstreamMalformedEnvelopeNeverReturnsEmptySuccess','TestClineDrainGraceRetainsLateUsageAndStops','TestClineDrainDeadlineInterruptsBlockedHTTPRead','TestClineRequestCeilingCoversHeadersAndConcurrentCleanup','TestClineWriteDisconnectStartsDrainWithoutParentCancellation','TestClineTerminalFailureUsageIsNotLostOrDoubleCounted',\
         \ 'TestClineMetadataRefreshUsesBoundedCredentialSafeGETs', 'TestClineMetadataErrorsPreserveUnknownAndLastValidCatalog',\
         \ 'TestClineMetadataBoundariesAndPersistenceFailure', 'TestClineMetadataExpiryAndIdentityRotation', 'TestClineAdmissionFailsClosedWithoutDurableState',\
         \ 'TestClineMonitorCannotTurnUnknownIntoHealthyZero', 'TestClinePartialFailurePreservesObservedUsageAndBillingIdentity',\
@@ -84,7 +84,7 @@ jobs:
       run: "set -euo pipefail\ngo test -json -tags=unit -count=1 -run '^TestCline' ./internal/repository ./internal/handler\
         \ ./internal/handler/admin | tee \"$RUNNER_TEMP/cline-registration-tests.jsonl\"\npython3 - <<'PYTEST'\nimport json,\
         \ os\nfrom pathlib import Path\nevents = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-registration-tests.jsonl').read_text().splitlines()\
-        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineForwardTerminationKeepsDeadlineSeparate','TestClineMetadataHandlerIsLocalAndRedacted',\
+        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineSuccessfulResponseSurvivesLateDeadline','TestClineForwardTerminationKeepsDeadlineSeparate','TestClineMetadataHandlerIsLocalAndRedacted',\
         \ 'TestClinePortableDataRetainsModesButNotManagedGrants', 'TestClineSchedulerProjectionRetainsQuotaIdentity', 'TestClineAccountWriteEntryPointsValidateBeforeDatabase',\
         \ 'TestClineLockedEditPreservesLatestManagedState', 'TestClineManagedExtraDeltaIsPlatformScoped', 'TestClineStandaloneAndCompositeDispatch',\
         \ 'TestClineGroupAndCompositeRequestBindings'}\nif not required.issubset(passed) or any(e.get('Action') == 'skip'\
@@ -171,11 +171,13 @@ jobs:
         from pathlib import Path
         events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-handler-ledger-tests.jsonl').read_text().splitlines() if line.strip()]
         root = 'TestClineHTTPHandlersDurableBillingAndTermination'
-        required = {root + '/' + protocol + '/' + scenario for protocol in ('chat', 'responses', 'messages') for scenario in ('complete', 'cancel_then_usage', 'writer_stall', 'deadline', 'deadline_headers')}
+        scenarios = ('complete', 'cancel_then_usage', 'writer_stall', 'deadline', 'deadline_headers', 'success_late_deadline', 'success_late_deadline_json', 'parameters_stream', 'parameters_json', 'parameters_legacy_openai_stream', 'parameters_legacy_openai_json', 'parameters_legacy_deepseek_stream', 'parameters_legacy_deepseek_json')
+        required = {root + '/' + protocol + '/' + scenario for protocol in ('chat', 'responses', 'messages') for scenario in scenarios}
+        required |= {root + '/responses/' + scenario for scenario in ('parameters_compaction', 'parameters_legacy_openai_compaction', 'parameters_legacy_deepseek_compaction')}
         passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
         if not required.issubset(passed) or root not in passed or any(e.get('Action') == 'skip' for e in events):
             raise SystemExit(f'HTTP handler/ledger cases missing or skipped: {sorted(required-passed)}')
-        print('15 real HTTP-handler/forwarding/SQL billing cases passed; no live account or NewAPI deployment used.')
+        print(f'{len(required)} real HTTP-handler/forwarding/SQL billing cases passed; no live account or NewAPI process used.')
         PYTEST
     - name: Verify checked source remained unchanged
       run: 'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
@@ -232,6 +234,28 @@ jobs:
         PYTEST
 
         '
+    - name: API key concurrency upgrade paths on PostgreSQL 18.6
+      working-directory: backend
+      env:
+        SUB2API_UPGRADE_TEST_POSTGRES_URL: postgres://cline_fixture:fixture_only@127.0.0.1:55432/cline_fixture?sslmode=disable
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(docker exec cline-migration-fixture psql -U cline_fixture -d cline_fixture -Atc 'SHOW server_version')"
+        [[ "$version" == 18.6* ]]
+        printf 'Disposable PostgreSQL version: %s\n' "$version"
+        go test -json -tags=integration -count=1 -run '^TestAPIKeyConcurrencyUpgradePaths$' ./internal/repository | tee "$RUNNER_TEMP/api-key-concurrency-upgrade.jsonl"
+        python3 - <<'PYTEST'
+        import json, os
+        from pathlib import Path
+        events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'api-key-concurrency-upgrade.jsonl').read_text().splitlines() if line.strip()]
+        root = 'TestAPIKeyConcurrencyUpgradePaths'
+        required = {root, root + '/deployed_pr=false', root + '/deployed_pr=true'}
+        passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
+        if not required.issubset(passed) or any(e.get('Action') == 'skip' for e in events):
+            raise SystemExit(f'API-key PostgreSQL upgrade cases missing or skipped: {sorted(required-passed)}')
+        print('Both API-key concurrency upgrade paths executed on disposable PostgreSQL 18.6, no skips.')
+        PYTEST
     - name: Remove disposable migration database
       if: always()
       run: docker rm --force cline-migration-fixture || true

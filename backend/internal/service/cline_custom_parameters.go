@@ -30,14 +30,20 @@ func mergeClineCustomRequestParameters(account *Account, sourceBody, outboundBod
 		return nil, fmt.Errorf("merge Cline custom request parameters: invalid outbound JSON object")
 	}
 
-	sourceFields := jsonStructFieldNames(sourceShape)
-	protected := jsonStructFieldNames(apicompat.ChatCompletionsRequest{})
+	protected := append(jsonStructFieldNames(sourceShape), jsonStructFieldNames(apicompat.ChatCompletionsRequest{})...)
 	changed := false
 	for key, raw := range source {
-		if _, known := sourceFields[key]; known {
-			continue
+		// encoding/json accepts case-folded struct field names. Treat those
+		// aliases as protocol fields too, never as vendor extensions which
+		// could shadow the canonical field after lowering or compaction.
+		known := false
+		for _, field := range protected {
+			if strings.EqualFold(key, field) {
+				known = true
+				break
+			}
 		}
-		if _, core := protected[key]; core {
+		if known {
 			continue
 		}
 		if !validClineCustomParameterName(key) {
@@ -56,17 +62,17 @@ func mergeClineCustomRequestParameters(account *Account, sourceBody, outboundBod
 	return merged, nil
 }
 
-func jsonStructFieldNames(value any) map[string]struct{} {
+func jsonStructFieldNames(value any) []string {
 	t := reflect.TypeOf(value)
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	fields := make(map[string]struct{}, t.NumField())
+	fields := make([]string, 0, t.NumField())
 	for i := 0; i < t.NumField(); i++ {
 		tag := t.Field(i).Tag.Get("json")
 		name := strings.Split(tag, ",")[0]
 		if name != "" && name != "-" {
-			fields[name] = struct{}{}
+			fields = append(fields, name)
 		}
 	}
 	return fields

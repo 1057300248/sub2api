@@ -69,7 +69,11 @@ func TestClineHTTPHandlersDurableBillingAndTermination(t *testing.T) {
 	for _, protocol := range []string{"responses", "messages", "chat"} {
 		t.Run(protocol, func(t *testing.T) {
 			t.Parallel()
-			for _, scenario := range []string{"complete", "cancel_then_usage", "writer_stall", "deadline", "deadline_headers"} {
+			scenarios := []string{"complete", "cancel_then_usage", "writer_stall", "deadline", "deadline_headers", "success_late_deadline", "success_late_deadline_json", "parameters_stream", "parameters_json", "parameters_legacy_openai_stream", "parameters_legacy_openai_json", "parameters_legacy_deepseek_stream", "parameters_legacy_deepseek_json"}
+			if protocol == "responses" {
+				scenarios = append(scenarios, "parameters_compaction", "parameters_legacy_openai_compaction", "parameters_legacy_deepseek_compaction")
+			}
+			for _, scenario := range scenarios {
 				t.Run(scenario, func(t *testing.T) { exerciseClineHTTPHandler(t, client, db, settings, protocol, scenario) })
 			}
 		})
@@ -100,12 +104,29 @@ type clineHTTPFixtureUpstream struct {
 	abort          chan struct{}
 	calls          atomic.Int32
 	requestContext context.Context
+	lastBody       []byte
 	closed         atomic.Int32
 }
 
 func (u *clineHTTPFixtureUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	u.calls.Add(1)
 	u.requestContext = req.Context()
+	requestBody, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	u.lastBody = requestBody
+	var request struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(requestBody, &request); err != nil {
+		return nil, err
+	}
+	if !request.Stream {
+		payload := `{"id":"cline-handler","model":"cline-pass/model","choices":[{"index":0,"message":{"role":"assistant","content":"fixture answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}}`
+		body := &clineHTTPFixtureBody{reader: strings.NewReader(payload), ctx: req.Context(), closed: &u.closed, abort: u.abort}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body}, nil
+	}
 	if u.scenario == "deadline_headers" {
 		select {
 		case <-req.Context().Done():
@@ -168,11 +189,36 @@ type clineHTTPBrokenWriter struct {
 func (w *clineHTTPBrokenWriter) Write([]byte) (int, error) { w.failures++; return 0, io.ErrClosedPipe }
 func (w *clineHTTPBrokenWriter) Flush()                    {}
 
+// Account release is the real handler boundary immediately after Forward.
+// A test hook here introduces an expired request context only after success,
+// without relying on a tiny timeout racing the upstream response.
+type clineHTTPPostForwardSlots struct {
+	*concurrencyCacheMock
+	afterForward func()
+}
+
+func (s *clineHTTPPostForwardSlots) ReleaseAccountSlot(ctx context.Context, accountID int64, requestID string) error {
+	err := s.concurrencyCacheMock.ReleaseAccountSlot(ctx, accountID, requestID)
+	if s.afterForward != nil {
+		s.afterForward()
+	}
+	return err
+}
+
 func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, settings *service.SettingService, protocol, scenario string) {
 	t.Helper()
 	ctx := context.Background()
 	name := protocol + "-" + scenario
-	group, err := client.Group.Create().SetName(name).SetPlatform(service.PlatformCline).SetRateMultiplier(2).Save(ctx)
+	platform := service.PlatformCline
+	if strings.Contains(scenario, "legacy_openai") {
+		platform = service.PlatformOpenAI
+	}
+	if strings.Contains(scenario, "legacy_deepseek") {
+		platform = service.PlatformDeepseek
+	}
+	success := scenario == "complete" || strings.HasPrefix(scenario, "parameters_") || strings.HasPrefix(scenario, "success_late_deadline")
+	compaction := strings.HasSuffix(scenario, "_compaction")
+	group, err := client.Group.Create().SetName(name).SetPlatform(platform).SetRateMultiplier(2).Save(ctx)
 	require.NoError(t, err)
 	user, err := client.User.Create().SetEmail(name + "@example.invalid").SetPasswordHash("synthetic-not-a-login").SetBalance(100).SetConcurrency(1).Save(ctx)
 	require.NoError(t, err)
@@ -180,6 +226,10 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, se
 	require.NoError(t, err)
 	accounts := repository.NewAccountRepository(client, db, nil)
 	a := &service.Account{Name: name, Platform: service.PlatformCline, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "synthetic-cline-key", "account_mode": cline.ModePass, "cline_auth_type": cline.AuthAPIKey, "base_url": cline.BaseURL, "model_mapping": map[string]any{"gpt-5.1": "cline-pass/model"}}}
+	a.Platform = platform
+	if platform != service.PlatformCline {
+		a.Extra = map[string]any{"openai_responses_mode": "force_chat_completions"}
+	}
 	require.NoError(t, accounts.Create(ctx, a))
 	require.NoError(t, accounts.BindGroups(ctx, a.ID, []int64{group.ID}))
 	now := time.Now().UTC()
@@ -187,7 +237,7 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, se
 	// Seed the verified identity locally; never contact the provider in a test.
 	encoded, err := json.Marshal(state)
 	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, "UPDATE accounts SET extra=jsonb_build_object('cline_state',$1::jsonb) WHERE id=$2", string(encoded), a.ID)
+	_, err = db.ExecContext(ctx, "UPDATE accounts SET extra=COALESCE(extra,'{}'::jsonb)||jsonb_build_object('cline_state',$1::jsonb) WHERE id=$2", string(encoded), a.ID)
 	require.NoError(t, err)
 	keys := repository.NewAPIKeyRepository(client, db)
 	apiKey, err := keys.GetByID(ctx, key.ID)
@@ -217,17 +267,28 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, se
 		defer stop()
 	}
 	upstream := &clineHTTPFixtureUpstream{scenario: scenario, cancel: cancel, abort: make(chan struct{})}
-	slots := &concurrencyCacheMock{acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }, acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }}
+	slots := &clineHTTPPostForwardSlots{concurrencyCacheMock: &concurrencyCacheMock{acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }, acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }}}
 	concurrency := service.NewConcurrencyService(slots)
 	rateLimits := service.NewRateLimitService(accounts, nil, cfg, nil, nil)
 	rateLimits.SetSettingService(settings)
 	gateway := service.NewOpenAIGatewayService(accounts, nil, repository.NewUsageLogRepository(client, db), ledger, users, subs, nil, nil, cfg, nil, concurrency, service.NewBillingService(cfg, pricing), rateLimits, cache, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, settings, nil)
 	h := NewOpenAIGatewayHandler(gateway, concurrency, cache, service.NewAPIKeyService(keys, users, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
-	var reason string
+	var reason, committedBody string
+	rec := httptest.NewRecorder()
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: user.ID, Concurrency: 1})
+		if strings.HasPrefix(scenario, "success_late_deadline") {
+			slots.afterForward = func() {
+				require.True(t, c.Writer.Written(), "Forward must already have committed its response")
+				committedBody = rec.Body.String()
+				expired, stop := context.WithDeadline(c.Request.Context(), time.Now().Add(-time.Second))
+				defer stop()
+				c.Request = c.Request.WithContext(expired)
+				require.ErrorIs(t, c.Request.Context().Err(), context.DeadlineExceeded)
+			}
+		}
 		c.Next()
 		reason = c.GetString("cline_forward_stop_reason")
 	})
@@ -243,9 +304,19 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, se
 	if protocol == "messages" {
 		path = "/messages"
 	}
+	if strings.HasSuffix(scenario, "_json") {
+		payload = strings.ReplaceAll(payload, `"stream":true`, `"stream":false`)
+	}
+	if compaction {
+		payload = `{"model":"gpt-5.1","input":[{"type":"compaction_trigger"},{"role":"user","content":"fixture"}],"stream":true,"STREAM":true}`
+	}
+	if strings.HasPrefix(scenario, "parameters_") {
+		// Literal wire JSON representing NewAPI's post-override output enters
+		// the actual HTTP handler, not a direct service call or sjson helper.
+		payload = strings.TrimSuffix(payload, "}") + `,"providerOptions":{"gateway":{"only":["deepseek"]}},"vendor":{"zero":0,"disabled":false,"nested":{"keep":["a",2]}}}`
+	}
 	req := httptest.NewRequest("POST", path, strings.NewReader(payload)).WithContext(parent)
 	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
 	var writer http.ResponseWriter = rec
 	broken := &clineHTTPBrokenWriter{ResponseWriter: rec}
 	if scenario == "writer_stall" {
@@ -274,10 +345,39 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, se
 	} else {
 		require.Equal(t, int32(1), upstream.closed.Load(), "upstream body must close exactly once")
 	}
-	require.Error(t, upstream.requestContext.Err(), "request resources remain live after handler return")
+	if strings.HasPrefix(scenario, "parameters_") {
+		var sent map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(upstream.lastBody, &sent))
+		require.JSONEq(t, `{"gateway":{"only":["deepseek"]}}`, string(sent["providerOptions"]))
+		require.JSONEq(t, `{"zero":0,"disabled":false,"nested":{"keep":["a",2]}}`, string(sent["vendor"]))
+		require.JSONEq(t, `"cline-pass/model"`, string(sent["model"]))
+		require.Contains(t, sent, "messages")
+		require.NotContains(t, sent, "input")
+		if compaction {
+			require.NotContains(t, sent, "STREAM", "case alias cannot undo forced non-streaming compaction")
+			require.NotEqual(t, "true", string(sent["stream"]))
+			require.NotContains(t, string(upstream.lastBody), "compaction_trigger")
+			require.Contains(t, rec.Body.String(), `"type":"compaction"`)
+		}
+	}
+	if strings.HasPrefix(scenario, "success_late_deadline") {
+		require.NotEmpty(t, committedBody)
+		require.Equal(t, committedBody, rec.Body.String(), "late deadline appended bytes to a successful response")
+		require.NotContains(t, rec.Body.String(), "Request deadline exceeded")
+		if strings.HasSuffix(scenario, "_json") {
+			require.True(t, json.Valid(rec.Body.Bytes()), "successful JSON became invalid")
+		}
+	}
+	if platform == service.PlatformCline {
+		require.Error(t, upstream.requestContext.Err(), "Cline-owned request lifetime remains live after handler return")
+	}
+	// Legacy accounts use the generic admission owner's context, not the
+	// Cline lifetime. Their body-close and slot-release contracts are checked
+	// separately; this synthetic-auth fixture installs no generic auth owner.
 	require.Equal(t, int32(1), atomic.LoadInt32(&slots.releaseAccountCalled))
 	require.Equal(t, int32(1), atomic.LoadInt32(&slots.releaseUserCalled))
-	if scenario == "complete" {
+	if success {
+		require.Equal(t, http.StatusOK, rec.Code)
 		require.Empty(t, reason)
 	} else if strings.HasPrefix(scenario, "deadline") {
 		require.Equal(t, "deadline_exceeded", reason)
@@ -297,7 +397,7 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, se
 	}
 	metrics := gateway.SnapshotOpenAIAccountSchedulerMetrics()
 	require.Zero(t, metrics.AccountSwitchTotal)
-	if scenario != "complete" {
+	if !success {
 		require.Zero(t, metrics.RuntimeStatsAccountCount, "client termination must not add a failure or recovery sample")
 	} else {
 		require.Positive(t, metrics.RuntimeStatsAccountCount, "healthy control must exercise the scheduling-result path")

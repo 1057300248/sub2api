@@ -17,7 +17,10 @@ func finishClineForward(c *gin.Context, account *service.Account, result *servic
 		return false
 	}
 	ctx := c.Request.Context()
-	if errors.Is(err, service.ErrClineCallerDeadline) || ctx.Err() == context.DeadlineExceeded {
+	// Forward may have completed and committed a valid response before the
+	// caller deadline expires during handler bookkeeping. Never append an
+	// error to that successful JSON/SSE or bypass its ordinary settlement.
+	if err != nil && (errors.Is(err, service.ErrClineCallerDeadline) || ctx.Err() == context.DeadlineExceeded) {
 		c.Set("cline_forward_stop_reason", "deadline_exceeded")
 		submit(result)
 		writeDeadline()
