@@ -67,6 +67,17 @@ func TestClineWrappedRateLimitRejectsAmbiguousAndGeneratedData(t *testing.T) {
 	errFields, ok := envelope["error"].(map[string]any)
 	require.True(t, ok)
 	message := errFields["message"]
+	for _, code := range []any{400, 401, 402, 403, "401", "insufficient_balance"} {
+		body, err := json.Marshal(map[string]any{"error": map[string]any{"code": code, "message": message}})
+		require.NoError(t, err)
+		_, wrapped := WrappedRateLimitBody(body)
+		assert.False(t, wrapped)
+		status, confirmed := GenerationErrorStatus(body)
+		assert.True(t, confirmed)
+		assert.NotEqual(t, 429, status)
+		_, handled := Classify(502, nil, body, "vendor/model", time.Now())
+		assert.False(t, handled)
+	}
 	for _, field := range []string{"content", "reasoning_content", "tool_calls"} {
 		body, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{field: message}}}})
 		require.NoError(t, err)

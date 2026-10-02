@@ -2,6 +2,7 @@ package cline
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 )
 
@@ -11,6 +12,30 @@ import (
 func WrappedRateLimitBody(payload []byte) ([]byte, bool) {
 	if len(payload) > MaxBodyBytes || !HasGenerationError(payload) {
 		return nil, false
+	}
+	// A confirmed authentication/client/balance error takes precedence over
+	// contradictory wrapped text. In particular it must not become a cooldown.
+	var root map[string]json.RawMessage
+	if json.Unmarshal(payload, &root) != nil {
+		return nil, false
+	}
+	var nested map[string]json.RawMessage
+	_ = json.Unmarshal(root["error"], &nested)
+	for _, fields := range []map[string]json.RawMessage{nested, root} {
+		for _, key := range []string{"status", "status_code", "code"} {
+			var value json.Number
+			if json.Unmarshal(fields[key], &value) == nil {
+				if status, err := strconv.Atoi(value.String()); err == nil && status >= 400 && status < 500 && status != 429 {
+					return nil, false
+				}
+			}
+		}
+		for _, key := range []string{"code", "type"} {
+			var value string
+			if json.Unmarshal(fields[key], &value) == nil && value == "insufficient_balance" {
+				return nil, false
+			}
+		}
 	}
 	message := strings.TrimSpace(errorMessage(payload))
 	lower := strings.ToLower(message)
