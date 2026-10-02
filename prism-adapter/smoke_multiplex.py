@@ -20,7 +20,12 @@ from multiplex_browser import MultiplexBrowser
 from multiplex_runtime import AsyncBrowserWorker
 
 
-PAGE = '''<button onclick="document.querySelector('[role=menuitem]').hidden=false">New</button>
+APP = '''const originalFetch = window.fetch.bind(window);
+window.fetch = (...args) => originalFetch(...args);
+window.SentinelSDK = {token: async () => 'fixture-only'};'''
+
+
+PAGE = '''<script src="/fixture-app.js"></script><button onclick="document.querySelector('[role=menuitem]').hidden=false">New</button>
 <button role="menuitem" hidden onclick="location.href='/?u='+crypto.randomUUID()">Blank project</button>
 <button onclick="window.chat=[]">New chat tab</button><button>5.6 Sol</button>
 <textarea placeholder="Ask anything"></textarea><script>
@@ -43,17 +48,21 @@ class Fixture(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
 
-    def reply(self, code, body, content_type='application/json'):
+    def reply(self, code, body, content_type='application/json', cache=False):
         raw = body.encode()
         self.send_response(code)
         self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(len(raw)))
+        if cache:
+            self.send_header('Cache-Control', 'public, max-age=3600')
         self.end_headers()
         self.wfile.write(raw)
 
     def do_GET(self):
-        if self.path == '/favicon.svg':
-            self.reply(200, '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>', 'image/svg+xml')
+        if self.path == '/fixture-app.js':
+            with self.server.lock:
+                self.server.asset_requests += 1
+            self.reply(200, APP, 'application/javascript', cache=True)
             return
         self.reply(200, PAGE, 'text/html')
 
@@ -100,6 +109,7 @@ def main():
     upstream = ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
     upstream.daemon_threads = True
     upstream.lock = threading.Lock()
+    upstream.asset_requests = 0
     upstream.jobs, upstream.release, upstream.mismatches, upstream.target = {}, None, 0, args.concurrency
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     api.BASE = f'http://127.0.0.1:{upstream.server_port}'
@@ -149,12 +159,14 @@ def main():
                 observer.cancel()
                 return await observer
             peak = asyncio.run_coroutine_threadsafe(finish_observer(), worker.loop).result(5)
-            assert peak['pages'] <= 3 and peak['contexts'] == 1
+            assert peak['pages'] <= 2 and peak['contexts'] == 1
+            assert upstream.asset_requests == 1, upstream.asset_requests
             assert peak['active'] == args.concurrency and upstream.mismatches == 0
             result = {'result':'passed','scope':'real adapter + real browser + mock upstream',
                 'concurrency':args.concurrency,'completed':len(ids),'starts':len(upstream.jobs),
                 'projects':len({j['project'] for j in upstream.jobs.values()}),'peak':peak,
                 'state_mismatches':upstream.mismatches,'real_prism_requests':0,
+                'asset_network_requests':upstream.asset_requests,
                 'elapsed_seconds':round(time.monotonic()-started,3)}
             print(json.dumps(result), flush=True)
             if args.output:

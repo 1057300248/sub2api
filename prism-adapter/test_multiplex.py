@@ -10,7 +10,31 @@ from types import SimpleNamespace
 
 from test_server import adapter
 from multiplex_runtime import Admission, AsyncBrowserWorker, TurnJournal
+from browser_gate import BrowserGate
 import multiplex_browser
+
+
+class GateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unhandled_interception_fails_closed(self):
+        session = SimpleNamespace(send=mock.AsyncMock())
+        handler = mock.AsyncMock(side_effect=ValueError('fixture'))
+        gate = BrowserGate(session, handler)
+        await gate.paused({'requestId':'paused-1','request':{'url':adapter.BASE+adapter.START,
+            'method':'POST','postData':'{}'}})
+        session.send.assert_awaited_once_with('Fetch.failRequest', {'requestId':'paused-1','errorReason':'BlockedByClient'})
+
+    async def test_large_post_data_is_read_without_rewriting_or_double_dispatch(self):
+        session = SimpleNamespace(send=mock.AsyncMock(return_value={'postData':'{"request_id":"fixture"}'}))
+        async def handler(route):
+            self.assertEqual(route.request.post_data_json, {'request_id':'fixture'})
+            await route.continue_()
+            await route.continue_()
+        gate = BrowserGate(session, handler)
+        await gate.paused({'requestId':'paused-1','networkId':'network-1',
+            'request':{'url':adapter.BASE+adapter.STATUS,'method':'POST','hasPostData':True}})
+        self.assertEqual(session.send.await_args_list, [
+            mock.call('Network.getRequestPostData', {'requestId':'network-1'}),
+            mock.call('Fetch.continueRequest', {'requestId':'paused-1'})])
 
 
 class JournalTests(unittest.TestCase):
@@ -158,18 +182,19 @@ class WorkerTests(unittest.TestCase):
 
 
 class EngineTests(unittest.IsolatedAsyncioTestCase):
-    async def test_poll_carrier_rejects_full_application_html_before_start(self):
+    async def test_poll_carrier_requires_the_official_fetch_wrapper_before_start(self):
         engine = SimpleNamespace(api=adapter)
         actor = multiplex_browser.AccountBrowser(engine, '300', 'fixture')
         page = mock.Mock()
-        page.route = mock.AsyncMock()
-        page.url = adapter.BASE + '/favicon.svg'
-        page.goto = mock.AsyncMock(return_value=SimpleNamespace(status=200,
-            header_value=mock.AsyncMock(return_value='text/html')))
+        page.url = adapter.BASE + '/'
+        page.add_init_script = mock.AsyncMock()
+        page.wait_for_function = mock.AsyncMock(side_effect=TimeoutError('fixture'))
+        page.goto = mock.AsyncMock(return_value=SimpleNamespace(status=200))
         context = mock.Mock(add_cookies=mock.AsyncMock(),new_page=mock.AsyncMock(return_value=page),close=mock.AsyncMock())
         browser = SimpleNamespace(new_context=mock.AsyncMock(return_value=context))
-        with self.assertRaises(adapter.AdapterError) as raised:
-            await actor.open(browser, 'fixture')
+        with mock.patch.object(multiplex_browser.BrowserGate,'install',new=mock.AsyncMock()):
+            with self.assertRaises(adapter.AdapterError) as raised:
+                await actor.open(browser, 'fixture')
         self.assertEqual(raised.exception.code, 'poll_carrier_unavailable')
         context.close.assert_awaited_once()
         self.assertIsNone(actor.context)

@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 from playwright.async_api import async_playwright
 
 from multiplex_runtime import Admission, TurnJournal
+from browser_gate import BrowserGate
 
 
 POLL_JS = """async ({origin, path, body}) => {
@@ -82,14 +83,17 @@ class AccountBrowser:
                 'domain':urlparse(self.api.BASE).hostname, 'path':'/', 'secure':self.api.BASE.startswith('https:')}])
             self.page = await self.context.new_page()
             self.page.set_default_timeout(60000)
-            await self.page.route('**/api/llm/**', self.route)
-            # Polling needs same-origin cookies, not another full Prism editor.
-            # The official project page still owns start and SDK verification.
-            response = await self.page.goto(self.api.BASE + '/favicon.svg', wait_until='domcontentloaded', timeout=60000)
-            content_type = await response.header_value('content-type') if response else ''
-            if (not response or response.status != 200 or not (content_type or '').startswith('image/svg+xml')
-                    or not self.page.url.startswith(self.api.BASE + '/')):
-                raise self.api.AdapterError(503, 'poll_carrier_unavailable', 'Prism lightweight polling page is unavailable')
+            await self.page.add_init_script('window.__prismOriginalFetch = window.fetch;')
+            self.gate = await BrowserGate.install(self.context, self.page, self.api.BASE, self.route)
+            response = await self.page.goto(self.api.BASE, wait_until='domcontentloaded', timeout=60000)
+            if not response or response.status != 200 or not self.page.url.startswith(self.api.BASE + '/'):
+                raise self.api.AdapterError(503, 'poll_carrier_unavailable', 'Prism official polling page is unavailable')
+            try:
+                await self.page.wait_for_function("""() => window.__prismOriginalFetch &&
+                    window.fetch !== window.__prismOriginalFetch && window.SentinelSDK &&
+                    typeof window.SentinelSDK.token === 'function'""", timeout=30000)
+            except Exception:
+                raise self.api.AdapterError(503, 'poll_carrier_unavailable', 'Prism official fetch wrapper is not ready') from None
         except BaseException:
             await self.close()
             raise
@@ -145,6 +149,7 @@ class BrowserStart:
         self.project = None
         self.armed = self.sent = self.closed = False
         self.start_request = None
+        self.start_fingerprint = None
         self.violation = False
         self.request_id = ''
         self.start_response = asyncio.get_running_loop().create_future()
@@ -162,6 +167,7 @@ class BrowserStart:
                         and metadata.get('projectId') == self.project and request.method == 'POST'):
                     self.sent = True
                     self.start_request = request
+                    self.start_fingerprint = fingerprint(body)
                     await route.continue_()
                     return
                 self.violation = True
@@ -180,9 +186,11 @@ class BrowserStart:
             pass
 
     async def response(self, response):
-        if response.request != self.start_request or self.start_response.done():
+        if response.url != self.api.BASE + self.api.START or self.start_fingerprint is None or self.start_response.done():
             return
         try:
+            if fingerprint(response.request.post_data_json) != self.start_fingerprint:
+                return
             data = await response.json()
             if response.status != 200 or not isinstance(data, dict):
                 self.start_response.set_result(None)
@@ -200,7 +208,7 @@ class BrowserStart:
     async def run(self, prompt):
         page = self.page = await self.actor.context.new_page()
         page.set_default_timeout(60000)
-        await page.route('**/api/llm/**', self.route)
+        self.gate = await BrowserGate.install(self.actor.context, page, self.api.BASE, self.route)
         page.on('response', self.response)
         entry = self.actor.projects.get(self.session_id) if self.session_id else None
         if entry and time.monotonic() - entry[1] < 900:
