@@ -182,3 +182,4 @@ issues/
 **/.credential-key-*
 !docs/credential-encryption.md
 !docs/screenshots/credential-encryption/
+!docs/screenshots/pelican-showcase-api-ui/
