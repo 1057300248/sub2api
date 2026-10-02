@@ -564,6 +564,7 @@ class Handler(BaseHTTPRequestHandler):
     browser_turn = None
     api_key = None
     lock = threading.Lock()
+    serialize_requests = True
 
     def setup(self):
         super().setup()
@@ -615,12 +616,13 @@ class Handler(BaseHTTPRequestHandler):
                 raise AdapterError(413, "request_too_large", "request body is empty or too large")
             payload = json.loads(self.rfile.read(length))
             prompt, stream = parse_prompt(payload)
-            if not self.lock.acquire(blocking=False):
+            if self.serialize_requests and not self.lock.acquire(blocking=False):
                 raise AdapterError(429, "prism_busy", "Prism browser is busy; request was not submitted")
             try:
                 request_id, answer = self.browser_turn.run(account_id, token, prompt, session_id)
             finally:
-                self.lock.release()
+                if self.serialize_requests:
+                    self.lock.release()
             response = response_payload(request_id, answer)
             if stream:
                 created = dict(response, status="in_progress", output=[])
@@ -667,7 +669,25 @@ def main():
     idle_seconds = int(os.environ.get("PRISM_ADAPTER_SESSION_TTL_SECONDS", "300"))
     if not 1 <= max_sessions <= 2 or not 30 <= idle_seconds <= 900:
         raise SystemExit("session cache limits are out of range")
-    Handler.browser_turn = BrowserWorker(lambda: BrowserTurn(Handler.state, chrome, max_sessions, idle_seconds))
+    mode = os.environ.get("PRISM_ADAPTER_MODE", "browser")
+    if mode == "browser":
+        Handler.serialize_requests = True
+        Handler.browser_turn = BrowserWorker(lambda: BrowserTurn(Handler.state, chrome, max_sessions, idle_seconds))
+    elif mode == "multiplex":
+        from multiplex_browser import MultiplexBrowser
+        from multiplex_runtime import AsyncBrowserWorker, Admission
+        active = int(os.environ.get("PRISM_ADAPTER_MAX_INFLIGHT", "20"))
+        per_account = int(os.environ.get("PRISM_ADAPTER_ACCOUNT_MAX_INFLIGHT", str(active)))
+        queued = int(os.environ.get("PRISM_ADAPTER_MAX_QUEUED", "30"))
+        # Validate before starting the worker so invalid settings fail startup.
+        api = sys.modules[__name__]
+        Admission(api, active, per_account, queued)
+        Handler.serialize_requests = False
+        Handler.browser_turn = AsyncBrowserWorker(lambda: MultiplexBrowser(
+            Handler.state, chrome, api, active=active, per_account=per_account,
+            queued=queued, idle_seconds=idle_seconds), api)
+    else:
+        raise SystemExit("PRISM_ADAPTER_MODE must be browser or multiplex")
     server = ThreadingHTTPServer(("127.0.0.1", 8319), Handler)
     server.daemon_threads = True
     try:

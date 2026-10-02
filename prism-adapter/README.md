@@ -45,6 +45,37 @@ PRISM_ADAPTER_SESSION_TTL_SECONDS=300
 
 `/health` 只证明 HTTP 进程可用，不证明 OAuth 登录、浏览器 sandbox 或模型可调用。服务模板限制 CPU 为一个核心、内存为 900 MiB、禁止 swap；实际资源需求仍需观测。
 
+## 并发执行器（服务端试用开关）
+
+默认 `PRISM_ADAPTER_MODE=browser` 保持原来的单回合 UI 执行器。要试用单账号并发，在服务器环境文件中设置：
+
+```dotenv
+PRISM_ADAPTER_MODE=multiplex
+PRISM_ADAPTER_MAX_INFLIGHT=20
+PRISM_ADAPTER_ACCOUNT_MAX_INFLIGHT=20
+PRISM_ADAPTER_MAX_QUEUED=30
+```
+
+用户的 Codex、模型名和请求不需要修改。并发总数和单账号上限均不超过 30，单账号上限不能大于总上限；队列允许 0-60 个请求，等待超过 15 秒返回 429，尚未提交模型请求。三路管理员糖果测试使用独立请求，不需要客户端会话头。同一有标识的对话仍顺序执行，其他对话可以并行。
+
+新执行器使用一个浏览器、一个账号上下文，以及最多两个短期项目准备页面。官方页面仍负责新建项目、创建聊天和发出唯一一次 start；取得可信 request ID 后，在发送前捕获该页面的首个 status 请求体，关闭准备页面，由常驻账号页面的 `window.fetch` 接管轮询。只有登记过的精确 status 请求体会被放行，不合成 start、复用验证头或重新提交未知结果。项目缓存只保留会话对应的项目 ID，不为每个并发请求保留浏览器页面。
+
+当前最多同时驻留一个账号上下文；另一个账号在它繁忙时会被拒绝，账号池多上下文调度不属于本轮范围。凭据更新必须等旧上下文在飞请求结束才能替换，期间返回 429，不强行关闭旧请求。空闲回收沿用 `PRISM_ADAPTER_SESSION_TTL_SECONDS`，存活满 900 秒且无活动请求也会回收；到期不会中断在飞任务。
+
+待决文件改为 `pending/<account_id>/<scope_hash>.json`。每个请求有自己的 request ID 和 turn_state；不确定结果只阻塞相同会话。匿名管理员测试每份结果使用独立作用域，不自动重试。原版本留下的 `pending/<account_id>` 文件仍会阻塞该账号，不能绕过。回滚到旧执行器时，旧程序看到该目录也会拒绝账号，必须先核实并发版本的未完成记录；不能直接删除目录解锁。
+
+systemd 的 `MemoryMax=900M`、禁 swap 和单核限制保持不变。新执行器在 Linux cgroup 使用量达到 750 MiB 时拒绝新的项目准备，并回收已空闲上下文；已提交请求继续尝试取得终态。这个阈值是保护措施，不是达到生产容量的证明。推荐使用与固定 Playwright 版本匹配、预构建的 Chromium headless shell，仍启用浏览器 sandbox。
+
+本地完整路径验证（真实 Chromium，模拟上游，无 OAuth/真实推理）：
+
+```sh
+python3 -m unittest discover -s prism-adapter -p 'test_*.py' -v
+python3 prism-adapter/smoke_multiplex.py --chrome /absolute/path/to/chrome-headless-shell --concurrency 20
+python3 prism-adapter/smoke_multiplex.py --chrome /absolute/path/to/chrome-headless-shell --concurrency 30
+```
+
+此脚本通过真实 HTTP 入口、项目准备、start/status 移交和 journal，验证并发任务各自只提交一次、项目和状态不串线，页面峰值不超过 3。模型结果由本地模拟服务生成，不可用来声称真实 Prism 20/30 并发或“不降智”已验收。真实试用应先验证 1/3 并发，再逐步升到 20/30，同时记录上游终态、正确答案、耗时和整个 systemd cgroup 的内存峰值；不得在生产服务器构建。
+
 ## 验收
 
 1. 在账号编辑中打开 Prism 开关并保存。API Key 账号和 shadow 账号不显示开关。
