@@ -25,8 +25,13 @@ func prismToolResponse(kind string) map[string]any {
 	return map[string]any{"id": "resp_fixture", "model": "gpt-6.1-sol", "status": "completed", "usage": nil, "output": []any{item}}
 }
 
-func prismToolEvents(response map[string]any) []map[string]any {
-	item := response["output"].([]any)[0].(map[string]any)
+func prismToolEvents(t *testing.T, response map[string]any) []map[string]any {
+	t.Helper()
+	output, ok := response["output"].([]any)
+	require.True(t, ok, "fixture output must be an item array")
+	require.NotEmpty(t, output)
+	item, ok := output[0].(map[string]any)
+	require.True(t, ok, "fixture item must be an object")
 	added := make(map[string]any)
 	for k, v := range item {
 		added[k] = v
@@ -63,7 +68,7 @@ func TestPrismClientToolTerminalAndCatalog(t *testing.T) {
 		id, err := prismBrowserTerminal(raw, "gpt-6.1-sol", false)
 		require.NoError(t, err)
 		require.Equal(t, "resp_fixture", id)
-		sse := encodePrismEvents(prismToolEvents(response))
+		sse := encodePrismEvents(prismToolEvents(t, response))
 		id, err = prismBrowserTerminal(sse, "gpt-6.1-sol", true)
 		require.NoError(t, err)
 		require.Equal(t, "resp_fixture", id)
@@ -91,14 +96,16 @@ func TestPrismClientToolStreamRejectsConflictingItems(t *testing.T) {
 		func(events []map[string]any) []map[string]any { events[1]["output_index"] = -1; return events },
 		func(events []map[string]any) []map[string]any { events[1]["output_index"] = 0.5; return events },
 		func(events []map[string]any) []map[string]any {
-			events[1]["item"].(map[string]any)["name"] = "foreign"
+			item, ok := events[1]["item"].(map[string]any)
+			require.True(t, ok, "fixture added item must be an object")
+			item["name"] = "foreign"
 			return events
 		},
 		func(events []map[string]any) []map[string]any { return append(events[:3], events[2:]...) },
 		func(events []map[string]any) []map[string]any { return append(events, events[1]) },
 		func(events []map[string]any) []map[string]any { return events[4:] },
 	} {
-		events := mutate(prismToolEvents(prismToolResponse("function_call")))
+		events := mutate(prismToolEvents(t, prismToolResponse("function_call")))
 		_, err := prismBrowserTerminal(encodePrismEvents(events), "gpt-6.1-sol", true)
 		require.Error(t, err)
 	}
@@ -120,7 +127,7 @@ func TestPrismCallerIdentityCannotBeSpoofed(t *testing.T) {
 
 func TestPrismClientToolGatewayForward(t *testing.T) {
 	response := prismToolResponse("function_call")
-	sse := encodePrismEvents(prismToolEvents(response))
+	sse := encodePrismEvents(prismToolEvents(t, response))
 	var caller string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		caller = r.Header.Get("X-Prism-Caller-ID")
