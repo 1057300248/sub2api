@@ -1,8 +1,6 @@
 package cline
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
 )
@@ -52,17 +50,8 @@ func (b *guardedJSONBody) Read(p []byte) (int, error) {
 		}
 		if err != nil {
 			b.terminal = err
-		} else if HasGenerationError(payload) {
-			b.terminal = ErrStreamFailure
-			if b.onError != nil {
-				b.onError(payload)
-			}
-		} else if !json.Valid(payload) || bytes.TrimSpace(payload)[0] != '{' {
-			b.terminal = ErrInvalidJSONBody
-		} else if b.expectSSE {
-			b.terminal = ErrExpectedSSE
 		} else {
-			b.pending, b.terminal = payload, io.EOF
+			b.pending, b.terminal = b.preparePayload(payload)
 		}
 	}
 	if len(b.pending) > 0 {

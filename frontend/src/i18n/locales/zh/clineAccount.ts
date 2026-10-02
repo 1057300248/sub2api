@@ -1,4 +1,5 @@
 export default {
+  manualTokenNotice: "Account Token 为手工维护、可能过期的凭据。本账户类型不提供 OAuth 自动续期或 Refresh Token 管理。遇到 401 后请更换凭据，并明确刷新已保存账户的元数据后再重试；不会自动切换 PAYG 或新增模型权限。",
   "create": "添加 Cline 账户",
   "edit": "编辑 Cline 账户",
   "boundary": "独立 Cline 平台。Chat、Responses、Messages 统一桥接到 Chat Completions；不启用原生 Responses、付费回退或 Free 公共 API 转发。",

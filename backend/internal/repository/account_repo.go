@@ -130,13 +130,7 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
-	if err := createAccountRecord(ctx, r.client, account); err != nil {
-		return err
-	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account create failed: account=%d err=%v", account.ID, err)
-	}
-	return nil
+	return r.createAccountAtomic(ctx, account, nil, false)
 }
 
 func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account) error {
@@ -217,63 +211,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 // CreateWithAccountGroups atomically persists an account, its exact per-group priorities,
 // and the scheduler outbox event used to publish the new routing snapshot.
 func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup) error {
-	if account == nil {
-		return service.ErrAccountNilInput
-	}
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return err
-	}
-
-	var txClient *dbent.Client
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		txClient = tx.Client()
-	} else {
-		// Reuse a caller-owned transaction when this repository is already transactional.
-		txClient = r.client
-	}
-	groupIDs := make([]int64, 0, len(groups))
-	for i := range groups {
-		groupIDs = append(groupIDs, groups[i].GroupID)
-	}
-	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
-		return err
-	}
-
-	if err := createAccountRecord(ctx, txClient, account); err != nil {
-		return err
-	}
-	if len(groups) > 0 {
-		builders := make([]*dbent.AccountGroupCreate, 0, len(groups))
-		for i := range groups {
-			groups[i].AccountID = account.ID
-			groups[i].AllowedModels = service.NormalizeGroupAllowedModels(groups[i].AllowedModels)
-			builder := txClient.AccountGroup.Create().
-				SetAccountID(account.ID).
-				SetGroupID(groups[i].GroupID).
-				SetPriority(groups[i].Priority)
-			if len(groups[i].AllowedModels) > 0 {
-				builder.SetAllowedModels(groups[i].AllowedModels)
-			}
-			builders = append(builders, builder)
-		}
-		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
-			return err
-		}
-	}
-	account.GroupIDs = groupIDs
-	account.AccountGroups = append([]service.AccountGroup(nil), groups...)
-	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(groupIDs)); err != nil {
-		return err
-	}
-
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
+	return r.createAccountAtomic(ctx, account, groups, true)
 }
 
 func (r *accountRepository) GetByID(ctx context.Context, id int64) (*service.Account, error) {

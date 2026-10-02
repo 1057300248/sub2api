@@ -6,7 +6,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   integration:
-    if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
+    if: github.repository == '1057300248/sub2api' && (github.ref == 'refs/heads/codex/cline-platform-modular-20261001' ||
+      github.ref == 'refs/heads/codex/cline-review-fixes-20261002')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -27,12 +28,12 @@ jobs:
         python-version: '3.12'
     - name: Check exact source and formatting without mutation
       shell: bash
-      run: "set -euo pipefail\ntest \"$(git rev-parse HEAD)\" = \"$EXPECTED_SHA\"\nunformatted=\"$(gofmt -l backend/internal/clinemigration/*.go\
-        \ backend/cmd/cline-migrate/*.go backend/internal/handler/admin/account_cline*.go backend/internal/server/routes/cline_admin.go\
-        \ backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go backend/internal/service/openai_gateway_cc_pipeline.go\
-        \ backend/internal/repository/cline*.go backend/internal/server/api_contract_test.go backend/internal/reauthruntime/runtime_test.go)\"\
-        \nif [[ -n \"$unformatted\" ]]; then\n  printf 'Files require gofmt:\\n%s\\n' \"$unformatted\"\n  exit 1\nfi\ngit\
-        \ diff --check\n"
+      run: "set -euo pipefail\ntest \"$(git rev-parse HEAD)\" = \"$EXPECTED_SHA\"\nunformatted=\"$(gofmt -l backend/internal/repository/account_create_atomic.go\
+        \ backend/internal/clinemigration/*.go backend/cmd/cline-migrate/*.go backend/internal/handler/admin/account_cline*.go\
+        \ backend/internal/server/routes/cline_admin.go backend/internal/domain/cline.go backend/internal/pkg/cline/*.go backend/internal/service/cline*.go\
+        \ backend/internal/service/openai_gateway_cc_pipeline.go backend/internal/repository/cline*.go backend/internal/server/api_contract_test.go\
+        \ backend/internal/reauthruntime/runtime_test.go)\"\nif [[ -n \"$unformatted\" ]]; then\n  printf 'Files require gofmt:\\\
+        n%s\\n' \"$unformatted\"\n  exit 1\nfi\ngit diff --check\n"
     - name: Verify module integrity and CI invariants
       run: 'python3 -m pip install -r .github/release-tools/requirements-release.txt
 
@@ -49,7 +50,7 @@ jobs:
       run: "set -euo pipefail\ngo test -json -race -tags=unit -count=3 ./internal/pkg/cline | tee \"$RUNNER_TEMP/cline-policy-tests.jsonl\"\
         \npython3 - <<'PY'\nimport collections, json, os\nfrom pathlib import Path\nevents = [json.loads(line) for line in\
         \ (Path(os.environ['RUNNER_TEMP'])/'cline-policy-tests.jsonl').read_text().splitlines() if line.strip()]\npassed =\
-        \ collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')\nrequired = {'TestClineTerminalFailurePreservesOnlyValidatedUsage',\
+        \ collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')\nrequired = {'TestClineJSONEnvelopePreservesCompletionAndUsage','TestClineJSONEnvelopeRejectsInvalidAndNestedErrors','TestClineTerminalFailurePreservesOnlyValidatedUsage',\
         \ 'TestClineSSEFailurePreventsSuccessfulTerminal', 'TestClineSSEClosePropagatesSourceError', 'TestClineSSEFailureIsStickyAcrossSmallReads',\
         \ 'TestClineSSECompleteEventFailures', 'TestClineSSEEventBoundsAndTruncation', 'TestClineSSEMultilineAndLineEndings',\
         \ 'TestClineSSEEmptyDataHeartbeatAndMissingDone', 'TestClineGenerationErrorIgnoresGeneratedFields', 'TestClineJSON200FailureAndBounds',\
@@ -63,7 +64,7 @@ jobs:
       run: "set -euo pipefail\ngo test -json -tags=unit -count=1 -run '^Test(Cline|ParseCline|SetCline|Handle429Cline)' ./internal/service\
         \ | tee \"$RUNNER_TEMP/cline-service-tests.jsonl\"\npython3 - <<'PY'\nimport json, os\nfrom pathlib import Path\n\
         events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-service-tests.jsonl').read_text().splitlines()\
-        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineTerminalFailureUsageIsNotLostOrDoubleCounted',\
+        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineNonstreamEnvelopeProtocolsAndBilling','TestClineNonstreamMalformedEnvelopeNeverReturnsEmptySuccess','TestClineDrainGraceRetainsLateUsageAndStops','TestClineDrainDeadlineInterruptsBlockedHTTPRead','TestClineRequestCeilingCoversHeadersAndConcurrentCleanup','TestClineWriteDisconnectStartsDrainWithoutParentCancellation','TestClineTerminalFailureUsageIsNotLostOrDoubleCounted',\
         \ 'TestClineMetadataRefreshUsesBoundedCredentialSafeGETs', 'TestClineMetadataErrorsPreserveUnknownAndLastValidCatalog',\
         \ 'TestClineMetadataBoundariesAndPersistenceFailure', 'TestClineMetadataExpiryAndIdentityRotation', 'TestClineAdmissionFailsClosedWithoutDurableState',\
         \ 'TestClineMonitorCannotTurnUnknownIntoHealthyZero', 'TestClinePartialFailurePreservesObservedUsageAndBillingIdentity',\
@@ -109,6 +110,14 @@ jobs:
         go build -o "$RUNNER_TEMP/cline-migrate" ./cmd/cline-migrate
 
         '
+    - name: Race-check bounded Cline request ownership
+      working-directory: backend
+      shell: bash
+      run: 'set -euo pipefail
+
+        go test -race -tags=unit -count=3 -run ''^TestCline(Drain|RequestCeiling|WriteDisconnect)'' ./internal/service
+
+        '
     - name: Verify checked source remained unchanged
       run: 'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
@@ -116,7 +125,8 @@ jobs:
 
         '
   postgres:
-    if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
+    if: github.repository == '1057300248/sub2api' && (github.ref == 'refs/heads/codex/cline-platform-modular-20261001' ||
+      github.ref == 'refs/heads/codex/cline-review-fixes-20261002')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -140,7 +150,7 @@ jobs:
         \ 2 -tags=integration -count=3 -run '^TestClinePostgres' ./internal/repository | tee \"$RUNNER_TEMP/cline-postgres-tests.jsonl\"\
         \npython3 - <<'PYTEST'\nimport collections, json, os\nfrom pathlib import Path\nevents = [json.loads(line) for line\
         \ in (Path(os.environ['RUNNER_TEMP'])/'cline-postgres-tests.jsonl').read_text().splitlines() if line.strip()]\npassed\
-        \ = collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')\nrequired = {'TestClinePostgresIdentitySwitchDoesNotReattributeOldLimits',\
+        \ = collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')\nrequired = {'TestClinePostgresCreateOutboxFailureIsAtomic','TestClinePostgresCreateReusesOuterTransaction','TestClinePostgresMaximumFreeScopeUsesUnfingerprintedColumn','TestClinePostgresIdentitySwitchDoesNotReattributeOldLimits',\
         \ 'TestClinePostgresSharedSubjectLimitsAndRestart', 'TestClinePostgresRefreshLeaseAndObservationOrdering', 'TestClinePostgresOutboxFailureRollsBackState',\
         \ 'TestClinePostgresDirectAndBulkCredentialGuards', 'TestClinePostgresAdmissionRejectsStaleCredentials', 'TestClinePostgresConcurrentScopedCAS',\
         \ 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits',\
@@ -155,7 +165,8 @@ jobs:
 
         '
   offline-migration:
-    if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/cline-platform-modular-20261001'
+    if: github.repository == '1057300248/sub2api' && (github.ref == 'refs/heads/codex/cline-platform-modular-20261001' ||
+      github.ref == 'refs/heads/codex/cline-review-fixes-20261002')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -217,6 +228,7 @@ jobs:
   push:
     branches:
     - codex/cline-platform-modular-20261001
+    - codex/cline-review-fixes-20261002
     paths:
     - .github/workflows/cline-platform-development.yml
     - .wanchuan/**

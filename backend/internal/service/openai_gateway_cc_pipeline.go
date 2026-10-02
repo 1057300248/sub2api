@@ -194,8 +194,21 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	// passed back to the API"。在共用出站点补空格占位，真实明文不覆盖。
 	body = ensureDeepSeekChatReasoningPlaceholders(account, body)
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	var lifetime *clineRequestLifetime
+	if account.IsCline() {
+		lifetime = newClineRequestLifetime(ctx, clineDrainGrace, clineRequestCeiling)
+		if c != nil && c.Request != nil {
+			lifetime.watch(c.Request.Context())
+		}
+		upstreamCtx, releaseUpstreamCtx = lifetime.ctx, lifetime.close
+	}
+	bodyOwnsLifetime := false
+	defer func() {
+		if !bodyOwnsLifetime {
+			releaseUpstreamCtx()
+		}
+	}()
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(body))
-	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
@@ -254,6 +267,13 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	}
 	if guardResponse != nil {
 		guardResponse(resp)
+	}
+	if lifetime != nil {
+		if resp == nil || resp.Body == nil {
+			return nil, fmt.Errorf("cline upstream returned no response body")
+		}
+		resp.Body = &clineLifetimeBody{source: resp.Body, lifetime: lifetime}
+		bodyOwnsLifetime = true
 	}
 	return resp, nil
 }

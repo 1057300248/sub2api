@@ -317,6 +317,10 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	var terminal openAIRawStreamTerminalState
 
 	writeLine := func(line string) {
+		if account.IsCline() && c.Request.Context().Err() != nil {
+			clientDisconnected = true
+			beginClineBodyDrain(resp.Body)
+		}
 		if clientDisconnected {
 			return
 		}
@@ -329,6 +333,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			for _, pending := range pendingLines {
 				if _, werr := c.Writer.WriteString(pending + "\n"); werr != nil {
 					clientDisconnected = true
+					beginClineBodyDrain(resp.Body)
 					logger.L().Debug("openai chat_completions raw: client disconnected, continuing to drain upstream for billing",
 						zap.Error(werr),
 						zap.String("request_id", requestID),
@@ -341,6 +346,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 		if _, werr := c.Writer.WriteString(line + "\n"); werr != nil {
 			clientDisconnected = true
+			beginClineBodyDrain(resp.Body)
 			logger.L().Debug("openai chat_completions raw: client disconnected, continuing to drain upstream for billing",
 				zap.Error(werr),
 				zap.String("request_id", requestID),
@@ -455,6 +461,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			for _, pending := range pendingLines {
 				if _, werr := c.Writer.WriteString(pending + "\n"); werr != nil {
 					clientDisconnected = true
+					beginClineBodyDrain(resp.Body)
 					logger.L().Debug("openai chat_completions raw: client disconnected during final flush",
 						zap.Error(werr),
 						zap.String("request_id", requestID),

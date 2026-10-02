@@ -61,8 +61,6 @@ func (s *OpenAIGatewayService) prepareClineResponseGuard(ctx context.Context, ac
 			if !confirmed || s == nil || s.rateLimitService == nil {
 				return
 			}
-			// A confirmed upstream failure must not disappear with client
-			// cancellation. Persistence stays synchronous and strictly bounded.
 			persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clineLimitPersistTimeout)
 			defer cancel()
 			s.rateLimitService.handleClineScopedUpstreamError(persistCtx, snapshot, status, headers, payload, request.Model)
@@ -71,8 +69,12 @@ func (s *OpenAIGatewayService) prepareClineResponseGuard(ctx context.Context, ac
 		if stream && (strings.EqualFold(mediaType, "text/event-stream") || strings.TrimSpace(resp.Header.Get("Content-Type")) == "") {
 			resp.Body = cline.GuardSSEBody(resp.Body, lineLimit, onError)
 		} else {
-			// JSON returned to a streaming request is not an empty successful
-			// stream. Non-stream JSON is checked before exposing any bytes.
+			// Normalization may remove an envelope; never forward its old length
+			// or representation validators with the normalized response body.
+			resp.ContentLength = -1
+			for _, header := range []string{"Content-Length", "Content-MD5", "Digest", "ETag"} {
+				resp.Header.Del(header)
+			}
 			resp.Body = cline.GuardJSONBody(resp.Body, clineJSONResponseLimit, stream, onError)
 		}
 	}, nil

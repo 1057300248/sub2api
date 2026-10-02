@@ -12,6 +12,7 @@
           <label class="block text-sm">{{ t('clineAccount.authType') }}<select v-model="draft.authType" data-testid="cline-auth" class="input mt-1 w-full" required><option value="" disabled>{{ t('clineAccount.selectAuth') }}</option><option value="api_key">API Key</option><option value="account_token">Account Token</option></select></label>
           <label class="block text-sm">{{ t(account ? 'clineAccount.replaceKey' : 'clineAccount.key') }}<input v-model="draft.apiKey" data-testid="cline-key" type="password" autocomplete="new-password" spellcheck="false" class="input mt-1 w-full" :required="!account" /></label>
         </div>
+        <p v-if="draft.authType === 'account_token'" data-testid="cline-manual-token-notice" class="text-sm text-amber-700 dark:text-amber-300">{{ t('clineAccount.manualTokenNotice') }}</p>
         <p v-if="account" class="text-xs text-gray-500">{{ t('clineAccount.keepKey') }}</p>
         <label class="block text-sm">{{ t('clineAccount.baseURL') }}<input v-model="draft.baseURL" data-testid="cline-base" class="input mt-1 w-full font-mono text-sm" type="url" /></label>
         <div class="space-y-2">

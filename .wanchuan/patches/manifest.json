@@ -77,7 +77,10 @@
         "backend/internal/service/channel_monitor_quota_fetcher.go",
         "backend/internal/service/channel_monitor_validate.go",
         "frontend/src/api/admin/clineMetadata.ts",
-        "frontend/src/i18n/locales/*/clineMetadata.ts"
+        "frontend/src/i18n/locales/*/clineMetadata.ts",
+        "backend/internal/repository/account_create_atomic.go",
+        "backend/internal/service/admin_account.go",
+        "backend/internal/service/openai_gateway_chat_completions_raw.go"
       ],
       "tests": [
         "python3 tools/verify_cline_platform.py",

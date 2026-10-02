@@ -112,3 +112,14 @@ describe('independent Cline account modal', () => {
     expect(api.create).not.toHaveBeenCalled(); expect(api.update).not.toHaveBeenCalled()
   })
 })
+
+it('explains manual account tokens without probing or changing models', async () => {
+  const w=render(account)
+  await w.get('[data-testid="cline-auth"]').setValue('account_token')
+  expect(w.get('[data-testid="cline-manual-token-notice"]').text()).toBe('clineAccount.manualTokenNotice')
+  expect(w.get<HTMLInputElement>('[data-testid="cline-upstream-model"]').element.value).toBe('cline-pass/model')
+  expect(metadata.getClineMetadata).not.toHaveBeenCalled()
+  expect(metadata.refreshClineMetadata).not.toHaveBeenCalled()
+  expect(api.create).not.toHaveBeenCalled()
+  expect(api.update).not.toHaveBeenCalled()
+})

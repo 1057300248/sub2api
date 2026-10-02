@@ -1,4 +1,5 @@
 export default {
+  manualTokenNotice: "Account Token is manually maintained and may expire. Sub2API does not refresh OAuth tokens or store refresh tokens for this account type. After a 401, replace the credential and explicitly refresh saved-account metadata before retrying. This does not switch to PAYG or grant additional models.",
   "create": "Add Cline account",
   "edit": "Edit Cline account",
   "boundary": "Independent Cline platform. Chat, Responses and Messages are bridged to Chat Completions. Native Responses, paid fallback and public Free forwarding are not enabled.",
