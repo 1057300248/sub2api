@@ -1,5 +1,9 @@
 # Prism OAuth 文本适配器（P1 试验）
 
+账号编辑 → Prism → 勾选专属模型。`extra.openai_prism_browser_models` 按账号映射后的模型名匹配，只支持 `gpt-6.1-sol`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-6-luna`。未选模型继续使用原来的 Codex / Excel 路由；显式空数组表示不走 Prism。已开启 Prism 的旧账号缺少该字段时仅默认这四个模型，不再接管所有 OpenAI 模型。所选模型的 Prism 失败仍不自动切换协议或模型。
+
+Prism 请求由适配器独立排队与限流，不参与原生账号的自动并发升降档；账号页显示的并发档位不代表适配器容量。本变更不会提高线上适配器限额。
+
 关联 [Issue #256](https://github.com/ranxi2001/sub2api/issues/256)。账号编辑页的 Prism 开关复用现有 OpenAI OAuth 凭据，通过回环适配服务访问 Prism 网页。管理员账号测试与 HTTP `/v1/responses` 共用后端凭据获取及适配器请求函数。
 
 文本请求接受 `gpt-6.1-sol`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-6-luna` 四个精确模型 ID，以及 `low`、`medium`、`high`、`xhigh` 思考强度（省略时为 `medium`）。能否调用仍取决于该 OAuth 账号在 Prism 页面中实际可选的模型和强度；不把静态支持列表当作账号权益证明。默认保持文本模式。`gpt-6.1-sol` 可通过下述服务端试用开关启用客户端工具桥；图片、`previous_response_id`、background、structured output、compact 和原生 WebSocket 仍不支持。
@@ -24,7 +28,7 @@
 
 ## 6.1 Sol 客户端工具桥（试用）
 
-同时升级 Go 网关和本目录适配器，安装固定版本的预构建依赖后，在适配器的受限环境文件设置 `PRISM_ADAPTER_CLIENT_TOOLS_ENABLED=true`。默认 false；其他三个模型暂只保留文本路径。无需更改用户的 Codex 工具定义、provider 或请求头。
+同时升级 Go 网关和本目录适配器，并安装 `requirements.txt` 固定版本的预构建依赖。客户端工具桥接默认启用；显式设置 `PRISM_ADAPTER_CLIENT_TOOLS_ENABLED=false` 可关闭。启动时检查工具验证依赖，缺失则停止启动，避免接收请求后才发现升级不完整。其他三个模型暂只保留文本路径。无需更改用户的 Codex 工具定义、provider 或请求头。
 
 - 支持 Responses `function`、`custom`、嵌套 namespace，顶层 `tools` / `additional_tools` 及 input 内的 `additional_tools`。
 - 支持 `tool_choice=auto/none/required`、指定 function/custom，以及 `parallel_tool_calls`。最多 96 个工具、每次最多 8 个调用、历史最多 64 个调用；`parallel_tool_calls=false` 时最多一个。
