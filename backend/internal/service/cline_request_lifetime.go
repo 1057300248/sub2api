@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -11,7 +12,9 @@ import (
 const clineDrainGrace = 30 * time.Second
 const clineRequestCeiling = 30 * time.Minute
 
-var ErrClineDrainTimeout = errors.New("cline disconnected response drain deadline exceeded")
+// Preserve the existing client-cancellation classification after bounded drain.
+// The independent absolute ceiling remains a distinct upstream timeout.
+var ErrClineDrainTimeout = fmt.Errorf("cline disconnected response drain deadline exceeded: %w", context.Canceled)
 var ErrClineRequestTimeout = errors.New("cline upstream request lifetime exceeded")
 
 // Each request owns its timers and cancellation. Parent cancellation starts a
