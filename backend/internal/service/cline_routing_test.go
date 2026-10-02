@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func clineRoutingAccount(t *testing.T, mode, auth string) *Account {
@@ -218,4 +219,55 @@ func TestClineTokenCountNeverCallsNativeUpstream(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
 	require.Positive(t, response.InputTokens)
 	require.True(t, slices.Contains(AllowedQuotaPlatforms, PlatformCline))
+}
+
+func TestClineCustomRequestParametersReachFinalChatBody(t *testing.T) {
+	for _, protocol := range []string{"chat", "responses", "messages"} {
+		t.Run(protocol, func(t *testing.T) {
+			body, path := clineProtocolRequest(protocol, false)
+			var err error
+			body, err = sjson.SetRawBytes(body, "providerOptions", []byte("{\"gateway\":{\"only\":[\"deepseek\"]}}"))
+			require.NoError(t, err)
+			body, err = sjson.SetRawBytes(body, "customVendor", []byte("{\"nested\":{\"enabled\":true}}"))
+			require.NoError(t, err)
+
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader("{\"id\":\"custom\",\"model\":\"cline-pass/model\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}")),
+			}}
+			gateway := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream, accountRepo: &clineAdmissionTestRepository{}}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+
+			result, err := invokeClineProtocol(gateway, c, clineRoutingAccount(t, cline.ModePass, cline.AuthAPIKey), body, protocol)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, "deepseek", gjson.GetBytes(upstream.lastBody, "providerOptions.gateway.only.0").String())
+			require.True(t, gjson.GetBytes(upstream.lastBody, "customVendor.nested.enabled").Bool())
+			require.Equal(t, "cline-pass/model", gjson.GetBytes(upstream.lastBody, "model").String())
+			require.True(t, gjson.GetBytes(upstream.lastBody, "messages").IsArray())
+		})
+	}
+}
+
+func TestClineCustomRequestParametersCannotOverrideChatCoreFields(t *testing.T) {
+	body := []byte("{\"model\":\"public-model\",\"input\":\"hello\",\"stream\":false,\"providerOptions\":{\"gateway\":{\"only\":[\"deepseek\"]}},\"messages\":[{\"role\":\"system\",\"content\":\"must-not-pass\"}],\"max_tokens\":1}")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader("{\"id\":\"protected\",\"model\":\"cline-pass/model\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}")),
+	}}
+	gateway := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream, accountRepo: &clineAdmissionTestRepository{}}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", bytes.NewReader(body))
+
+	result, err := gateway.forwardResponsesViaRawChatCompletions(context.Background(), c, clineRoutingAccount(t, cline.ModePass, cline.AuthAPIKey), body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "deepseek", gjson.GetBytes(upstream.lastBody, "providerOptions.gateway.only.0").String())
+	require.NotEqual(t, "must-not-pass", gjson.GetBytes(upstream.lastBody, "messages.0.content").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "max_tokens").Exists())
 }
