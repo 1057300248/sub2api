@@ -411,7 +411,7 @@ class BrowserTurn:
                 manager, self.manager = self.manager, None
                 manager.__exit__(None, None, None)
 
-    def run(self, account_id, token, prompt, session_id=None, model=MODEL, effort="medium"):
+    def run(self, account_id, token, prompt, session_id=None, model=MODEL, effort="medium", reuse_project=True):
         self.state.ensure_idle(account_id)
         self.prune()
         # Rotate credentials by discarding every cached context for that account.
@@ -420,8 +420,8 @@ class BrowserTurn:
         for old in list(self.sessions):
             if old[0] == account_id and old[2] != identity:
                 self.discard(old)
-        key = (account_id, session_id, identity)
-        session = self.sessions.get(key) if session_id else None
+        key = (account_id, session_id if reuse_project else None, identity)
+        session = self.sessions.get(key) if session_id and reuse_project else None
         cache_hit = session is not None
         request = None
         succeeded = False
@@ -457,7 +457,7 @@ class BrowserTurn:
             if session is not None:
                 session.active = None
             try:
-                if not succeeded or not session_id:
+                if not succeeded or not session_id or not reuse_project:
                     self.discard(key)
             finally:
                 # Discarding the cache never clears an ambiguous submission.
@@ -647,7 +647,12 @@ class Handler(BaseHTTPRequestHandler):
                 if bridge is not None:
                     self.tool_state.reserve(scope, bridge.calls, bridge.results, bridge.lease, bridge.needs_fresh)
                 try:
-                    request_id, answer = self.browser_turn.run(account_id, token, prompt, session_id, model, effort)
+                    args = (account_id, token, prompt, session_id, model, effort)
+                    if bridge is not None:
+                        # Client results already contain expanded history. A
+                        # native chat/project is not their continuation state.
+                        args += (False,)
+                    request_id, answer = self.browser_turn.run(*args)
                 except Exception as error:
                     if bridge is not None and (getattr(error,'not_submitted',False) or
                             getattr(error,'code',None) in ('prism_busy','resource_pressure','credential_rotation')):

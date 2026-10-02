@@ -201,8 +201,10 @@ class ToolHTTPTests(unittest.TestCase):
     def test_function_and_custom_roundtrip_over_real_http_sse(self):
         class Browser:
             count = 0
-            def run(inner, account, token, prompt, session, model, effort):
+            def run(inner, account, token, prompt, session, model, effort, reuse_project=True):
                 import re
+                self.assertFalse(reuse_project)
+                self.assertEqual(session,'a'*64)
                 inner.count += 1
                 marker = re.search(r'PRISM_CLIENT_TOOLS_V1:[a-f0-9]+',prompt).group()
                 if inner.count == 1:

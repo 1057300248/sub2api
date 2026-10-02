@@ -31,6 +31,7 @@
 - 网关不执行 shell、JavaScript、补丁、MCP 或文件操作。Prism 通过受控文本协议请求客户端工具，适配器只接受带本轮标记的完整 JSON；未知工具、裸 shell、代码围栏、重复调用或不合法参数不会被猜测、包装或发送给客户端。这不是 Prism 原生工具通道。
 - Function arguments 校验 JSON Schema Draft 2020-12 / Draft 7；拒绝外部 schema 引用。Custom input 保留原始字符串，支持 text、regex 和 Lark 格式；Lark 仅允许 bundled common imports。校验在独立子进程中运行，限制时间、CPU、输入大小，Linux 限制地址空间 192 MiB；不运行工具代码。
 - 回传 `function_call` / `custom_tool_call`、原工具名/namespace 和唯一 `call_id`。客户端执行后，用完整 Responses 历史提交对应的 `*_call_output`；当前不支持只有结果、没有原 call 的增量历史，也不把 `previous_response_id` 当作已恢复的会话。
+- 客户端工具回合每次创建独立空白 Prism 项目，避免复用原生聊天后第三轮编辑器无法就绪；续接依据是完整客户端历史和调用记录。原会话的准入锁与 pending 作用域仍保留，不把未知结局改成匿名新请求来绕过保护。普通文本继续使用原项目缓存策略。
 - `X-Prism-Caller-ID` 由 Go 网关按已认证 API Key 和账号生成，外部同名头不参与取值。调用记录绑定 caller、账号和标准会话摘要；换账号/Key/会话、修改已发出的参数、未知 ID、缺失或重复结果均拒绝。
 - SQLite `tools/v1.sqlite3`（0600，父目录 0700）只存调用摘要、作用域摘要、响应/调用 ID、结果摘要和占用状态，不存工具参数、结果正文或凭据。每个结果先占用再提交，明确未发送时可释放；结果未知时保留占用，重启后也不重放。已知上游终态但格式不合法时消耗该结果并报错，不发出工具调用。记录上限 50000，达到上限需运维处理，不自动清除未知状态。
 - Hosted web/search、MCP、computer、image 等工具不由本桥执行。有可用客户端工具时，未支持的 hosted 类型在提示和响应 metadata `prism_unavailable_tools` 中明确列出；只有 hosted 工具或强制选择它们时拒绝请求。
