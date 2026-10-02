@@ -218,7 +218,9 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, se
 	}
 	success := scenario == "complete" || strings.HasPrefix(scenario, "parameters_") || strings.HasPrefix(scenario, "success_late_deadline")
 	compaction := strings.HasSuffix(scenario, "_compaction")
-	group, err := client.Group.Create().SetName(name).SetPlatform(platform).SetRateMultiplier(2).Save(ctx)
+	// OpenAI groups require an explicit Messages permission. This fixture
+	// grants it only to that protocol, never by changing production defaults.
+	group, err := client.Group.Create().SetName(name).SetPlatform(platform).SetRateMultiplier(2).SetAllowMessagesDispatch(protocol == "messages").Save(ctx)
 	require.NoError(t, err)
 	user, err := client.User.Create().SetEmail(name + "@example.invalid").SetPasswordHash("synthetic-not-a-login").SetBalance(100).SetConcurrency(1).Save(ctx)
 	require.NoError(t, err)
@@ -338,7 +340,7 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, se
 		t.Fatal("handler exceeded the bounded disconnect acceptance deadline")
 	}
 	t.Logf("%s/%s: elapsed=%v status=%d reason=%s", protocol, scenario, time.Since(started), rec.Code, reason)
-	require.Equal(t, int32(1), upstream.calls.Load(), "no failover for a disconnected caller; body=%s", rec.Body.String())
+	require.Equal(t, int32(1), upstream.calls.Load(), "expected one upstream attempt; body=%s", rec.Body.String())
 	if scenario == "deadline_headers" {
 		require.Zero(t, upstream.closed.Load(), "no response body was obtained")
 		require.Equal(t, http.StatusGatewayTimeout, rec.Code)

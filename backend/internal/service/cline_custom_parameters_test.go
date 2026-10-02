@@ -46,6 +46,34 @@ func TestClineLegacyCustomParametersStayRequestScoped(t *testing.T) {
 	}
 }
 
+func TestClineLegacyCompactionGatePreservesCapabilityBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, base string
+		chat       bool
+		compact    bool
+	}{
+		{"official_chat", "https://api.cline.bot/api/v1", true, true},
+		{"official_no_chat", "https://api.cline.bot/api/v1", false, false},
+		{"unrelated_gateway", "https://gateway.example/v1", true, false},
+		{"suffix_host", "https://api.cline.bot.example/v1", true, false},
+		{"plaintext", "http://api.cline.bot/api/v1", true, false},
+		{"alternate_port", "https://api.cline.bot:8443/api/v1", true, false},
+		{"userinfo", "https://api.cline.bot@other.example/api/v1", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			capabilities := []any{"embeddings"}
+			if tc.chat {
+				capabilities = append(capabilities, "chat_completions")
+			}
+			a := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+				Credentials: map[string]any{"base_url": tc.base, "openai_capabilities": capabilities},
+				Extra:       map[string]any{"openai_responses_mode": "force_chat_completions"}}
+			assert.Equal(t, tc.compact, a.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityResponsesCompact))
+			assert.False(t, a.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityResponses), "a chat compaction bridge is not native Responses/image capability")
+		})
+	}
+}
+
 func TestClineLegacyThreeProtocolParametersSurviveLowering(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, platform := range []string{PlatformOpenAI, PlatformDeepseek} {

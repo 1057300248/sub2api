@@ -1994,9 +1994,11 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 		// 与 OpenAIEndpointCapabilityResponses 的唯一区别：DeepSeek 语义上游的压缩
 		// 回合由 chat 桥承接（改写为普通 CC 请求 + 回程合成 compaction item，见
 		// shouldForwardDeepSeekResponsesCompactViaChatCompletions），因此不要求
-		// openai_responses_supported；其余账号保持原 Responses 判定。
+		// openai_responses_supported。旧 Cline 官方 API-key 账号也由同一 chat
+		// 桥改写 native v2 压缩；不因此开放原生 Responses/生图能力。
+		// 其余账号保持原 Responses 判定，且仍执行下方 chat 能力集校验。
 		if a.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(a.Extra) &&
-			!isDeepSeekSemanticsAccount(a) {
+			!isDeepSeekSemanticsAccount(a) && !isLegacyClineAccount(a) {
 			return false
 		}
 		capability = OpenAIEndpointCapabilityChatCompletions
