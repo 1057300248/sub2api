@@ -50,6 +50,7 @@ export default {
       accountCost: 'Cost',
       noDataAvailable: 'No data available',
       recentUsage: 'Recent Usage',
+      actualSpending: 'Actual spending ($)',
       viewModelDistribution: 'Model Distribution',
       viewSpendingRanking: 'User Spending Ranking',
       spendingRankingTitle: 'User Spending Ranking',
@@ -1072,6 +1073,7 @@ export default {
         minimax: 'MiniMax',
         opencode_go: 'OpenCode',
         cline: 'Cline',
+        typesafe: 'TypeSafe / Jev',
         composite: 'Composite',
       },
       deleteConfirm:

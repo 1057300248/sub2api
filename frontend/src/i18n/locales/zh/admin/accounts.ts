@@ -94,6 +94,12 @@ export default {
       schedulableEnabled: '调度已开启',
       schedulableDisabled: '调度已关闭',
       failedToToggleSchedulable: '切换调度状态失败',
+      priorityQuick: {
+        raise: '提高优先级（数值 -1）',
+        lower: '降低优先级（数值 +1）',
+        editHint: '点击直接输入；数值越小越优先',
+        failed: '更新优先级失败'
+      },
       groupCountTotal: '共 {count} 个分组',
       columns: {
         name: '名称',
@@ -345,6 +351,7 @@ export default {
         minimax: 'MiniMax',
         opencode_go: 'OpenCode',
         cline: 'Cline',
+        typesafe: 'TypeSafe / Jev',
       },
       cnProviders: {
         accountMode: {
@@ -769,13 +776,14 @@ export default {
       // OpenAI specific hints
       openai: {
         baseUrlHint: '留空使用官方 OpenAI API',
+        prismBrowser: '自动使用 Prism 浏览器协议',
+        prismBrowserDesc: '使用此 OpenAI OAuth 账号接入服务器管理的 Prism 适配器，无需另填 Prism 凭据。目前支持 gpt-5.6-sol 纯文本请求。',
+        prismBrowserManagedEndpoint: '已启用：请求将自动发送到服务器的 Prism 适配器。',
         apiKeyHint: '您的 OpenAI API Key',
         oauthPassthrough: '自动透传（仅替换认证）',
         excelBPS: 'Excel / BPS 协议',
         excelBPSOmitUnsupportedTools: '保持 BPS，省略不支持的托管工具',
         excelBPSOmitUnsupportedToolsDesc: '默认关闭：请求声明实时联网搜索（external_web_access=true）、高搜索上下文或图片生成时走原生 Codex 通道，即使 tool_choice=auto 且本轮尚未调用。开启后保持 BPS，省略适配层不支持的托管工具，并向模型说明能力不可用；搜索和图片生成不会因此获得支持，客户端函数工具不受影响。强制工具选择返回 400；tool_choice=none 不触发工具回退。回退原因记录在响应头及 excel_bps.native_fallback 诊断日志中。',
-        excelBPSIgnoreImages: '图片支持关闭时忽略图片输入',
-        excelBPSIgnoreImagesDesc: '默认关闭。仅在系统设置中的 Excel / BPS 图片支持关闭时生效：转发前将当前及历史消息、工具结果中的每张图片替换为不可用提示，保留文本和工具调用关系，避免历史截图反复报错导致会话无法继续。图片混合文本的结果也会明确告知模型无法看到图片，图片支持关闭期间不要重试 view_image 或其他读图工具。重新开启图片支持后恢复正常图片处理。',
         excelBPSCacheCreationAsInput: '创建缓存按普通输入计费',
         excelBPSMihomo: 'BPS 会话代理（谨慎开启）',
         excelBPSProxySource: '出口来源',
@@ -1030,6 +1038,7 @@ export default {
       enterCustomModelName: '输入自定义模型名称',
       addModel: '填入',
       modelExists: '该模型已存在',
+      modelMappingConflict: '该模型已配置映射 {from} → {to}，请在模型映射中修改或删除后再添加白名单模型',
       modelCount: '{count} 个模型',
       poolMode: '池模式',
       poolModeHint: '上游为账号池时启用，错误不标记本地账号状态',
@@ -1753,7 +1762,7 @@ export default {
         promptLabel: '测试消息',
         promptHint: '同一题目会原样发给每个并行任务。',
         model: '模型',
-        modelHint: '默认使用 gpt-6-astra，可按账号实际支持情况修改。',
+        modelHint: '默认使用 {model}，可按账号实际支持情况修改。',
         reasoning: '思考强度',
         reasoningLow: '低',
         reasoningMedium: '中',

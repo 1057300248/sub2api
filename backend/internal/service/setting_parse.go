@@ -226,6 +226,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyCyberSessionBlockEnabled:          "false",
 		SettingKeyCyberSessionBlockTTLSeconds:       "3600",
 		SettingKeyCyberSessionIdentityStrictEnabled: "false",
+		SettingKeyCyberPolicyUserAllowlist:          "",
 
 		// Claude Code version check (default: empty = disabled)
 		SettingKeyMinClaudeCodeVersion: "",
@@ -275,8 +276,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky:         "",
 
 		SettingKeyAllowUserViewErrorRequests: "false",
-		SettingKeyExcelBPSImageMode:          ExcelBPSImageModeRelay,
-		SettingKeyExcelBPSImageRelayEnabled:  "false",
+		SettingKeyExcelBPSImageMode:          ExcelBPSImageModeNative,
+		SettingKeyExcelBPSImageRelayEnabled:  "true",
 		SettingKeyExcelBPSImageBaseURL:       "",
 
 		SettingKeyUsageShowLongContextBadge:     "true",
@@ -874,6 +875,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 	result.CyberSessionBlockEnabled = settings[SettingKeyCyberSessionBlockEnabled] == "true"
+	result.CyberPolicyUserAllowlist = settings[SettingKeyCyberPolicyUserAllowlist]
 	if v, err := strconv.Atoi(strings.TrimSpace(settings[SettingKeyCyberSessionBlockTTLSeconds])); err == nil && v > 0 {
 		result.CyberSessionBlockTTLSeconds = v
 	} else {
@@ -1065,9 +1067,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	result.ExcelBPSImageMode = settings[SettingKeyExcelBPSImageMode]
 	if result.ExcelBPSImageMode == "" {
-		result.ExcelBPSImageMode = ExcelBPSImageModeRelay
+		result.ExcelBPSImageMode = ExcelBPSImageModeNative
 	}
-	result.ExcelBPSImageRelayEnabled = settings[SettingKeyExcelBPSImageRelayEnabled] == "true"
+	result.ExcelBPSImageRelayEnabled = settings[SettingKeyExcelBPSImageRelayEnabled] == "" || settings[SettingKeyExcelBPSImageRelayEnabled] == "true"
 	result.ExcelBPSImageBaseURL = settings[SettingKeyExcelBPSImageBaseURL]
 	result.ExcelBPSImageBodyLimitMiB, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageBodyLimitMiB], DefaultExcelBPSImageBodyLimitMiB)
 	result.ExcelBPSImageBudgetMiB, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageBudgetMiB], DefaultExcelBPSImageBudgetMiB)

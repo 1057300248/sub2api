@@ -88,7 +88,8 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	upstreamMsg string,
 	upstreamModel string,
 ) *UpstreamFailoverError {
-	shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
+	wrappedClineLimit := isClineWrappedRateLimit(account, resp.StatusCode, respBody)
+	shouldFailover := wrappedClineLimit || s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
 	tempUnscheduled := false
 	if c != nil && account != nil && account.Platform != PlatformGrok && !shouldFailover && !IsResponseCommitted(c) && s.rateLimitService != nil {
 		tempUnscheduled = s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, upstreamModel) == ErrorPolicyTempUnscheduled
@@ -127,14 +128,20 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	if account.Platform != PlatformGrok && !tempUnscheduled {
 		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
 	}
+	// Preserve the original status in the ops event above. Scheduling and the
+	// exhausted retry response use the verified inner quota status instead.
+	classifiedStatus := resp.StatusCode
+	if wrappedClineLimit {
+		classifiedStatus = http.StatusTooManyRequests
+	}
 	return s.newOpenAIAccountFailoverError(
 		account,
-		resp.StatusCode,
+		classifiedStatus,
 		resp.Header,
 		respBody,
 		upstreamMsg,
 		shouldDisable,
-		!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
+		!wrappedClineLimit && !shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
 	)
 }
 

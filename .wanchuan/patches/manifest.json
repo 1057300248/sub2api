@@ -70,7 +70,7 @@
         "frontend/src/i18n/locales/*/clineAccount.ts",
         "backend/internal/clinemigration/**",
         "backend/cmd/cline-migrate/**",
-        "backend/migrations/26[4-6]_cline*.sql",
+        "backend/migrations/26[4-7]_cline*.sql",
         "backend/internal/server/routes/cline_admin.go",
         "backend/internal/server/routes/admin.go",
         "backend/internal/handler/admin/account_data.go",
@@ -124,9 +124,10 @@
       ]
     },
     {
-      "id": "model-compat-overlays",
-      "mode": "source-overlay",
-      "review_on_upstream_touch": true,
+      "id": "model-compat-regressions",
+      "mode": "upstream-regression",
+      "review_on_upstream_touch": false,
+      "description": "DeepSeek reasoning, Gemini keepalive and native media are upstream-owned; retain regressions, not duplicate source overlays.",
       "protected_globs": [
         "backend/internal/service/openai_gateway*.go",
         "backend/internal/pkg/antigravity/**",
@@ -137,9 +138,10 @@
       ]
     },
     {
-      "id": "operations-ui",
-      "mode": "source-overlay",
-      "review_on_upstream_touch": true,
+      "id": "operations-ui-regressions",
+      "mode": "upstream-regression",
+      "review_on_upstream_touch": false,
+      "description": "Upstream operations and monitor UI are no longer fork overlays. Cline-specific UI remains protected by cline-platform.",
       "protected_globs": [
         "frontend/src/components/account/**",
         "frontend/src/components/admin/operations/**",

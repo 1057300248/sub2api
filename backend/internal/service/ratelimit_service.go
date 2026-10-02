@@ -344,6 +344,9 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 // handleUpstreamErrorAfterStreakReset keeps account policy handling shared with
 // the OpenAI gateway, which resets the streak before its early-return policies.
 func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
+	if s.handleLegacyClineWrappedRateLimit(ctx, account, statusCode, headers, responseBody) {
+		return false
+	}
 	if s.handleClineScopedError(ctx, account, statusCode, headers, responseBody, firstRequestedModel(requestedModel)) {
 		return false
 	}

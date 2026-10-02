@@ -96,6 +96,12 @@ export default {
       schedulableEnabled: 'Scheduling enabled',
       schedulableDisabled: 'Scheduling disabled',
       failedToToggleSchedulable: 'Failed to toggle scheduling status',
+      priorityQuick: {
+        raise: 'Raise priority (value -1)',
+        lower: 'Lower priority (value +1)',
+        editHint: 'Click to type a value; lower is used first',
+        failed: 'Failed to update priority'
+      },
       groupCountTotal: '{count} groups total',
       platforms: {
         anthropic: 'Anthropic',
@@ -110,6 +116,7 @@ export default {
         minimax: 'MiniMax',
         opencode_go: 'OpenCode',
         cline: 'Cline',
+        typesafe: 'TypeSafe / Jev',
       },
       cnProviders: {
         accountMode: {
@@ -651,13 +658,14 @@ export default {
       // OpenAI specific hints
       openai: {
         baseUrlHint: 'Leave default for official OpenAI API',
+        prismBrowser: 'Use Prism browser protocol automatically',
+        prismBrowserDesc: 'Uses the server-managed Prism adapter with this OpenAI OAuth account. No separate Prism credentials are needed. Currently supports text requests with gpt-5.6-sol.',
+        prismBrowserManagedEndpoint: 'Enabled: requests are routed to the server-managed Prism adapter.',
         apiKeyHint: 'Your OpenAI API Key',
         oauthPassthrough: 'Auto passthrough (auth only)',
         excelBPS: 'Excel / BPS protocol',
         excelBPSOmitUnsupportedTools: 'Keep BPS and omit unsupported hosted tools',
         excelBPSOmitUnsupportedToolsDesc: 'Off by default: declarations for live web search (external_web_access=true), high search context or image generation use native Codex, even with tool_choice=auto before any tool executes. Enable to keep BPS, omit hosted tools unsupported by the bridge and tell the model they are unavailable. This does not add search or image generation support; client function tools are unaffected. Forced tool choices return 400; tool_choice=none does not trigger tool fallback. Fallback reasons appear in response headers and excel_bps.native_fallback diagnostic logs.',
-        excelBPSIgnoreImages: 'Ignore image inputs when image support is disabled',
-        excelBPSIgnoreImagesDesc: 'Disabled by default. Only applies while Excel / BPS image support is off in system settings. Replaces every image in current and historical messages and tool results with an unavailable notice before forwarding, preserving text and tool call pairing so old screenshots cannot repeatedly block the conversation. Even mixed text/image results tell the model it cannot see the image and should not retry view_image or other image-reading tools while image support is disabled. Enabling image support restores normal image handling.',
         excelBPSCacheCreationAsInput: 'Bill cache creation as regular input',
         excelBPSMihomo: 'BPS session proxy (use with caution)',
         excelBPSProxySource: 'Exit source',
@@ -925,6 +933,7 @@ export default {
       enterCustomModelName: 'Enter custom model name',
       addModel: 'Add',
       modelExists: 'Model already exists',
+      modelMappingConflict: 'A mapping already exists for {from} → {to}. Modify or remove it under Model Mapping before adding this whitelist model',
       modelCount: '{count} models',
       poolMode: 'Pool Mode',
       poolModeHint: 'Enable when upstream is an account pool; errors won\'t mark local account status',
@@ -1666,7 +1675,7 @@ export default {
         promptLabel: 'Test message',
         promptHint: 'The same prompt is sent unchanged to every parallel run.',
         model: 'Model',
-        modelHint: 'Defaults to gpt-6-astra; adjust it for the account when needed.',
+        modelHint: 'Defaults to {model}; adjust it for the account when needed.',
         reasoning: 'Reasoning effort',
         reasoningLow: 'Low',
         reasoningMedium: 'Medium',

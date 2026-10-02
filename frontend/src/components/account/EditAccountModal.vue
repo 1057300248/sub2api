@@ -31,6 +31,21 @@
         <p class="input-hint">{{ t('priorityScheduling.modelAliasesHint') }}</p>
       </div>
 
+      <div
+        v-if="account.platform === 'openai' && account.type === 'oauth' && !isSparkShadow"
+        class="rounded-lg border border-gray-200 p-3 dark:border-dark-600"
+        data-testid="openai-prism-browser-oauth-settings"
+      >
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="prismBrowserEnabled" type="checkbox" data-testid="openai-prism-browser-oauth-toggle" />
+          <span>{{ t('admin.accounts.openai.prismBrowser') }}</span>
+        </label>
+        <p class="input-hint">{{ t('admin.accounts.openai.prismBrowserDesc') }}</p>
+        <p v-if="prismBrowserEnabled" class="mt-2 text-xs text-primary-600 dark:text-primary-400">
+          {{ t('admin.accounts.openai.prismBrowserManagedEndpoint') }}
+        </p>
+      </div>
+
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
@@ -304,7 +319,7 @@
 
             <!-- Whitelist Mode -->
             <div v-if="modelRestrictionMode === 'whitelist'">
-              <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
+              <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
                 <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
@@ -784,7 +799,7 @@
 
           <!-- Whitelist Mode -->
           <div v-if="modelRestrictionMode === 'whitelist'">
-            <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
+            <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
               <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
@@ -996,7 +1011,7 @@
 
           <!-- Whitelist Mode -->
           <div v-if="modelRestrictionMode === 'whitelist'">
-            <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
+            <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
               <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
@@ -1218,7 +1233,7 @@
 
           <!-- Whitelist Mode -->
           <div v-if="modelRestrictionMode === 'whitelist'">
-            <ModelWhitelistSelector v-model="allowedModels" platform="anthropic" />
+            <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" platform="anthropic" />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
               <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{ t('admin.accounts.supportsAllModels') }}</span>
@@ -1834,15 +1849,6 @@
             <span class="text-sm">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedTools') }}</span>
           </label>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedToolsDesc') }}</p>
-        </div>
-        <div v-if="excelBPSEnabled" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSIgnoreImages" type="checkbox"
-              data-testid="excel-bps-ignore-images"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSIgnoreImages') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSIgnoreImagesDesc') }}</p>
         </div>
         <div v-if="excelBPSEnabled" class="mt-3">
           <label class="flex items-center gap-2">
@@ -3568,6 +3574,7 @@ interface TempUnschedRuleForm {
 const submitting = ref(false)
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
+const prismBrowserEnabled = ref(false)
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）account_mode / api_protocol 编辑 ──
 // account_mode 决定额度/余额监控路径，api_protocol 决定转发端点与格式；
@@ -3910,7 +3917,6 @@ const excelBPSAutoRecoverOn403 = ref(false)
 const excelBPSRecoveryIntervalMinutes = ref<number | string>(DEFAULT_BPS_RECOVERY_INTERVAL_MINUTES)
 const excelBPS403RecoveryPending = computed(() => props.account?.extra?.openai_excel_bps !== true && typeof props.account?.extra?.openai_excel_bps_403_disabled_at === 'string')
 const excelBPSOmitUnsupportedTools = ref(false)
-const excelBPSIgnoreImages = ref(false)
 const excelBPSIgnoreEncryptedContent = ref(false)
 const excelBPSAutoMoveOn403 = ref(false)
 const excelBPS403TargetGroupID = ref<number | string>('')
@@ -3921,7 +3927,7 @@ const bpsDefaults = useExcelBPSDefaults({
   context: () => JSON.stringify([props.show, props.account?.id, authStore.user?.id, authStore.isObserver]),
   fields: {
     all_models: excelBPSAllModels, models: excelBPSModels,
-    omit_unsupported_tools: excelBPSOmitUnsupportedTools, ignore_images: excelBPSIgnoreImages,
+    omit_unsupported_tools: excelBPSOmitUnsupportedTools,
     ignore_encrypted_content: excelBPSIgnoreEncryptedContent,
     auto_disable_on_403: excelBPSAutoDisableOn403, auto_recover_on_403: excelBPSAutoRecoverOn403,
     recovery_interval_minutes: excelBPSRecoveryIntervalMinutes,
@@ -4250,6 +4256,7 @@ const defaultBaseUrl = computed(() => {
   if (props.account?.platform === 'openai') return 'https://api.openai.com'
   if (props.account?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
   if (props.account?.platform === 'grok') return 'https://api.x.ai/v1'
+  if (props.account?.platform === 'typesafe') return 'https://api.typesafe.ai'
   // CN 供应商：按当前模式/协议回落到官方预设（清空输入框提交时使用），
   // 不能落到 anthropic 默认值（会被当 CC base 拼出错误端点）。
   if (
@@ -4451,10 +4458,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   excelBPSAutoRecoverOn403.value = false
   excelBPSRecoveryIntervalMinutes.value = DEFAULT_BPS_RECOVERY_INTERVAL_MINUTES
   excelBPSOmitUnsupportedTools.value = false
-  excelBPSIgnoreImages.value = false
   excelBPSIgnoreEncryptedContent.value = false
   excelBPSAutoMoveOn403.value = false
   excelBPS403TargetGroupID.value = ''
+  prismBrowserEnabled.value = false
   copilotSDKEnabled.value = false
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
@@ -4475,6 +4482,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
+    prismBrowserEnabled.value = newAccount.type === 'oauth' && extra?.openai_prism_browser === true
     excelBPSEnabled.value = newAccount.type === 'oauth' && extra?.openai_excel_bps === true
     excelBPSMode.value = extra?.openai_excel_bps_config_mode === 'defaults' ? 'defaults' : 'initial'
     excelBPSAllModels.value = excelBPSEnabled.value && !Object.prototype.hasOwnProperty.call(extra ?? {}, 'openai_excel_bps_models')
@@ -4490,7 +4498,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     excelBPSAutoRecoverOn403.value = newAccount.type === 'oauth' && extra?.openai_excel_bps_auto_recover_on_403 === true
     excelBPSRecoveryIntervalMinutes.value = bpsRecoveryIntervalOrDefault(extra?.openai_excel_bps_403_recovery_interval_minutes)
     excelBPSOmitUnsupportedTools.value = excelBPSEnabled.value && extra?.openai_excel_bps_omit_unsupported_tools === true
-    excelBPSIgnoreImages.value = excelBPSEnabled.value && extra?.openai_excel_bps_ignore_images === true
     excelBPSIgnoreEncryptedContent.value = excelBPSEnabled.value && extra?.openai_excel_bps_ignore_encrypted_content === true
     excelBPSAutoMoveOn403.value = newAccount.type === 'oauth' && extra?.openai_excel_bps_auto_move_on_403 === true
     const targetGroupID = extra?.openai_excel_bps_403_target_group_id
@@ -4750,6 +4757,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
           ? 'https://generativelanguage.googleapis.com'
           : newAccount.platform === 'grok'
             ? 'https://api.x.ai/v1'
+            : newAccount.platform === 'typesafe'
+              ? 'https://api.typesafe.ai'
             : newAccount.platform === 'kimi' ||
                 newAccount.platform === 'zhipu' ||
                 newAccount.platform === 'deepseek' ||
@@ -6043,11 +6052,6 @@ const handleSubmit = async () => {
       } else {
         delete newExtra.openai_excel_bps_omit_unsupported_tools
       }
-      if (newExtra.openai_excel_bps === true && excelBPSIgnoreImages.value) {
-        newExtra.openai_excel_bps_ignore_images = true
-      } else {
-        delete newExtra.openai_excel_bps_ignore_images
-      }
       if (newExtra.openai_excel_bps === true && excelBPSIgnoreEncryptedContent.value) {
         newExtra.openai_excel_bps_ignore_encrypted_content = true
       } else {
@@ -6059,7 +6063,7 @@ const handleSubmit = async () => {
       if (preserveDisabledBPS) {
         for (const key of ['openai_excel_bps_config_mode', 'openai_excel_bps_models', 'openai_excel_bps_mihomo', 'openai_excel_bps_proxy_source',
           'openai_excel_bps_cache_creation_as_input', 'openai_excel_bps_omit_unsupported_tools',
-          'openai_excel_bps_ignore_images', 'openai_excel_bps_ignore_encrypted_content']) {
+          'openai_excel_bps_ignore_encrypted_content']) {
           if (Object.prototype.hasOwnProperty.call(currentExtra, key)) newExtra[key] = currentExtra[key]
           else delete newExtra[key]
         }
@@ -6124,6 +6128,10 @@ const handleSubmit = async () => {
         delete newExtra.openai_compact_mode
       } else {
         newExtra.openai_compact_mode = openAICompactMode.value
+      }
+      if (props.account.type === 'oauth') {
+        if (prismBrowserEnabled.value) newExtra.openai_prism_browser = true
+        else delete newExtra.openai_prism_browser
       }
 		if (props.account.type === 'apikey') {
         if (!openAITextGenerationCapabilityEnabled.value || openAIResponsesMode.value === 'auto') {

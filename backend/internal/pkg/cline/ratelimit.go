@@ -120,6 +120,12 @@ func Classify(status int, h http.Header, body []byte, requestedModel string, now
 	if status < 400 {
 		return Limit{}, false
 	}
+	// Do not reinterpret authentication/client errors as quota exhaustion.
+	if status == http.StatusTooManyRequests || status >= http.StatusInternalServerError {
+		if inner, wrapped := WrappedRateLimitBody(body); wrapped {
+			status, body = http.StatusTooManyRequests, inner
+		}
+	}
 	text := errorMessage(body)
 	lower := strings.ToLower(text)
 	l := Limit{Kind: "throttle", Scope: ScopeThrottle, RetryAt: now.Add(30 * time.Second)}

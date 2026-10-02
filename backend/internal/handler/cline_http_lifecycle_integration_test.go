@@ -45,7 +45,7 @@ func TestClineHTTPHandlersDurableBillingAndTermination(t *testing.T) {
 		t.Skip("Docker required for disposable handler/ledger database")
 	}
 	ctx := context.Background()
-	pg, err := tcpostgres.Run(ctx, "postgres:16-alpine", tcpostgres.WithDatabase("cline_handler_fixture"), tcpostgres.WithUsername("fixture"), tcpostgres.WithPassword("fixture-only"), tcpostgres.BasicWaitStrategies())
+	pg, err := tcpostgres.Run(ctx, "postgres:18.6-alpine", tcpostgres.WithDatabase("cline_handler_fixture"), tcpostgres.WithUsername("fixture"), tcpostgres.WithPassword("fixture-only"), tcpostgres.BasicWaitStrategies())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, pg.Terminate(context.Background())) })
 	dsn, err := pg.ConnectionString(ctx, "sslmode=disable", "TimeZone=UTC")

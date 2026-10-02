@@ -18,7 +18,7 @@ import (
 // Chat Completions fields are protected so custom parameters cannot overwrite
 // model/messages/stream/tools or other gateway-owned core fields.
 func mergeClineCustomRequestParameters(account *Account, sourceBody, outboundBody []byte, sourceShape any) ([]byte, error) {
-	if account == nil || !account.IsCline() {
+	if account == nil || (!account.IsCline() && !isLegacyClineAccount(account)) {
 		return outboundBody, nil
 	}
 	var source map[string]json.RawMessage

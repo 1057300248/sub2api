@@ -1,4 +1,6 @@
 name: Cline platform development
+env:
+  SUB2API_TEST_POSTGRES_IMAGE: postgres:18.6-alpine
 permissions:
   contents: read
 concurrency:
@@ -7,7 +9,7 @@ concurrency:
 jobs:
   integration:
     if: github.repository == '1057300248/sub2api' && (github.ref == 'refs/heads/codex/cline-platform-modular-20261001' ||
-      github.ref == 'refs/heads/codex/cline-review-fixes-20261002')
+      github.ref == 'refs/heads/codex/cline-review-fixes-20261002' || github.ref == 'refs/heads/codex/sub2-v297-cline-fixes-20261003')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -50,7 +52,7 @@ jobs:
       run: "set -euo pipefail\ngo test -json -race -tags=unit -count=3 ./internal/pkg/cline | tee \"$RUNNER_TEMP/cline-policy-tests.jsonl\"\
         \npython3 - <<'PY'\nimport collections, json, os\nfrom pathlib import Path\nevents = [json.loads(line) for line in\
         \ (Path(os.environ['RUNNER_TEMP'])/'cline-policy-tests.jsonl').read_text().splitlines() if line.strip()]\npassed =\
-        \ collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')\nrequired = {'TestClineJSONEnvelopePreservesCompletionAndUsage','TestClineJSONEnvelopeRejectsInvalidAndNestedErrors','TestClineTerminalFailurePreservesOnlyValidatedUsage',\
+        \ collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')\nrequired = {'TestClineWrappedRateLimitClassification','TestClineWrappedRateLimitRejectsAmbiguousAndGeneratedData','TestClineJSONEnvelopePreservesCompletionAndUsage','TestClineJSONEnvelopeRejectsInvalidAndNestedErrors','TestClineTerminalFailurePreservesOnlyValidatedUsage',\
         \ 'TestClineSSEFailurePreventsSuccessfulTerminal', 'TestClineSSEClosePropagatesSourceError', 'TestClineSSEFailureIsStickyAcrossSmallReads',\
         \ 'TestClineSSECompleteEventFailures', 'TestClineSSEEventBoundsAndTruncation', 'TestClineSSEMultilineAndLineEndings',\
         \ 'TestClineSSEEmptyDataHeartbeatAndMissingDone', 'TestClineGenerationErrorIgnoresGeneratedFields', 'TestClineJSON200FailureAndBounds',\
@@ -64,7 +66,7 @@ jobs:
       run: "set -euo pipefail\ngo test -json -tags=unit -count=1 -run '^Test(Cline|ParseCline|SetCline|Handle429Cline)' ./internal/service\
         \ | tee \"$RUNNER_TEMP/cline-service-tests.jsonl\"\npython3 - <<'PY'\nimport json, os\nfrom pathlib import Path\n\
         events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-service-tests.jsonl').read_text().splitlines()\
-        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineDeadlineSendPreservesCauseBeforeHeaders','TestClineDeadlinePreemptsDrainEvenAfterEarlyCancel','TestClineDeadlineFromEitherParentAndAlreadyExpired','TestClineDeadlineDoesNotRelabelServiceAbortAsDisconnect','TestClineDeadlineInterruptsHeadersAndBodyOverHTTP','TestClineWriterFailureAllBridgesStartDrainAndRetainUsage','TestClineNonstreamEnvelopeProtocolsAndBilling','TestClineNonstreamMalformedEnvelopeNeverReturnsEmptySuccess','TestClineDrainGraceRetainsLateUsageAndStops','TestClineDrainDeadlineInterruptsBlockedHTTPRead','TestClineRequestCeilingCoversHeadersAndConcurrentCleanup','TestClineWriteDisconnectStartsDrainWithoutParentCancellation','TestClineTerminalFailureUsageIsNotLostOrDoubleCounted',\
+        \ if line.strip()]\npassed = {e.get('Test') for e in events if e.get('Action') == 'pass'}\nrequired = {'TestClineLegacyCustomParametersStayRequestScoped','TestClineLegacyThreeProtocolParametersSurviveLowering','TestClineWrappedLimitPreservesAuditAndStopsSameAccountRetry','TestClineDeadlineSendPreservesCauseBeforeHeaders','TestClineDeadlinePreemptsDrainEvenAfterEarlyCancel','TestClineDeadlineFromEitherParentAndAlreadyExpired','TestClineDeadlineDoesNotRelabelServiceAbortAsDisconnect','TestClineDeadlineInterruptsHeadersAndBodyOverHTTP','TestClineWriterFailureAllBridgesStartDrainAndRetainUsage','TestClineNonstreamEnvelopeProtocolsAndBilling','TestClineNonstreamMalformedEnvelopeNeverReturnsEmptySuccess','TestClineDrainGraceRetainsLateUsageAndStops','TestClineDrainDeadlineInterruptsBlockedHTTPRead','TestClineRequestCeilingCoversHeadersAndConcurrentCleanup','TestClineWriteDisconnectStartsDrainWithoutParentCancellation','TestClineTerminalFailureUsageIsNotLostOrDoubleCounted',\
         \ 'TestClineMetadataRefreshUsesBoundedCredentialSafeGETs', 'TestClineMetadataErrorsPreserveUnknownAndLastValidCatalog',\
         \ 'TestClineMetadataBoundariesAndPersistenceFailure', 'TestClineMetadataExpiryAndIdentityRotation', 'TestClineAdmissionFailsClosedWithoutDurableState',\
         \ 'TestClineMonitorCannotTurnUnknownIntoHealthyZero', 'TestClinePartialFailurePreservesObservedUsageAndBillingIdentity',\
@@ -126,7 +128,7 @@ jobs:
         '
   postgres:
     if: github.repository == '1057300248/sub2api' && (github.ref == 'refs/heads/codex/cline-platform-modular-20261001' ||
-      github.ref == 'refs/heads/codex/cline-review-fixes-20261002')
+      github.ref == 'refs/heads/codex/cline-review-fixes-20261002' || github.ref == 'refs/heads/codex/sub2-v297-cline-fixes-20261003')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -150,7 +152,7 @@ jobs:
         \ 2 -tags=integration -count=3 -run '^TestClinePostgres' ./internal/repository | tee \"$RUNNER_TEMP/cline-postgres-tests.jsonl\"\
         \npython3 - <<'PYTEST'\nimport collections, json, os\nfrom pathlib import Path\nevents = [json.loads(line) for line\
         \ in (Path(os.environ['RUNNER_TEMP'])/'cline-postgres-tests.jsonl').read_text().splitlines() if line.strip()]\npassed\
-        \ = collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')\nrequired = {'TestClinePostgresCreateOutboxFailureIsAtomic','TestClinePostgresCreateReusesOuterTransaction','TestClinePostgresMaximumFreeScopeUsesUnfingerprintedColumn','TestClinePostgresIdentitySwitchDoesNotReattributeOldLimits',\
+        \ = collections.Counter(e.get('Test') for e in events if e.get('Action') == 'pass')\nrequired = {'TestClinePostgresPlatformUnionUpgrade','TestClinePostgresCreateOutboxFailureIsAtomic','TestClinePostgresCreateReusesOuterTransaction','TestClinePostgresMaximumFreeScopeUsesUnfingerprintedColumn','TestClinePostgresIdentitySwitchDoesNotReattributeOldLimits',\
         \ 'TestClinePostgresSharedSubjectLimitsAndRestart', 'TestClinePostgresRefreshLeaseAndObservationOrdering', 'TestClinePostgresOutboxFailureRollsBackState',\
         \ 'TestClinePostgresDirectAndBulkCredentialGuards', 'TestClinePostgresAdmissionRejectsStaleCredentials', 'TestClinePostgresConcurrentScopedCAS',\
         \ 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits',\
@@ -183,7 +185,7 @@ jobs:
         '
   offline-migration:
     if: github.repository == '1057300248/sub2api' && (github.ref == 'refs/heads/codex/cline-platform-modular-20261001' ||
-      github.ref == 'refs/heads/codex/cline-review-fixes-20261002')
+      github.ref == 'refs/heads/codex/cline-review-fixes-20261002' || github.ref == 'refs/heads/codex/sub2-v297-cline-fixes-20261003')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -199,7 +201,7 @@ jobs:
         cache-dependency-path: backend/go.sum
     - name: Start isolated disposable migration database
       run: docker run --detach --rm --name cline-migration-fixture -e POSTGRES_USER=cline_fixture -e POSTGRES_PASSWORD=fixture_only
-        -e POSTGRES_DB=cline_fixture -p 127.0.0.1:55432:5432 postgres:16
+        -e POSTGRES_DB=cline_fixture -p 127.0.0.1:55432:5432 postgres:18.6-alpine
     - name: Execute real migration transaction regressions
       working-directory: backend
       shell: bash
@@ -246,6 +248,7 @@ jobs:
     branches:
     - codex/cline-platform-modular-20261001
     - codex/cline-review-fixes-20261002
+    - codex/sub2-v297-cline-fixes-20261003
     paths:
     - .github/workflows/cline-platform-development.yml
     - .wanchuan/**

@@ -77,6 +77,18 @@ func parseClineRateLimitResetAt(account *Account, body []byte, now time.Time) (t
 	return now.Add(time.Duration(math.Ceil(seconds)) * time.Second), true
 }
 
+// isLegacyClineAccount identifies only the existing API-key compatibility path.
+// It does not migrate an account, grant a plan, or match an arbitrary gateway.
+func isLegacyClineAccount(account *Account) bool {
+	if account == nil || account.Type != AccountTypeAPIKey ||
+		(account.Platform != PlatformOpenAI && account.Platform != PlatformDeepseek) {
+		return false
+	}
+	parsed, err := url.Parse(strings.TrimSpace(account.GetBaseURL()))
+	return err == nil && parsed.Scheme == "https" && parsed.User == nil &&
+		(parsed.Port() == "" || parsed.Port() == "443") && strings.EqualFold(parsed.Hostname(), "api.cline.bot")
+}
+
 func isClineUpstreamAccount(account *Account) bool {
 	if account == nil {
 		return false

@@ -16,6 +16,9 @@ func GenerationErrorStatus(payload []byte) (int, bool) {
 	if len(payload) > MaxBodyBytes {
 		return http.StatusBadGateway, true
 	}
+	if _, wrapped := WrappedRateLimitBody(payload); wrapped {
+		return http.StatusTooManyRequests, true
+	}
 	var root map[string]json.RawMessage
 	if json.Unmarshal(payload, &root) != nil {
 		return http.StatusBadGateway, true
