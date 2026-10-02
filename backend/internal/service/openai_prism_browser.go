@@ -234,6 +234,21 @@ func prismBrowserAdapterErrorMessage(status int, body []byte) string {
 	}
 }
 
+// Only log protocol codes we own. Never copy arbitrary adapter messages or
+// reflected input into gateway logs when diagnosing fast 422 refusals.
+func prismBrowserForwardError(status int, body []byte) error {
+	code := gjson.GetBytes(body, "error.type").String()
+	switch code {
+	case "tools_disabled", "unsupported_model", "unsupported_request", "unsupported_reasoning",
+		"unsupported_input", "unsupported_tool_model", "unsupported_tool", "invalid_tools",
+		"invalid_tool_choice", "invalid_tool_payload", "unsupported_reasoning_history",
+		"model_unavailable", "reasoning_unavailable", "pending_turn", "prism_busy":
+		return fmt.Errorf("prism adapter returned HTTP %d (%s)", status, code)
+	default:
+		return fmt.Errorf("prism adapter returned HTTP %d", status)
+	}
+}
+
 func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.Context, account *Account, body []byte, started time.Time) (*OpenAIForwardResult, error) {
 	MarkPrismBrowserAttempt(c, account.ID)
 	// This path buffers and writes a complete JSON or SSE response, including
@@ -292,7 +307,7 @@ func (s *OpenAIGatewayService) forwardPrismBrowser(ctx context.Context, c *gin.C
 			return nil, fmt.Errorf("prism adapter returned HTTP %d", status)
 		}
 		writeError(status, responseBody)
-		return nil, fmt.Errorf("prism adapter returned HTTP %d", status)
+		return nil, prismBrowserForwardError(status, responseBody)
 	}
 	responseID, err := prismBrowserTerminal(responseBody, upstreamModel, stream)
 	if err != nil {

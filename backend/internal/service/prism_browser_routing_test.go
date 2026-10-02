@@ -34,6 +34,13 @@ func TestPrismBrowserResponsesURL(t *testing.T) {
 	}
 }
 
+func TestPrismBrowserForwardErrorKeepsKnownCodeWithoutReflectingSecrets(t *testing.T) {
+	err := prismBrowserForwardError(422, []byte(`{"error":{"type":"tools_disabled","message":"private input fixture"}}`))
+	require.EqualError(t, err, "prism adapter returned HTTP 422 (tools_disabled)")
+	err = prismBrowserForwardError(422, []byte(`{"error":{"type":"private input fixture","message":"private input fixture"}}`))
+	require.EqualError(t, err, "prism adapter returned HTTP 422")
+}
+
 func TestPrismBrowserSessionIDUsesExistingCodexIdentity(t *testing.T) {
 	identity := func(keyID, accountID int64, headers map[string]string, body string) (string, error) {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
