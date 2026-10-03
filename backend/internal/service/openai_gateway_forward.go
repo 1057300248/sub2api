@@ -45,6 +45,11 @@ func prismBrowserResponsesURL(baseURL string) string {
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, resultErr error) {
+	if astraSchedulingAppliesToRequest(s.cfg.AstraRouting(ctx), account, gjson.GetBytes(body, "model").String(), getOpenAIGroupIDFromContext(c)) {
+		if err := s.checkAstraSchedulingRoute(ctx, account); err != nil {
+			return nil, err
+		}
+	}
 	defer func() {
 		outcome := "success"
 		if resultErr != nil {
@@ -189,6 +194,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// HTTP SSE may opt into the native WS pool on ordinary OAuth accounts.
 	wsDecision = s.resolveOpenAIHTTPWSSSEDecision(c, account, body, wsDecision)
 	accelerateHTTPSSE := wsDecision.Reason == openAIOAuthWSSSEAccelerationReason
+	anchorCtx, anchorFinish, anchorErr := s.prepareCodexWSAnchor(ctx, c, account, body)
+	if anchorErr != nil {
+		return nil, anchorErr
+	}
+	if anchorFinish != nil {
+		ctx = anchorCtx
+		defer func() { anchorFinish(result, resultErr) }()
+		wsDecision = OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2, Reason: "private_astra_ws_anchor"}
+	}
+
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
 	compactPath := isOpenAIResponsesCompactPath(c)
 	if shouldFlattenOpenAIResponsesNamespaces(account, wsDecision.Transport, passthroughEnabled, compactPath) {
@@ -1003,6 +1018,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if wsErr == nil {
 				break
 			}
+			var capacityFailover *UpstreamFailoverError
+			if errors.As(wsErr, &capacityFailover) && !c.Writer.Written() {
+				return nil, capacityFailover
+			}
 			if IsOpenAITurnAdmissionError(wsErr) {
 				return nil, wsErr
 			}
@@ -1023,11 +1042,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			// previous_response_not_found 说明续链锚点不可用：
 			// 对非 function_call_output 场景，允许一次“去掉 previous_response_id 后重放”。
-			if reason == "previous_response_not_found" && recoverPrevResponseNotFound(attempt) {
+			if codexWSAnchorFromContext(ctx) == nil && reason == "previous_response_not_found" && recoverPrevResponseNotFound(attempt) {
 				continue
 			}
-			if reason == "invalid_encrypted_content" && recoverInvalidEncryptedContent(attempt) {
+			if codexWSAnchorFromContext(ctx) == nil && reason == "invalid_encrypted_content" && recoverInvalidEncryptedContent(attempt) {
 				continue
+			}
+			if codexWSAnchorFromContext(ctx) != nil {
+				break
 			}
 			if retryable && attempt < maxAttempts {
 				backoff := s.openAIWSRetryBackoff(attempt)
