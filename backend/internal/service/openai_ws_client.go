@@ -139,7 +139,8 @@ func (d *coderOpenAIWSClientDialer) Dial(
 		return nil, 0, nil, errors.New("ws url is empty")
 	}
 	region := ""
-	if strings.TrimSpace(proxyURL) == "" && HTTPUpstreamProfileFromContext(ctx) != HTTPUpstreamProfileOpenAIHarvest {
+	regionalEligible := strings.TrimSpace(proxyURL) == "" && HTTPUpstreamProfileFromContext(ctx) != HTTPUpstreamProfileOpenAIHarvest
+	if regionalEligible {
 		if d.upstreamRoutesErr != nil {
 			return nil, 0, nil, d.upstreamRoutesErr
 		}
@@ -168,13 +169,29 @@ func (d *coderOpenAIWSClientDialer) Dial(
 			return nil, 0, nil, err
 		}
 		opts.HTTPClient = proxyClient
-		if region != "" {
-			// A redirected handshake may target a different region. Reject it
-			// rather than sending credentials through the wrong egress.
-			clone := *proxyClient
-			clone.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-			opts.HTTPClient = &clone
+	}
+	if regionalEligible && d.upstreamRoutes != nil {
+		base := opts.HTTPClient
+		if base == nil {
+			base = http.DefaultClient
 		}
+		clone := *base
+		clone.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			// Also guard a direct first hop redirecting into a regional rule:
+			// it must not silently use the original direct transport.
+			_, nextRegion := d.upstreamRoutes.Match(req.URL)
+			if region != "" || nextRegion != "" {
+				return http.ErrUseLastResponse
+			}
+			if base.CheckRedirect != nil {
+				return base.CheckRedirect(req, via)
+			}
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			return nil
+		}
+		opts.HTTPClient = &clone
 	}
 
 	conn, resp, err := coderws.Dial(ctx, targetURL, opts)

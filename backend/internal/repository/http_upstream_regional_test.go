@@ -280,3 +280,25 @@ func TestRegionalHTTPSCONNECTSuccessPreservesUpstreamTLS(t *testing.T) {
 	require.EqualValues(t, 1, connectHits.Load())
 	require.EqualValues(t, 1, hits.Load())
 }
+
+func TestRegionalEgressRetainsPublicHostValidationAndInvalidProxyFailure(t *testing.T) {
+	var egressHits atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { egressHits.Add(1); w.WriteHeader(204) }))
+	defer proxy.Close()
+	cfg := regionalHTTPConfig(t, proxy.URL, "127.0.0.1")
+	up := NewHTTPUpstream(cfg)
+	req, err := http.NewRequestWithContext(service.WithHTTPUpstreamPublicHostsOnly(t.Context()), http.MethodGet, "http://127.0.0.1/v1/responses", nil)
+	require.NoError(t, err)
+	_, err = up.Do(req, "", 21, 2)
+	require.Error(t, err, "a configured relay must not bypass the request's public-host restriction")
+	require.Zero(t, egressHits.Load())
+	req = req.WithContext(t.Context())
+	_, err = up.Do(req, "://bad-account-proxy", 21, 2)
+	require.Error(t, err, "an invalid explicit account proxy must not be silently replaced")
+	require.Zero(t, egressHits.Load())
+	t.Setenv("TEST_HTTP_REGION_PROXY", "")
+	up = NewHTTPUpstream(cfg)
+	_, err = up.Do(req, "", 21, 2)
+	require.Error(t, err, "bad regional configuration must fail closed even for programmatic construction")
+	require.Zero(t, egressHits.Load())
+}

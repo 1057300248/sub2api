@@ -134,3 +134,27 @@ func TestRegionalWebSocketHandshakeCancellation(t *testing.T) {
 		t.Fatal("proxy not cancelled")
 	}
 }
+
+func TestRegionalWebSocketDirectRedirectCannotBypassPolicy(t *testing.T) {
+	var targetCalls, proxyCalls atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { targetCalls.Add(1); w.WriteHeader(204) }))
+	defer target.Close()
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { proxyCalls.Add(1); w.WriteHeader(204) }))
+	defer proxy.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", target.URL)
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer redirect.Close()
+	// localhost is deliberately not the numeric 127.0.0.1 rule; the Location is.
+	cfg := regionalWSConfig(t, proxy.URL, "127.0.0.1")
+	dialer := newConfiguredOpenAIWSClientDialer(cfg)
+	source := "ws" + strings.TrimPrefix(strings.Replace(redirect.URL, "127.0.0.1", "localhost", 1), "http")
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	_, status, _, err := dialer.Dial(ctx, source, nil, "")
+	require.Error(t, err)
+	require.Equal(t, http.StatusFound, status)
+	require.Zero(t, targetCalls.Load(), "must not send a regional target through the first hop's direct transport")
+	require.Zero(t, proxyCalls.Load(), "redirects requiring a different exit are rejected")
+}
