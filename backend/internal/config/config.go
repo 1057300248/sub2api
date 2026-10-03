@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamroute"
 	"github.com/spf13/viper"
 	"golang.org/x/net/http/httpguts"
 )
@@ -1057,6 +1058,7 @@ func strictConfigInt(value any) (int, error) {
 
 // GatewayConfig API网关相关配置
 type GatewayConfig struct {
+	UpstreamRouting upstreamroute.Config `mapstructure:"upstream_routing"`
 	// PrismBrowser is the server-managed browser-session adapter for prism.openai.com.
 	// Account settings only select this route; cookies, sandbox state and the adapter
 	// API key remain outside account credentials.
@@ -2151,6 +2153,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 }
 
 func setDefaults() {
+	viper.SetDefault("gateway.upstream_routing.enabled", false)
 	viper.SetDefault("runtime.role", RuntimeRoleFull)
 	viper.SetDefault("runtime.serverless_id", "")
 	viper.SetDefault("runtime.serverless_endpoint", "")
@@ -2839,6 +2842,9 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if _, err := upstreamroute.New(c.Gateway.UpstreamRouting); err != nil {
+		return fmt.Errorf("gateway.upstream_routing: %w", err)
+	}
 	if err := c.validateRuntime(); err != nil {
 		return err
 	}
