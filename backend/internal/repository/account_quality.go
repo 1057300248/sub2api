@@ -54,6 +54,13 @@ type qualityState struct {
 	PassStreak    int                        `json:"pass_streak,omitempty"`
 	BPSPrevious   map[string]json.RawMessage `json:"bps_previous,omitempty"`
 	BPSApplied    map[string]json.RawMessage `json:"bps_applied,omitempty"`
+	// ModelRateLimits stores the pre-existing native cooldown entry for each
+	// model key so a quality rule can restore it without clearing unrelated
+	// cooldowns.
+	ModelRateLimits     map[string]json.RawMessage `json:"model_rate_limits,omitempty"`
+	ModelApplied        map[string]json.RawMessage `json:"model_applied,omitempty"`
+	PreviousConcurrency *int                       `json:"previous_concurrency,omitempty"`
+	AppliedConcurrency  *int                       `json:"applied_concurrency,omitempty"`
 }
 
 // Lease/version checks, account mutation, ownership and scheduler invalidation
@@ -123,6 +130,16 @@ func (r *scheduledTestPlanRepository) ApplyQualityOutcome(ctx context.Context, p
 		}
 	}
 	// 已被本规则开过 BPS 的账号即便规则后来改了动作，也由 BPS 分支负责恢复。
+	if state.Action == service.QualityActionRemoveModel || (state.Action == "" && q.Action == service.QualityActionRemoveModel) {
+		action, err := applyQualityModelOutcome(ctx, tx, plan, outcome, status, state)
+		if err != nil {
+			return "", err
+		}
+		if err = tx.Commit(); err != nil {
+			return "", err
+		}
+		return action, nil
+	}
 	if state.Action == service.QualityActionEnableBPS || (state.Action == "" && q.Action == service.QualityActionEnableBPS) {
 		action, err := applyQualityBPSOutcome(ctx, tx, plan, outcome, status, state, len(raw) > 0)
 		if err != nil {

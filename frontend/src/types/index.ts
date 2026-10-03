@@ -2577,8 +2577,9 @@ export interface QualityBPSPolicy {
 export interface QualityPolicy {
   judge?: QualityJudgeConfig
   expected_answer: string
-  action: 'remove_groups' | 'disable_scheduling' | 'enable_bps' | 'observe_only'
+  action: 'remove_groups' | 'remove_models' | 'disable_scheduling' | 'enable_bps' | 'observe_only'
   remove_group_ids: number[]
+  remove_models?: string[]
   auto_restore: boolean
   bps?: QualityBPSPolicy
 }

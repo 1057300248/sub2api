@@ -99,6 +99,8 @@ export function buildQualityRulePatch(
   if (fields.includes('action')) {
     config.quality.action = source.quality.action
     config.quality.remove_group_ids = source.quality.action === 'remove_groups' ? [...source.quality.remove_group_ids] : []
+    if (source.quality.action === 'remove_models') config.quality.remove_models = [...(source.quality.remove_models || [])]
+    else delete config.quality.remove_models
     if (config.quality.action === 'remove_groups' && !config.quality.remove_group_ids.length) throw new Error('qualityOps.selectGroups')
     if (config.quality.action === 'enable_bps') {
       if (!source.quality.bps) throw new Error('qualityOps.bpsTriggerRequired')

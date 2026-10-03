@@ -26,6 +26,8 @@
               <button class="btn bulk-delete-button" data-testid="quality-bulk-delete" :disabled="!selectedRuleIds.length || busy || selectedRulesPending" @click="requestDelete(selectedRuleIds)">{{ t('qualityOps.bulkDelete') }}</button>
             </div>
           </div>
+          <label class="flex items-center gap-2"><input v-model="form.pelican_config.quality.action" type="radio" value="remove_models" />{{ t('qualityOps.removeModels') }}</label>
+          <label v-if="form.pelican_config.quality.action === 'remove_models'" class="block space-y-1 pl-6"><span>{{ t('qualityOps.removeModelsInput') }}</span><input :value="(form.pelican_config.quality.remove_models || []).join(', ')" class="input" placeholder="gpt-6-astra, gpt-5.6-sol" @input="form.pelican_config.quality.remove_models = ($event.target as HTMLInputElement).value.split(',').map(v => v.trim()).filter(Boolean)" /></label>
           <button class="all-accounts" :class="{ selected: store.selectedPlanId === null }" :aria-pressed="store.selectedPlanId === null" @click="store.selectedPlanId = null"><Icon name="users" size="sm" />{{ t('qualityOps.allAccounts') }}<span>{{ plans.length }}</span></button>
           <div class="rules-scroll" data-testid="rules-scroll" :aria-busy="store.rulesLoading">
             <div v-if="store.rulesError" class="panel-error" role="alert">{{ store.rulesError }}<button @click="store.refreshRules(true)">{{ t('qualityOps.retry') }}</button></div>
@@ -354,6 +356,7 @@ function bpsTrigger(policy?: QualityBPSPolicy) {
 function policyTarget(quality?: QualityPolicy) {
   if (quality?.action === 'observe_only') return t('qualityOps.observeOnly')
   if (quality?.action === 'remove_groups') return quality.remove_group_ids.map(id => groupNames.value[id] || `#${id}`).join(' / ')
+  if (quality?.action === 'remove_models') return `${t('qualityOps.removeModels')}: ${(quality.remove_models || []).join(' / ')}`
   if (quality?.action !== 'enable_bps') return t('qualityOps.disableSchedulingShort')
   const trigger = bpsTrigger(quality.bps)
   return trigger ? `${t('qualityOps.enableBPSShort')}（${trigger}）` : t('qualityOps.enableBPSShort')
@@ -413,7 +416,7 @@ function resultTone(result: ScheduledTestResult) {
 function defaults() {
   return { model_id: 'gpt-6-astra', cron_expression: '*/30 * * * *', enabled: true, max_results: 100, auto_recover: false,
     pelican_config: { question_kind: 'candy' as 'candy' | typeof STATE_PROBE_QUESTION, test_channel: 'account' as 'account' | 'bps', prompt: CANDY_PROMPT, reasoning_effort: 'high', parallel_count: 1,
-      quality: { expected_answer: '21', action: 'remove_groups' as QualityPolicy['action'], remove_group_ids: [] as number[], auto_restore: false, judge: { group_id: 0, model_id: '', prompt: t('qualityOps.defaultJudgePrompt') }, bps: defaultQualityBPS() } } }
+      quality: { trigger_on_upstream_5xx: false, expected_answer: '21', action: 'remove_groups' as QualityPolicy['action'], remove_group_ids: [] as number[], remove_models: [] as string[], auto_restore: false, judge: { group_id: 0, model_id: '', prompt: t('qualityOps.defaultJudgePrompt') }, bps: defaultQualityBPS() } } }
 }
 const form = ref(defaults())
 const isProbe = computed(() => form.value.pelican_config.question_kind === STATE_PROBE_QUESTION)
@@ -558,11 +561,15 @@ function selectTestChannel() {
 // BPS 设置只随「开启 BPS」提交。
 function payload() {
   const quality = form.value.pelican_config.quality
-  if (!isProbe.value) return { ...form.value, pelican_config: { ...form.value.pelican_config, quality: { ...quality, bps: undefined,
-    remove_group_ids: quality.action === 'remove_groups' ? [...quality.remove_group_ids] : [], auto_restore: quality.action === 'observe_only' ? false : quality.auto_restore } } }
-  const { action, remove_group_ids, auto_restore } = quality
+  if (!isProbe.value) {
+    const nextQuality: any = { ...quality, bps: undefined, remove_group_ids: quality.action === 'remove_groups' ? [...quality.remove_group_ids] : [], auto_restore: quality.action === 'observe_only' ? false : quality.auto_restore }
+    if (quality.action === 'remove_models') nextQuality.remove_models = [...(quality.remove_models || [])]
+    else delete nextQuality.remove_models
+    return { ...form.value, pelican_config: { ...form.value.pelican_config, quality: nextQuality } }
+  }
+  const { action, remove_group_ids, auto_restore, trigger_on_upstream_5xx } = quality
   return { ...form.value, pelican_config: { ...form.value.pelican_config, prompt: '', parallel_count: 1,
-    quality: { expected_answer: '', action, remove_group_ids: action === 'remove_groups' ? [...remove_group_ids] : [], auto_restore,
+    quality: { trigger_on_upstream_5xx, expected_answer: '', action, remove_group_ids: action === 'remove_groups' ? [...remove_group_ids] : [], ...(action === 'remove_models' ? { remove_models: [...(quality.remove_models || [])] } : {}), auto_restore,
       bps: action === 'enable_bps' ? qualityBPSPayload(quality.bps) : undefined } } }
 }
 async function save() {
@@ -575,6 +582,7 @@ async function save() {
     const judge = form.value.pelican_config.quality.judge
     if (!isProbe.value && (!judge.group_id || !judge.model_id.trim() || !judge.prompt.trim())) throw new Error(t('qualityOps.configureJudge'))
     if (form.value.pelican_config.quality.action === 'remove_groups' && !form.value.pelican_config.quality.remove_group_ids.length) throw new Error(t('qualityOps.selectGroups'))
+    if (form.value.pelican_config.quality.action === 'remove_models' && !(form.value.pelican_config.quality.remove_models || []).length) throw new Error(t('qualityOps.selectModels'))
     if (form.value.pelican_config.quality.action === 'enable_bps') {
       if (!isProbe.value) throw new Error(t('qualityOps.bpsRequiresProbe'))
       const invalid = qualityBPSError(bps.value)

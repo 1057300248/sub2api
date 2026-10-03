@@ -7,13 +7,16 @@ import (
 )
 
 const QualityActionObserveOnly = "observe_only"
+const QualityActionRemoveModel = "remove_models"
 
 // QualityPolicy is opt-in. Legacy connectivity/HTML tests never modify membership.
 type QualityPolicy struct {
+	TriggerOnUpstream5xx bool                `json:"trigger_on_upstream_5xx"`
 	Judge          *QualityJudgeConfig `json:"judge,omitempty"`
 	ExpectedAnswer string              `json:"expected_answer"`
 	Action         string              `json:"action"`
 	RemoveGroupIDs []int64             `json:"remove_group_ids"`
+	RemoveModels   []string            `json:"remove_models,omitempty"`
 	AutoRestore    bool                `json:"auto_restore"`
 	BPS            *QualityBPSPolicy   `json:"bps,omitempty"`
 }
@@ -42,7 +45,7 @@ func validateQualityPolicy(plan *ScheduledTestPlan) error {
 	} else if len(q.ExpectedAnswer) > 4000 {
 		return fmt.Errorf("expected answer must be 1–4000 bytes")
 	}
-	if q.Action != "remove_groups" && q.Action != "disable_scheduling" && q.Action != QualityActionEnableBPS && q.Action != QualityActionObserveOnly {
+	if q.Action != "remove_groups" && q.Action != "disable_scheduling" && q.Action != QualityActionRemoveModel && q.Action != QualityActionEnableBPS && q.Action != QualityActionObserveOnly {
 		return fmt.Errorf("invalid quality action")
 	}
 	if q.Action == QualityActionObserveOnly {
@@ -61,6 +64,23 @@ func validateQualityPolicy(plan *ScheduledTestPlan) error {
 		q.RemoveGroupIDs = nil
 	} else {
 		q.BPS = nil
+	}
+	if q.Action == QualityActionRemoveModel {
+		if len(q.RemoveModels) == 0 || len(q.RemoveModels) > 50 {
+			return fmt.Errorf("select 1-50 models to cool down")
+		}
+		seen := map[string]bool{}
+		for i, model := range q.RemoveModels {
+			model = strings.TrimSpace(model)
+			if model == "" || len(model) > 100 || strings.ContainsAny(model, "*\r\n\t") || seen[model] {
+				return fmt.Errorf("invalid or duplicate cooldown model")
+			}
+			seen[model] = true
+			q.RemoveModels[i] = model
+		}
+		q.RemoveGroupIDs = nil
+	} else {
+		q.RemoveModels = nil
 	}
 	if q.Action == "remove_groups" && len(q.RemoveGroupIDs) == 0 {
 		return fmt.Errorf("select at least one group to remove")
