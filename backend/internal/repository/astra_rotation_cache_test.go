@@ -119,7 +119,8 @@ func TestRepeatedCoolingHostPausesSourceNetworkAcrossSaves(t *testing.T) {
 	calls := 0
 	s.SetAstraGatewayPreparer(func(ctx context.Context, id int64) error {
 		calls++
-		egress := ctx.Value(astraSourceEgressKey{}).(astraSourceEgress)
+		egress, ok := ctx.Value(astraSourceEgressKey{}).(astraSourceEgress)
+		require.True(t, ok)
 		value := "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"host":"`+host+`"}`)) + ".signature"
 		route := codexGatewayRouteFromResponse(pinResponse("__oailb="+value+"; Path=/; Secure; Max-Age=230"), "/backend-api/codex/responses", time.Now())
 		route.node = egress.node
