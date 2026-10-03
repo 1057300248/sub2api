@@ -64,7 +64,9 @@ func TestClineHTTPRawChatAndDoneBoundaries(t *testing.T) {
 		})
 	}
 	for _, protocol := range []string{"chat", "responses", "messages"} {
-		t.Run("done_"+protocol, func(t *testing.T) { exerciseClineP2HTTP(t, client, db, settings, service.PlatformCline, protocol, "done_deadline") })
+		t.Run("done_"+protocol, func(t *testing.T) {
+			exerciseClineP2HTTP(t, client, db, settings, service.PlatformCline, protocol, "done_deadline")
+		})
 	}
 }
 
@@ -101,10 +103,11 @@ func (u *clineP2Upstream) Do(req *http.Request, _ string, _ int64, _ int) (*http
 }
 
 type clineP2Body struct {
-	reader             *strings.Reader
-	ctx                context.Context
-	keepOpen           bool
-	closed, readsAtEnd int
+	reader     *strings.Reader
+	ctx        context.Context
+	keepOpen   bool
+	closed     int
+	readsAtEnd int
 }
 
 func (b *clineP2Body) Read(p []byte) (int, error) {
