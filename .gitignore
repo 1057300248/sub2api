@@ -190,3 +190,6 @@ issues/
 
 # Upstream regional egress guide
 !/docs/upstream-regional-routing.md
+
+!docs/harvest-gateway-borrow.md
+!docs/screenshots/harvest-gateway-borrow/
