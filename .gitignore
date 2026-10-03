@@ -185,3 +185,6 @@ issues/
 !docs/screenshots/pelican-showcase-api-ui/
 
 !docs/typesafe-jev.md
+
+# Upstream regional egress guide
+!/docs/upstream-regional-routing.md

@@ -869,7 +869,7 @@ type openAIWSConnPool struct {
 func newOpenAIWSConnPool(cfg *config.Config) *openAIWSConnPool {
 	pool := &openAIWSConnPool{
 		cfg:          cfg,
-		clientDialer: newDefaultOpenAIWSClientDialer(),
+		clientDialer: newConfiguredOpenAIWSClientDialer(cfg),
 		workerStopCh: make(chan struct{}),
 	}
 	pool.startBackgroundWorkers()

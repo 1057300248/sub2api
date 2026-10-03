@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,9 +12,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamroute"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"go.uber.org/zap"
 )
 
 const openAIWSMessageReadLimitBytes int64 = 16 * 1024 * 1024
@@ -73,16 +79,26 @@ type openAIWSTransportMetricsDialer interface {
 }
 
 func newDefaultOpenAIWSClientDialer() openAIWSClientDialer {
-	return &coderOpenAIWSClientDialer{
+	return newConfiguredOpenAIWSClientDialer(nil)
+}
+
+func newConfiguredOpenAIWSClientDialer(cfg *config.Config) openAIWSClientDialer {
+	d := &coderOpenAIWSClientDialer{
 		proxyClients: make(map[string]*openAIWSProxyClientEntry),
 	}
+	if cfg != nil {
+		d.upstreamRoutes, d.upstreamRoutesErr = upstreamroute.New(cfg.Gateway.UpstreamRouting)
+	}
+	return d
 }
 
 type coderOpenAIWSClientDialer struct {
-	proxyMu      sync.Mutex
-	proxyClients map[string]*openAIWSProxyClientEntry
-	proxyHits    atomic.Int64
-	proxyMisses  atomic.Int64
+	upstreamRoutes    *upstreamroute.Router
+	upstreamRoutesErr error
+	proxyMu           sync.Mutex
+	proxyClients      map[string]*openAIWSProxyClientEntry
+	proxyHits         atomic.Int64
+	proxyMisses       atomic.Int64
 }
 
 // openAIWSHandshakeError keeps a bounded, non-logged HTTP error body so the
@@ -122,6 +138,17 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	if targetURL == "" {
 		return nil, 0, nil, errors.New("ws url is empty")
 	}
+	region := ""
+	if strings.TrimSpace(proxyURL) == "" && HTTPUpstreamProfileFromContext(ctx) != HTTPUpstreamProfileOpenAIHarvest {
+		if d.upstreamRoutesErr != nil {
+			return nil, 0, nil, d.upstreamRoutesErr
+		}
+		parsed, err := url.Parse(targetURL)
+		if err != nil {
+			return nil, 0, nil, errors.New("invalid websocket upstream URL")
+		}
+		proxyURL, region = d.upstreamRoutes.Match(parsed)
+	}
 
 	wrapped := &coderOpenAIWSClientConn{}
 	opts := &coderws.DialOptions{
@@ -135,12 +162,30 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	if proxy := strings.TrimSpace(proxyURL); proxy != "" {
 		proxyClient, err := d.proxyHTTPClient(proxy)
 		if err != nil {
+			if region != "" {
+				err = upstreamroute.TransportError(err)
+			}
 			return nil, 0, nil, err
 		}
 		opts.HTTPClient = proxyClient
+		if region != "" {
+			// A redirected handshake may target a different region. Reject it
+			// rather than sending credentials through the wrong egress.
+			clone := *proxyClient
+			clone.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+			opts.HTTPClient = &clone
+		}
 	}
 
 	conn, resp, err := coderws.Dial(ctx, targetURL, opts)
+	if region != "" {
+		parsed, _ := url.Parse(targetURL)
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		logger.FromContext(ctx).Info("upstream.region_route", zap.String("transport", "websocket"), zap.String("upstream_host", parsed.Hostname()), zap.String("region", region), zap.Int("status_code", status), zap.Bool("transport_error", err != nil))
+	}
 	if err != nil {
 		status := 0
 		respHeaders := http.Header(nil)
@@ -152,6 +197,9 @@ func (d *coderOpenAIWSClientDialer) Dial(
 		if resp != nil && resp.Body != nil {
 			body, _ = io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 			_ = resp.Body.Close()
+		}
+		if region != "" {
+			err = upstreamroute.TransportError(err)
 		}
 		return nil, status, respHeaders, &openAIWSHandshakeError{Body: body, Err: err}
 	}
@@ -174,9 +222,9 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 	if normalizedProxy == "" {
 		return nil, errors.New("proxy url is empty")
 	}
-	parsedProxyURL, err := url.Parse(normalizedProxy)
+	normalizedProxy, parsedProxyURL, err := proxyurl.Parse(normalizedProxy)
 	if err != nil {
-		return nil, fmt.Errorf("invalid proxy url: %w", err)
+		return nil, errors.New("invalid websocket proxy URL")
 	}
 	now := time.Now().UnixNano()
 
@@ -189,12 +237,15 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 	}
 	d.cleanupProxyClientsLocked(now)
 	transport := &http.Transport{
-		Proxy:               http.ProxyURL(parsedProxyURL),
+		DialContext:         (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		MaxIdleConns:        openAIWSProxyTransportMaxIdleConns,
 		MaxIdleConnsPerHost: openAIWSProxyTransportMaxIdleConnsPerHost,
 		IdleConnTimeout:     openAIWSProxyTransportIdleConnTimeout,
 		TLSHandshakeTimeout: 10 * time.Second,
 		ForceAttemptHTTP2:   true,
+	}
+	if err := proxyutil.ConfigureTransportProxy(transport, parsedProxyURL); err != nil {
+		return nil, errors.New("invalid websocket proxy transport")
 	}
 	client := &http.Client{Transport: transport}
 	d.proxyClients[normalizedProxy] = &openAIWSProxyClientEntry{
