@@ -1,6 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
+      <SmartOpsNav />
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 class="text-xl font-semibold text-gray-900 dark:text-white">{{ t('admin.harvestFlow.title') }}</h1>
@@ -239,6 +240,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import SmartOpsNav from '@/components/admin/operations/SmartOpsNav.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
 import HarvestControlsPanel from '@/components/admin/HarvestControlsPanel.vue'

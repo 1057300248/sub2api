@@ -11,6 +11,7 @@ vi.mock('@/api/admin/accounts', () => ({
 vi.mock('@/components/admin/HarvestControlsPanel.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('@/components/admin/HarvestManualConsole.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('@/components/admin/HarvestNodeRecords.vue', () => ({ default: { template: '<section />' } }))
+vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) => {
