@@ -104,14 +104,28 @@ type clineLifetimeBody struct {
 	closeErr  error
 }
 
+// Completion is supplied by the validating SSE guard, never inferred from usage
+// or finish_reason. All accesses happen on the response-reader goroutine.
+func (b *clineLifetimeBody) ClineSSEComplete() bool {
+	completed, ok := b.source.(interface{ ClineSSEComplete() bool })
+	return ok && completed.ClineSSEComplete()
+}
+
 func (b *clineLifetimeBody) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
+	if b.ClineSSEComplete() {
+		return 0, io.EOF
+	}
 	if err := context.Cause(b.lifetime.ctx); err != nil {
 		return 0, err
 	}
+
 	n, err := b.source.Read(p)
+	if b.ClineSSEComplete() {
+		return n, io.EOF
+	}
 	if err != nil {
 		if cause := context.Cause(b.lifetime.ctx); cause != nil {
 			return n, cause
@@ -202,6 +216,11 @@ func clineBodyDisconnectResult(body io.ReadCloser, writeFailed bool) bool {
 
 func clineBodyReadError(body io.ReadCloser, readErr error) error {
 	if bounded, ok := body.(*clineLifetimeBody); ok {
+		// A late caller deadline cannot turn an already validated terminal
+		// event into a failed response. Preserve genuine parser/read errors.
+		if bounded.ClineSSEComplete() && (readErr == nil || errors.Is(readErr, io.EOF)) {
+			return readErr
+		}
 		if cause := context.Cause(bounded.lifetime.ctx); cause != nil {
 			return cause
 		}

@@ -63,6 +63,15 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
 
+	// Cline raw Chat must enforce the same core-field boundary as protocol
+	// lowering, before field reads, mapping or any upstream side effect.
+	var normalizeErr error
+	body, normalizeErr = normalizeClineRawChatBody(account, body)
+	if normalizeErr != nil {
+		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", normalizeErr.Error())
+		return nil, normalizeErr
+	}
+
 	// 1. Parse minimal fields needed for routing/billing
 	originalModel := gjson.GetBytes(body, "model").String()
 	if originalModel == "" {
@@ -509,11 +518,11 @@ func isOpenAIChatUsageOnlyStreamChunk(payload string) bool {
 	if strings.TrimSpace(payload) == "" {
 		return false
 	}
-	if !gjson.Get(payload, "usage").Exists() {
+	if !gjson.Get(payload, "usage").Exists() || !gjson.Get(payload, "choices").Exists() {
 		return false
 	}
 	choices := gjson.Get(payload, "choices")
-	return choices.Exists() && choices.IsArray() && len(choices.Array()) == 0
+	return choices.IsArray() && len(choices.Array()) == 0
 }
 
 // extractCCStreamUsage 从单个 CC 流式 chunk 的 payload 中提取 usage 字段。

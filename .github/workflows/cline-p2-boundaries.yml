@@ -1,0 +1,76 @@
+name: Cline P2 boundaries
+on:
+  push:
+    branches: [codex/sub2-v297-cline-fixes-20261003]
+    paths: ['backend/**', '.github/workflows/cline-p2-boundaries.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  boundaries:
+    if: github.repository == '1057300248/sub2api'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPECTED_SHA: ${{ github.sha }}
+      SUB2API_TEST_POSTGRES_IMAGE: postgres:18.6-alpine
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Exact source and formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(gofmt -l backend/internal/service/cline_raw_request.go backend/internal/service/cline_raw_boundary_test.go backend/internal/service/cline_request_lifetime.go backend/internal/service/openai_gateway_chat_completions_raw.go backend/internal/pkg/cline/body.go backend/internal/handler/cline_p2_http_integration_test.go)"
+          git diff --check
+      - name: Raw request and terminal state race regressions
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -json -race -tags=unit -count=1 -run '^TestCline(RawChat|DeadlineAfterValidatedDone|TerminalGuard)' ./internal/service | tee "$RUNNER_TEMP/cline-p2-unit.jsonl"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-p2-unit.jsonl').read_text().splitlines() if line.strip()]
+          required = {'TestClineRawChatCanonicalFieldsAndExtensions', 'TestClineRawChatDuplicateKeysFailClosed', 'TestClineDeadlineAfterValidatedDonePreservesCompletion', 'TestClineTerminalGuardDoesNotPromotePartialOrFailedStreams'}
+          passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
+          if not required.issubset(passed) or any(e.get('Action') in ('fail', 'skip') for e in events):
+              raise SystemExit(f'P2 unit coverage missing, failed or skipped: {sorted(required-passed)}')
+          print('Four required P2 unit tests passed with race detection; no skips.')
+          PY
+      - name: Actual HTTP handlers and PostgreSQL 18.6 billing
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker info >/dev/null
+          go test -json -p 2 -tags=integration -count=1 -run '^TestClineHTTPRawChatAndDoneBoundaries$' ./internal/handler | tee "$RUNNER_TEMP/cline-p2-handler.jsonl"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP'])/'cline-p2-handler.jsonl').read_text().splitlines() if line.strip()]
+          root = 'TestClineHTTPRawChatAndDoneBoundaries'
+          scenarios = ('aliases_json', 'aliases_stream', 'duplicate_model', 'duplicate_stream', 'duplicate_escaped', 'duplicate_tools', 'duplicate_provider')
+          required = {root+'/'+platform+'/'+scenario for platform in ('cline','openai','deepseek') for scenario in scenarios}
+          required |= {root+'/done_'+protocol for protocol in ('chat','responses','messages')}
+          passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
+          if not required.issubset(passed) or root not in passed or any(e.get('Action') in ('fail','skip') for e in events):
+              raise SystemExit(f'P2 handler cases missing, failed or skipped: {sorted(required-passed)}')
+          print(f'{len(required)} P2 HTTP-handler/SQL billing cases passed; no real credentials, upstream inference or production changes.')
+          PY
+      - name: Source remained unchanged
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code

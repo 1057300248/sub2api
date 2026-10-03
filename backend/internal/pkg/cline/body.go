@@ -34,6 +34,13 @@ type guardedSSEBody struct {
 	sawDone   bool
 }
 
+// ClineSSEComplete reports only a validated, fully delivered [DONE] event.
+// Usage, finish_reason, a partial delimiter or failure never establish success.
+// Like Read, this observation belongs to the single response-reader goroutine.
+func (b *guardedSSEBody) ClineSSEComplete() bool {
+	return b.sawDone && b.terminal == io.EOF && len(b.pending) == 0
+}
+
 func (b *guardedSSEBody) Close() error { return b.source.Close() }
 func (b *guardedSSEBody) Read(p []byte) (int, error) {
 	if len(p) == 0 {
