@@ -440,3 +440,17 @@ class ProjectRuntimeTests(unittest.IsolatedAsyncioTestCase):
             engine.account.assert_awaited_once()
             self.assertEqual(engine.runtime_cooldowns['300'],expiry)
             self.assertEqual(list(engine.state.pending.iterdir()),[])
+
+
+class PollDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_poll_reports_status_without_body_or_turn_state(self):
+        observer=mock.Mock()
+        engine=SimpleNamespace(api=adapter,observe=observer)
+        actor=multiplex_browser.AccountBrowser(engine,'300','fixture-secret')
+        actor.page=SimpleNamespace(evaluate=mock.AsyncMock(return_value={'status':429}))
+        with self.assertRaises(adapter.AdapterError) as error:
+            await actor.poll({'request_id':'request-secret','turn_state':'state-secret'})
+        self.assertEqual(error.exception.code,'poll_failed')
+        observer.assert_called_once_with('prism_poll_failed',sent=False,http_status=429,transport_error=None)
+        self.assertEqual(actor.expected,{})
+        self.assertNotIn('secret',str(observer.call_args))

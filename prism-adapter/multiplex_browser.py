@@ -148,6 +148,9 @@ class AccountBrowser:
         try:
             result = await self.page.evaluate(POLL_JS, {'origin':self.api.BASE, 'path':self.api.STATUS, 'body':body})
             if not grant['sent'] or not isinstance(result, dict) or result.get('status') != 200:
+                self.engine.observe('prism_poll_failed', sent=grant['sent'],
+                    http_status=result.get('status') if isinstance(result, dict) else None,
+                    transport_error=result.get('error') if isinstance(result, dict) else 'invalid_result')
                 raise self.api.AdapterError(502, 'poll_failed', 'Prism poll failed; pending state retained')
             data = result.get('data')
             if not isinstance(data, dict):

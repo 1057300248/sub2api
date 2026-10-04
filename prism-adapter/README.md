@@ -166,3 +166,5 @@ multiplex 日志记录 `prism_prepare_start/end`、`prism_poll_start/end`、完�
 python prism-adapter/smoke_multiplex.py --chrome /path/to/chrome \
   --concurrency 5 --model gpt-6.1-sol --effort xhigh --rounds 3
 ```
+
+systemd 部署还需注意环境变量优先级：`EnvironmentFile` 中的值会覆盖 `Environment=`。若已有环境文件配置了并发，应更新对应文件，或在 drop-in 中追加最后读取的专用 `EnvironmentFile`；重启后必须核对进程实际环境，不能只看 drop-in 文本。Docker Compose 则在适配器服务的 `environment:` 下设置变量。
