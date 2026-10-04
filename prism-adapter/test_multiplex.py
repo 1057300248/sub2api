@@ -361,3 +361,82 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             engine.account.assert_awaited_once()
             self.assertEqual(list(blocked.directory.iterdir()), [blocked.path])
             self.assertEqual(json.loads(blocked.path.read_text())['request_id'], 'unknown')
+
+class MemoryAdmissionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_transient_pressure_collects_and_waits_without_submitting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = multiplex_browser.MultiplexBrowser(adapter.State(directory), 'fixture', adapter)
+            engine.memory_wait_seconds = 1
+            actor = SimpleNamespace(gate=SimpleNamespace(session=SimpleNamespace(send=mock.AsyncMock())))
+            journal = SimpleNamespace(local_id='fixture-local')
+            samples = iter([800, 800, 600])
+            with mock.patch.object(multiplex_browser, 'cgroup_memory_bytes', lambda:next(samples, 600)*1024*1024), \
+                    mock.patch.object(engine, 'observe') as observe:
+                await engine.wait_for_memory(actor, journal)
+            actor.gate.session.send.assert_awaited_once_with('HeapProfiler.collectGarbage')
+            self.assertEqual([c.args[0] for c in observe.call_args_list], ['prism_memory_wait','prism_memory_ready'])
+
+    async def test_sustained_pressure_rejects_and_cancellation_remains_cancellable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = multiplex_browser.MultiplexBrowser(adapter.State(directory), 'fixture', adapter)
+            engine.memory_wait_seconds = 0.02
+            actor = SimpleNamespace(gate=SimpleNamespace(session=SimpleNamespace(send=mock.AsyncMock())))
+            with mock.patch.object(multiplex_browser, 'cgroup_memory_bytes', lambda:800*1024*1024), \
+                    mock.patch.object(engine, 'observe'):
+                with self.assertRaises(adapter.AdapterError) as error:
+                    await engine.wait_for_memory(actor, SimpleNamespace(local_id='fixture'))
+                self.assertEqual(error.exception.code, 'resource_pressure')
+                engine.memory_wait_seconds = 30
+                task = asyncio.create_task(engine.wait_for_memory(actor, None))
+                await asyncio.sleep(0)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+    async def test_closed_editor_releases_listener_before_closing_page(self):
+        start = multiplex_browser.BrowserStart(SimpleNamespace(api=adapter), None, None, None)
+        page = mock.Mock(close=mock.AsyncMock())
+        start.page = page
+        await start.close()
+        await start.close()
+        page.remove_listener.assert_called_once_with('response', start.response)
+        page.close.assert_awaited_once_with(run_before_unload=False)
+        self.assertIsNone(start.page)
+
+    async def test_lifecycle_telemetry_does_not_include_request_material(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = multiplex_browser.MultiplexBrowser(adapter.State(directory), 'fixture', adapter)
+            journal = SimpleNamespace(local_id='local-fixture', token='secret-token', turn_state='secret-state')
+            with self.assertLogs('prism.lifecycle') as captured:
+                engine.observe('prism_prepare_start', journal, model='gpt-6.1-sol', effort='xhigh')
+            raw=' '.join(captured.output)
+            self.assertNotIn('secret-token',raw)
+            self.assertNotIn('secret-state',raw)
+            self.assertIn('memory_bytes',raw)
+            self.assertIn('xhigh',raw)
+
+
+class ProjectRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reported_runtime_throttle_is_recognized_before_editor_submission(self):
+        editor=SimpleNamespace(is_visible=mock.AsyncMock(return_value=True))
+        blocked=SimpleNamespace(is_visible=mock.AsyncMock(return_value=True))
+        page=SimpleNamespace(locator=mock.Mock(return_value=editor),get_by_text=mock.Mock(return_value=SimpleNamespace(first=blocked)))
+        with self.assertRaises(adapter.AdapterError) as error:
+            await multiplex_browser.wait_for_editor(page,adapter)
+        self.assertEqual(error.exception.code,'project_runtime_rate_limited')
+        self.assertTrue(multiplex_browser.RUNTIME_RATE_LIMIT.search('项目运行环境的启动请求受到限流。请等待后重新连接'))
+        editor.is_visible.assert_not_awaited()
+
+    async def test_project_creation_429_is_not_retried_and_cools_following_requests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine=multiplex_browser.MultiplexBrowser(adapter.State(directory),'fixture',adapter)
+            engine.account=mock.AsyncMock(side_effect=adapter.AdapterError(429,'project_runtime_rate_limited','fixture'))
+            with self.assertRaises(adapter.AdapterError):
+                await engine.run('300','fixture','prompt','one')
+            expiry=engine.runtime_cooldowns['300']
+            with self.assertRaises(adapter.AdapterError) as error:
+                await engine.run('300','fixture','prompt','two')
+            self.assertEqual(error.exception.code,'project_runtime_rate_limited')
+            engine.account.assert_awaited_once()
+            self.assertEqual(engine.runtime_cooldowns['300'],expiry)
+            self.assertEqual(list(engine.state.pending.iterdir()),[])

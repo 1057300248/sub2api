@@ -110,6 +110,9 @@ def main():
     parser.add_argument('--chrome', required=True)
     parser.add_argument('--concurrency', type=int, default=20, choices=range(1, 31))
     parser.add_argument('--output')
+    parser.add_argument('--model', choices=api.MODELS)
+    parser.add_argument('--effort', choices=api.EFFORTS, default='xhigh')
+    parser.add_argument('--rounds', type=int, default=1, choices=range(1, 5))
     args = parser.parse_args()
     upstream = ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
     upstream.daemon_threads = True
@@ -145,10 +148,11 @@ def main():
         started = time.monotonic()
         try:
             def call(index):
-                model, effort = list(api.MODELS)[index % 4], list(api.EFFORTS)[(index // 4) % 4]
+                model, effort = (args.model, args.effort) if args.model else (list(api.MODELS)[index % 4], list(api.EFFORTS)[(index // 4) % 4])
                 payload = json.dumps({'model':model,'reasoning':{'effort':effort},'input':f'fixture-{index}'}).encode()
                 headers = {'Authorization':'Bearer fixture-bridge', 'Content-Type':'application/json',
-                    'X-Prism-Account-ID':'300', 'X-Prism-OAuth-Token':'synthetic-fixture-token'}
+                    'X-Prism-Account-ID':'300', 'X-Prism-OAuth-Token':'synthetic-fixture-token',
+                    'X-Prism-Session-ID':__import__('hashlib').sha256(f'fixture-slot-{index % args.concurrency}'.encode()).hexdigest()}
                 with urlopen(Request(f'http://127.0.0.1:{gateway.server_port}/v1/responses', data=payload, headers=headers), timeout=150) as response:
                     data = json.load(response)
                 assert data['model'] == model and data['reasoning']['effort'] == effort and data['usage'] is None
@@ -156,13 +160,18 @@ def main():
                 assert (job['model'], job['effort']) == (model, effort)
                 assert data['output'][0]['content'][0]['text'] == f'[user]\nfixture-{index}'
                 return data['id']
-            with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
-                ids = list(pool.map(call, range(args.concurrency)))
-            assert len(set(ids)) == args.concurrency
-            assert len(upstream.jobs) == args.concurrency
+            ids = []
+            for round_index in range(args.rounds):
+                with upstream.lock:
+                    upstream.release = None
+                    upstream.target = (round_index + 1) * args.concurrency
+                with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+                    ids += list(pool.map(call, range(round_index * args.concurrency, (round_index + 1) * args.concurrency)))
+            assert len(set(ids)) == args.concurrency * args.rounds
+            assert len(upstream.jobs) == args.concurrency * args.rounds
             assert len({job['project'] for job in upstream.jobs.values()}) == args.concurrency
             assert not list(state.pending.iterdir())
-            assert len(list(state.receipts.iterdir())) == args.concurrency
+            assert len(list(state.receipts.iterdir())) == args.concurrency * args.rounds
             for path in state.receipts.iterdir():
                 receipt = json.loads(path.read_text())
                 job = upstream.jobs[receipt['request_id']]
@@ -175,7 +184,7 @@ def main():
             assert upstream.asset_requests == 1, upstream.asset_requests
             assert peak['active'] == args.concurrency and upstream.mismatches == 0
             result = {'result':'passed','scope':'real adapter + real browser + mock upstream',
-                'concurrency':args.concurrency,'completed':len(ids),'starts':len(upstream.jobs),
+                'concurrency':args.concurrency,'rounds':args.rounds,'model':args.model,'effort':args.effort,'completed':len(ids),'starts':len(upstream.jobs),
                 'projects':len({j['project'] for j in upstream.jobs.values()}),'peak':peak,
                 'state_mismatches':upstream.mismatches,'real_prism_requests':0,
                 'asset_network_requests':upstream.asset_requests,
