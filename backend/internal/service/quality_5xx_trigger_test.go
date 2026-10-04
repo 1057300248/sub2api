@@ -149,6 +149,8 @@ func TestQuality5xxTemporarilyUnschedulesOAuthAccountBeforeProbe(t *testing.T) {
 
 func TestQuality5xxTriggeredPlanDoesNotProbeDuringTempUnschedulableWindow(t *testing.T) {
 	account := &Account{ID: 42, Type: AccountTypeOAuth, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true}
+	until := time.Now().Add(time.Minute)
+	account.TempUnschedulableUntil = &until
 	plan := pelicanPlan()
 	plan.AccountID = account.ID
 	plan.TriggerSource = quality5xxSource
