@@ -34,11 +34,12 @@ type OAuthAutoConfig struct {
 	UpgradeStep      int                     `json:"upgrade_step"`
 	MaxConcurrency   int                     `json:"max_concurrency"`
 	CooldownSeconds  int                     `json:"cooldown_seconds"`
+	CostMultiplier   float64                 `json:"cost_multiplier"`
 	Revision         string                  `json:"revision"`
 }
 
 func DefaultOAuthAutoConfig() OAuthAutoConfig {
-	return OAuthAutoConfig{ModelMappings: defaultOAuthModelMappings(PlatformOpenAI), ModelBilling: DefaultModelBillingConfig(), ExcelBPS: DefaultExcelBPSDefaults(), Platform: PlatformOpenAI, Priority: 50, LoadFactor: 1, Concurrency: 3, GroupIDs: []int64{}, UpgradeGroupIDs: []int64{}, SuccessesPerStep: 20, UpgradeStep: 1, MaxConcurrency: 100, CooldownSeconds: 60}
+	return OAuthAutoConfig{ModelMappings: defaultOAuthModelMappings(PlatformOpenAI), ModelBilling: DefaultModelBillingConfig(), ExcelBPS: DefaultExcelBPSDefaults(), Platform: PlatformOpenAI, Priority: 50, LoadFactor: 1, Concurrency: 3, CostMultiplier: 0.07, GroupIDs: []int64{}, UpgradeGroupIDs: []int64{}, SuccessesPerStep: 20, UpgradeStep: 1, MaxConcurrency: 100, CooldownSeconds: 60}
 }
 func ValidateOAuthAutoConfig(c OAuthAutoConfig) error {
 	if err := validateOAuthModelMappings(c.ModelMappings); err != nil {
@@ -56,6 +57,9 @@ func ValidateOAuthAutoConfig(c OAuthAutoConfig) error {
 	}
 	if c.Priority < 0 || c.Priority > 10000 || c.LoadFactor < 1 || c.LoadFactor > 10000 || c.Concurrency < 1 || c.Concurrency > 10000 {
 		return bad("priority must be 0–10000; concurrency and load factor must be 1–10000")
+	}
+	if _, ok := accountCostMultiplierNumber(c.CostMultiplier); !ok {
+		return bad("cost multiplier must be a finite number between 0 and 1000000")
 	}
 	if c.SuccessesPerStep < 1 || c.SuccessesPerStep > 100000 || c.UpgradeStep < 1 || c.UpgradeStep > 1000 || c.MaxConcurrency < 1 || c.MaxConcurrency > 10000 || c.CooldownSeconds < 1 || c.CooldownSeconds > 86400 {
 		return bad("invalid concurrency upgrade settings")
@@ -97,6 +101,17 @@ func GetOAuthAutoConfig(ctx context.Context, repo SettingRepository) (OAuthAutoC
 		c.ModelMappings = nil
 		if err = json.Unmarshal([]byte(raw), &c); err != nil {
 			return c, err
+		}
+		if c.CostMultiplier == 0 {
+			var stored struct {
+				CostMultiplier *float64 `json:"cost_multiplier"`
+			}
+			if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+				return c, err
+			}
+			if stored.CostMultiplier == nil {
+				c.CostMultiplier = DefaultOAuthAutoConfig().CostMultiplier
+			}
 		}
 	}
 	return c, ValidateOAuthAutoConfig(c)
@@ -149,6 +164,7 @@ func (s *adminServiceImpl) ApplyOAuthAutoConfig(ctx context.Context, input *Crea
 	}
 	// No credentials or account identity is stored in the marker.
 	input.Extra["auto_config_initial_revision"] = c.Revision
+	input.Extra[AccountCostMultiplierExtraKey] = c.CostMultiplier
 	return nil
 }
 func (s *AccountOpsService) GetOAuthAutoConfig(ctx context.Context) (OAuthAutoConfig, error) {

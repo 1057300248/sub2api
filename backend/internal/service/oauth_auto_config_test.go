@@ -62,6 +62,20 @@ func TestAutoConfigIndependentSwitchesAndValidation(t *testing.T) {
 	c.GroupIDs = []int64{-1}
 	require.Error(t, ValidateOAuthAutoConfig(c))
 }
+
+func TestAutoConfigInitialCostMultiplierScope(t *testing.T) {
+	c := DefaultOAuthAutoConfig()
+	c.Enabled, c.GroupIDs, c.CostMultiplier = true, []int64{2}, 0.07
+	raw, err := json.Marshal(c)
+	require.NoError(t, err)
+	svc := &adminServiceImpl{settingService: NewSettingService(&accountOpsSettingsStub{raw: string(raw)}, nil), groupRepo: autoConfigGroups{group: &Group{ID: 2, Platform: PlatformOpenAI, Status: StatusActive}}}
+	input := &CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{AccountCostMultiplierExtraKey: 0.9}}
+	require.NoError(t, svc.ApplyOAuthAutoConfig(t.Context(), input))
+	require.Equal(t, 0.07, input.Extra[AccountCostMultiplierExtraKey])
+	apiKey := &CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{AccountCostMultiplierExtraKey: 0.9}}
+	require.NoError(t, svc.ApplyOAuthAutoConfig(t.Context(), apiKey))
+	require.Equal(t, 0.9, apiKey.Extra[AccountCostMultiplierExtraKey])
+}
 func TestAutoConfigAdvanceFailureCooldownCapAndManualChange(t *testing.T) {
 	c := DefaultOAuthAutoConfig()
 	c.Revision = "r1"
