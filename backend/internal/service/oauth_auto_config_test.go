@@ -112,6 +112,16 @@ func TestAutoConfigRecoveryRampStopsAtCapturedTarget(t *testing.T) {
 	require.Equal(t, 9, n)
 	require.Equal(t, 9, state.RecoveryTarget)
 }
+
+func TestAutoConfigPendingQualityFenceSurvivesCooldown(t *testing.T) {
+	c := DefaultOAuthAutoConfig()
+	c.Revision, c.SuccessesPerStep, c.MaxConcurrency = "r1", 1, 100
+	now := time.Now()
+	state := AutoConfigConcurrencyState{Revision: "r1", Concurrency: 5, RecoveryTarget: 5, PausedUntil: now.Add(-time.Hour)}
+	state, n := AdvanceConcurrency(state, 5, c, AccountConcurrencyResult{StartedAt: now, Success: true}, now)
+	require.Equal(t, 5, n)
+	require.Equal(t, 5, state.RecoveryTarget)
+}
 func TestAutoConfigQueueOverflowFailsClosed(t *testing.T) {
 	s := NewAccountOpsService(nil, nil, nil)
 	c := DefaultOAuthAutoConfig()

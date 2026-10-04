@@ -295,7 +295,10 @@ func blockNativeRecoveryRamp(ctx context.Context, tx *sql.Tx, extra map[string]a
 	if json.Unmarshal([]byte(raw), &c) != nil || !c.UpgradeEnabled {
 		return nil
 	}
-	state := service.AutoConfigConcurrencyState{Revision: c.Revision, Concurrency: current, Maximum: current, PausedUntil: time.Now().UTC().Add(time.Duration(c.CooldownSeconds) * time.Second)}
+	// RecoveryTarget=current fences every native success outcome while the
+	// quality probe is pending. PausedUntil alone is insufficient because an
+	// old request may complete after the cooldown window.
+	state := service.AutoConfigConcurrencyState{Revision: c.Revision, Concurrency: current, Maximum: current, RecoveryTarget: current, PausedUntil: time.Now().UTC().Add(time.Duration(c.CooldownSeconds) * time.Second)}
 	encoded, err := json.Marshal(state)
 	if err != nil {
 		return err
