@@ -1067,6 +1067,7 @@ var ProviderSet = wire.NewSet(
 	NewChannelMonitorQuotaFetcher,
 	ProvideChannelMonitorV2Service,
 	ProvideChannelMonitorV2Aggregator,
+	ProvideChannelMonitorV3Service,
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
 )
@@ -1150,6 +1151,12 @@ func ProvideChannelMonitorV2Service(repo ChannelMonitorV2Repository, settingServ
 	svc.SetRuntimeReader(settingService)
 	svc.candy = newChannelMonitorV2CandyService(repo, groups, settingService)
 	return svc
+}
+
+// ProvideChannelMonitorV3Service wires the component status page. It reads
+// the V2 passive aggregates, which the V2 aggregator keeps in v2 and v3 mode.
+func ProvideChannelMonitorV3Service(repo ChannelMonitorV3Repository, groupRepo GroupRepository) *ChannelMonitorV3Service {
+	return NewChannelMonitorV3Service(repo, groupRepo)
 }
 
 // ProvideChannelMonitorV2Aggregator starts the passive minute-rollup worker.
