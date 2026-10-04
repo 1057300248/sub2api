@@ -764,7 +764,10 @@ def main():
             queued=queued, bootstrap=bootstrap, idle_seconds=idle_seconds), api)
     else:
         raise SystemExit("PRISM_ADAPTER_MODE must be browser or multiplex")
-    server = ThreadingHTTPServer(("127.0.0.1", 8319), Handler)
+    port = int(os.environ.get("PRISM_ADAPTER_PORT", "8319"))
+    if not 1024 <= port <= 65535:
+        raise SystemExit("PRISM_ADAPTER_PORT must be 1024..65535")
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
     try:
         server.serve_forever()
