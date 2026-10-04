@@ -13,9 +13,11 @@ var scheduledTestCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom 
 
 // ScheduledTestService provides CRUD operations for scheduled test plans and results.
 type ScheduledTestService struct {
-	planRepo     ScheduledTestPlanRepository
-	resultRepo   ScheduledTestResultRepository
-	templateRepo QualityRuleTemplateRepository
+	planRepo      ScheduledTestPlanRepository
+	resultRepo    ScheduledTestResultRepository
+	templateRepo  QualityRuleTemplateRepository
+	accountTests  *AccountTestService
+	qualityModels func(context.Context, int64) ([]string, error)
 }
 
 // NewScheduledTestService creates a new ScheduledTestService.
@@ -34,6 +36,9 @@ func (s *ScheduledTestService) CreatePlan(ctx context.Context, plan *ScheduledTe
 	nextRun, err := nextPlanRun(plan, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("invalid test schedule: %w", err)
+	}
+	if err := s.validateQualityAccountModels(ctx, plan); err != nil {
+		return nil, err
 	}
 	plan.NextRunAt = &nextRun
 
@@ -59,6 +64,11 @@ func (s *ScheduledTestService) UpdatePlan(ctx context.Context, plan *ScheduledTe
 	nextRun, err := nextPlanRun(plan, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("invalid test schedule: %w", err)
+	}
+	if plan.Enabled {
+		if err := s.validateQualityAccountModels(ctx, plan); err != nil {
+			return nil, err
+		}
 	}
 	plan.NextRunAt = &nextRun
 

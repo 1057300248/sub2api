@@ -45,7 +45,7 @@ func TestQuality5xxImmediateDuringRunningProbe(t *testing.T) {
 	require.True(t, schedulable)
 	extra := f.extra()
 	require.Equal(t, "kept", extra["unrelated"])
-	require.Contains(t, extra["model_rate_limits"].(map[string]any), "gpt-6-astra")
+	require.NotContains(t, extra, "model_rate_limits", "5xx lowers concurrency but is not model degradation evidence")
 	require.Equal(t, "stale_run", f.apply("passed"), "probe started before 5xx cannot restore")
 	require.NoError(t, f.plans.FinishPelican(ctx, f.plan.ID, f.until, time.Now()))
 	f.claim()
@@ -64,4 +64,46 @@ func TestQuality5xxImmediateDuringRunningProbe(t *testing.T) {
 	require.NotContains(t, extra, "model_rate_limits")
 	ramp := extra[service.AutoConfigConcurrencyExtraKey].(map[string]any)
 	require.EqualValues(t, 17, ramp["recovery_target"])
+}
+
+func TestQualityModelResultsRemainIndependentInTransaction(t *testing.T) {
+	f := newQualityBPSFixture(t, `{"unrelated":"kept"}`, &service.QualityPolicy{Action: service.QualityActionRemoveModel, RemoveModels: []string{"gpt-6-astra", "gpt-6.1-sol"}, AutoRestore: true, RecoveryConcurrency: 4})
+	f.exec(`UPDATE accounts SET concurrency=20 WHERE id=$1`)
+	f.plan.QualityModelOutcomes = map[string]string{"gpt-6-astra": "failed", "gpt-6.1-sol": "passed"}
+	require.Equal(t, "models_cooled", f.apply("failed"))
+	limits := f.extra()["model_rate_limits"].(map[string]any)
+	require.Contains(t, limits, "gpt-6-astra")
+	require.NotContains(t, limits, "gpt-6.1-sol")
+	f.plan.QualityModelOutcomes = map[string]string{"gpt-6-astra": "failed", "gpt-6.1-sol": "failed"}
+	f.apply("failed")
+	require.Len(t, f.extra()["model_rate_limits"].(map[string]any), 2)
+	f.plan.QualityModelOutcomes = map[string]string{"gpt-6-astra": "passed", "gpt-6.1-sol": "failed"}
+	f.apply("failed")
+	limits = f.extra()["model_rate_limits"].(map[string]any)
+	require.NotContains(t, limits, "gpt-6-astra")
+	require.Contains(t, limits, "gpt-6.1-sol")
+	f.plan.QualityModelOutcomes = map[string]string{"gpt-6-astra": "passed", "gpt-6.1-sol": "passed"}
+	require.Equal(t, "restored", f.apply("passed"))
+	require.NotContains(t, f.extra(), "model_rate_limits")
+}
+
+func TestQualitySkippedRoundHistoryCountsOnlyTestedModels(t *testing.T) {
+	f := newQualityBPSFixture(t, `{}`, &service.QualityPolicy{Action: service.QualityActionRemoveModel, RemoveModels: []string{"gpt-6-astra"}, AutoRestore: true})
+	results := NewScheduledTestResultRepository(integrationDB)
+	svc := service.NewScheduledTestService(f.plans, results)
+	cfg := *f.plan.PelicanConfig
+	cfg.ModelIDs = []string{"gpt-6-astra", "gpt-6.1-sol"}
+	cfg.ParallelCount = 1
+	now := time.Now()
+	for _, status := range []string{"success", "skipped"} {
+		_, err := results.Create(context.Background(), &service.ScheduledTestResult{PlanID: f.plan.ID, QualityRoundID: "supported-model-round", Status: status, PelicanConfig: &cfg, StartedAt: now, FinishedAt: now})
+		require.NoError(t, err)
+	}
+	page, err := svc.ListQualityHistory(context.Background(), 0)
+	require.NoError(t, err)
+	require.NotEmpty(t, page.Items)
+	require.Equal(t, 1, page.Items[0].PassedCount)
+	require.Equal(t, 1, page.Items[0].TotalCount)
+	require.Equal(t, 1, page.Items[0].SkippedCount)
+	require.Equal(t, "success", page.Items[0].Status)
 }

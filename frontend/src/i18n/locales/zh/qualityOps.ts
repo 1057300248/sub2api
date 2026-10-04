@@ -1,4 +1,10 @@
 export default {
+  "cooldownPerModelHint": "冷却与恢复按每个模型自己的检测结果处理：仅冷却检测失败的模型；通过的模型不受其他模型影响，未检测或不支持的模型不新增冷却。5xx 先降低账号并发，等待检测结果后决定模型冷却。",
+
+  "skipped": "已跳过",
+  "modelUnsupportedSkipped": "模型不支持，已跳过",
+  "catalogUnavailable": "模型列表读取失败，已跳过",
+
   "tooManyModelSamples": "最多选择 50 个模型，每轮最多 100 个样本；请减少模型或每模型并行数。",
   "models": "检测模型",
   "addModel": "添加检测模型",
@@ -133,6 +139,12 @@ export default {
   "queued": "已加入检测队列，预计一分钟内开始。",
   "deleteConfirm": "删除此规则及检测记录？已移出的分组、关闭的调度或本规则开启的 BPS 不会自动恢复，请先在账户页处理。",
   "outcomes": {
+    "models_cooled": "未通过的模型已冷却",
+    "model_cooldown_refreshed": "模型冷却已续期",
+    "models_partially_restored": "已恢复通过的模型，其他模型继续冷却",
+    "probe_pending": "已降低并发，等待模型检测",
+    "recovery_started": "模型已恢复，并发逐渐升档",
+
     "observed": "仅记录检测结果",
     "action_conflict": "等待其他规则恢复",
     "no_change": "未变更账户",

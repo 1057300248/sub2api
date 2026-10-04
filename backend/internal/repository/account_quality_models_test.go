@@ -71,3 +71,58 @@ func TestQualityModelInconclusiveRetainsOwnedRestriction(t *testing.T) {
 	require.Equal(t, 3, a.Concurrency)
 	require.Equal(t, 12, *state.RecoveryTarget)
 }
+
+func TestQualityModelsIndependentCooldownAndRecovery(t *testing.T) {
+	for _, pair := range [][2]string{{"gpt-6-astra", "gpt-6.1-sol"}, {"gpt-6.1-sol", "gpt-6-astra"}} {
+		t.Run(pair[0], func(t *testing.T) {
+			primary, peer := pair[0], pair[1]
+
+			now := time.Now().UTC().Truncate(time.Second)
+			a := &service.Account{Platform: service.PlatformOpenAI, Status: "active", Schedulable: true, Type: service.AccountTypeOAuth, Concurrency: 20, Extra: map[string]any{}}
+			state := qualityState{RecoveryConcurrency: 4, NativeRecovery: true}
+			_, err := transitionQualityModels(a, &state, 7, []string{primary}, now.Add(time.Hour), "failed", true, now)
+			require.NoError(t, err)
+			require.False(t, a.IsSchedulableForModel(primary))
+			require.True(t, a.IsSchedulableForModel(peer))
+			_, err = transitionQualityModels(a, &state, 7, []string{peer}, now.Add(time.Hour), "inconclusive", true, now)
+			require.NoError(t, err)
+			require.True(t, a.IsSchedulableForModel(peer))
+			_, err = transitionQualityModels(a, &state, 7, []string{peer}, now.Add(time.Hour), "failed", true, now)
+			require.NoError(t, err)
+			require.False(t, a.IsSchedulableForModel(peer))
+			_, err = transitionQualityModels(a, &state, 7, []string{primary}, now.Add(time.Hour), "passed", true, now)
+			require.NoError(t, err)
+			require.True(t, a.IsSchedulableForModel(primary))
+			require.False(t, a.IsSchedulableForModel(peer))
+			require.Nil(t, state.RecoveryTarget)
+			_, err = transitionQualityModels(a, &state, 7, []string{peer}, now.Add(time.Hour), "passed", true, now)
+			require.NoError(t, err)
+			require.True(t, a.IsSchedulableForModel(peer))
+			require.Equal(t, 20, *state.RecoveryTarget)
+		})
+	}
+}
+func TestQuality5xxPendingOnlyLowersConcurrency(t *testing.T) {
+	now := time.Now().UTC()
+	a := &service.Account{Platform: service.PlatformOpenAI, Status: "active", Schedulable: true, Type: service.AccountTypeOAuth, Concurrency: 20, Extra: map[string]any{}}
+	state := qualityState{RecoveryConcurrency: 4, NativeRecovery: true}
+	action, err := transitionQualityModels(a, &state, 7, []string{"gpt-6-astra", "gpt-6.1-sol"}, now.Add(time.Hour), "pending", true, now)
+	require.NoError(t, err)
+	require.Equal(t, "probe_pending", action)
+	require.Equal(t, 4, a.Concurrency)
+	require.True(t, a.IsSchedulableForModel("gpt-6-astra"))
+	require.True(t, a.IsSchedulableForModel("gpt-6.1-sol"))
+}
+
+func TestQualityPassingModelDoesNotUnlockRampWithUnknownPeer(t *testing.T) {
+	now := time.Now().UTC()
+	a := &service.Account{Platform: service.PlatformOpenAI, Status: "active", Schedulable: true, Type: service.AccountTypeOAuth, Concurrency: 20, Extra: map[string]any{}}
+	state := qualityState{RecoveryConcurrency: 4, NativeRecovery: true}
+	_, err := transitionQualityModels(a, &state, 7, []string{"gpt-6-astra", "gpt-6.1-sol"}, now.Add(time.Hour), "pending", true, now)
+	require.NoError(t, err)
+	_, err = transitionQualityModelsScoped(a, &state, 7, []string{"gpt-6-astra"}, now.Add(time.Hour), "passed", true, now, true)
+	require.NoError(t, err)
+	require.Nil(t, state.RecoveryTarget)
+	require.Equal(t, 4, a.Concurrency)
+	require.Equal(t, 20, *state.PreviousConcurrency)
+}

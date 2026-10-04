@@ -37,8 +37,17 @@ func cooldownEntryUntil(entry any) time.Time {
 
 // Keep ownership at entry granularity: a newer native error or manual edit wins.
 func transitionQualityModels(account *service.Account, state *qualityState, planID int64, models []string, until time.Time, outcome string, restore bool, now time.Time) (string, error) {
+	return transitionQualityModelsScoped(account, state, planID, models, until, outcome, restore, now, false)
+}
+func transitionQualityModelsScoped(account *service.Account, state *qualityState, planID int64, models []string, until time.Time, outcome string, restore bool, now time.Time, holdRecovery bool) (string, error) {
 	if outcome == "inconclusive" {
-		if state.Action == "" {
+		owned := false
+		for _, model := range models {
+			if _, ok := state.ModelRateLimits[account.GetMappedModel(model)]; ok {
+				owned = true
+			}
+		}
+		if state.Action == "" || !owned {
 			return "inconclusive", nil
 		}
 		outcome = "failed"
@@ -53,6 +62,14 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 	if limits == nil {
 		limits = map[string]any{}
 	}
+	if outcome == "pending" {
+		state.Action = service.QualityActionRemoveModel
+		if state.AppliedConcurrency != nil && account.Concurrency != *state.AppliedConcurrency {
+			return "action_conflict", nil
+		}
+		lowerQualityRecoveryConcurrency(account, state)
+		return "probe_pending", nil
+	}
 	if outcome == "failed" {
 		first := state.Action == ""
 		if first {
@@ -64,24 +81,33 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 				state.PreviousConcurrency = &target
 				state.RecoveryTarget = nil
 			}
+		}
+		if state.ModelRateLimits == nil {
 			state.ModelRateLimits = map[string]json.RawMessage{}
+		}
+		if state.ModelApplied == nil {
 			state.ModelApplied = map[string]json.RawMessage{}
-			for _, model := range models {
-				key := account.GetMappedModel(model)
-				previous, err := json.Marshal(limits[key])
-				if err != nil {
-					return "", err
-				}
-				state.ModelRateLimits[key] = previous
-			}
-		} else {
-			for key, applied := range state.ModelApplied {
-				if !cooldownEntryEqual(limits[key], applied) {
-					return "action_conflict", nil
-				}
+		}
+		targeted := map[string]bool{}
+		for _, model := range models {
+			targeted[account.GetMappedModel(model)] = true
+		}
+		for key, applied := range state.ModelApplied {
+			if targeted[key] && !cooldownEntryEqual(limits[key], applied) {
+				return "action_conflict", nil
 			}
 		}
-		for key := range state.ModelRateLimits {
+		for _, model := range models {
+			key := account.GetMappedModel(model)
+			previous, err := json.Marshal(limits[key])
+			if err != nil {
+				return "", err
+			}
+			if _, owned := state.ModelRateLimits[key]; !owned {
+				state.ModelRateLimits[key] = previous
+			}
+		}
+		for key := range targeted {
 			reset := until
 			if previous := cooldownEntryUntil(limits[key]); previous.After(reset) {
 				reset = previous
@@ -95,28 +121,8 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 			state.ModelApplied[key] = raw
 		}
 		account.Extra["model_rate_limits"] = limits
-		if first && account.Type == service.AccountTypeOAuth {
-			cap := state.RecoveryConcurrency
-			if cap <= 0 {
-				cap = 5
-			}
-			if account.Concurrency > cap {
-				previous := account.Concurrency
-				if state.PreviousConcurrency != nil {
-					previous = *state.PreviousConcurrency
-				}
-				applied := cap
-				state.PreviousConcurrency, state.AppliedConcurrency = &previous, &applied
-				account.Concurrency = applied
-			} else {
-				// Never raise an account that is already below the configured cap.
-				applied := account.Concurrency
-				state.AppliedConcurrency = &applied
-				if state.PreviousConcurrency == nil {
-					previous := applied
-					state.PreviousConcurrency = &previous
-				}
-			}
+		if first || state.AppliedConcurrency == nil {
+			lowerQualityRecoveryConcurrency(account, state)
 		}
 		if first {
 			return "models_cooled", nil
@@ -127,7 +133,15 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 		return "no_change", nil
 	}
 	conflict := false
+	restoredCount := 0
+	targeted := map[string]bool{}
+	for _, model := range models {
+		targeted[account.GetMappedModel(model)] = true
+	}
 	for key, previous := range state.ModelRateLimits {
+		if !targeted[key] {
+			continue
+		}
 		if !cooldownEntryEqual(limits[key], state.ModelApplied[key]) {
 			conflict = true
 			continue
@@ -143,11 +157,24 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 		}
 		delete(state.ModelRateLimits, key)
 		delete(state.ModelApplied, key)
+		restoredCount++
 	}
 	if len(limits) == 0 {
 		delete(account.Extra, "model_rate_limits")
 	} else {
 		account.Extra["model_rate_limits"] = limits
+	}
+	if len(state.ModelRateLimits) > 0 {
+		if conflict {
+			return "restore_conflict", nil
+		}
+		if restoredCount == 0 {
+			return "passed", nil
+		}
+		return "models_partially_restored", nil
+	}
+	if holdRecovery {
+		return "models_partially_restored", nil
 	}
 	if state.PreviousConcurrency != nil && state.AppliedConcurrency != nil {
 		if account.Concurrency == *state.AppliedConcurrency {
@@ -177,8 +204,33 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 	return "restored", nil
 }
 
+// The concurrency ceiling is shared by the account; model availability is not.
+func lowerQualityRecoveryConcurrency(account *service.Account, state *qualityState) {
+	if account.Type != service.AccountTypeOAuth {
+		return
+	}
+	cap := state.RecoveryConcurrency
+	if cap <= 0 {
+		cap = 5
+	}
+	if state.PreviousConcurrency == nil {
+		previous := account.Concurrency
+		if state.RecoveryTarget != nil {
+			previous = *state.RecoveryTarget
+			state.RecoveryTarget = nil
+		}
+		state.PreviousConcurrency = &previous
+	}
+	applied := account.Concurrency
+	if applied > cap {
+		applied = cap
+	}
+	state.AppliedConcurrency = &applied
+	account.Concurrency = applied
+}
+
 func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.ScheduledTestPlan, outcome, status string, state qualityState) (string, error) {
-	if outcome == "inconclusive" {
+	if outcome == "inconclusive" && plan.QualityModelOutcomes == nil {
 		if state.Action == "" {
 			return "inconclusive", nil
 		}
@@ -205,7 +257,44 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 	}
 	beforeConcurrency := account.Concurrency
 	restore := plan.PelicanConfig.Quality.AutoRestore || plan.PelicanConfig.Quality.TriggerOnUpstream5xx
-	action, err := transitionQualityModels(account, &state, plan.ID, plan.PelicanConfig.Quality.RemoveModels, schedule.Next(now), outcome, restore, now)
+	action := "inconclusive"
+	if plan.QualityModelOutcomes == nil {
+		action, err = transitionQualityModels(account, &state, plan.ID, plan.PelicanConfig.Quality.RemoveModels, schedule.Next(now), outcome, restore, now)
+	} else {
+		allConfirmed := outcome == "passed"
+		// Apply failed models first, then passing models; a healthy peer cannot
+		// unlock the shared recovery ramp while another model remains cooled.
+		for _, verdict := range []string{"failed", "inconclusive", "passed"} {
+			for _, model := range plan.PelicanConfig.Quality.RemoveModels {
+				if plan.QualityModelOutcomes[model] != verdict {
+					continue
+				}
+				modelAction, e := transitionQualityModelsScoped(account, &state, plan.ID, []string{model}, schedule.Next(now), verdict, restore, now, !allConfirmed)
+				if e != nil {
+					return "", e
+				}
+				if modelAction == "restore_conflict" || modelAction == "action_conflict" {
+					return modelAction, nil
+				}
+				if modelAction != "passed" && modelAction != "inconclusive" {
+					action = modelAction
+				}
+			}
+		}
+		// Model restoration is independent; the account's shared concurrency
+		// recovery still requires the complete eligible round to pass.
+		if allConfirmed && len(state.ModelRateLimits) == 0 && state.PreviousConcurrency != nil {
+			action, err = transitionQualityModels(account, &state, plan.ID, nil, schedule.Next(now), "passed", restore, now)
+		} else if allConfirmed && action == "inconclusive" && state.Action == "" {
+			action = "passed"
+		}
+		outcome = "inconclusive"
+		if len(state.ModelRateLimits) > 0 {
+			outcome = "failed"
+		} else if action == "recovery_started" || action == "restored" {
+			outcome = "passed"
+		}
+	}
 	if err != nil {
 		return "", err
 	}
@@ -233,7 +322,7 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 			return "", err
 		}
 	}
-	if outcome == "failed" && plan.PelicanConfig.Quality.TriggerOnUpstream5xx && action != "inconclusive" {
+	if (outcome == "failed" || outcome == "pending") && plan.PelicanConfig.Quality.TriggerOnUpstream5xx && action != "inconclusive" {
 		if err := blockNativeRecoveryRamp(ctx, tx, account.Extra, account.Concurrency); err != nil {
 			return "", err
 		}

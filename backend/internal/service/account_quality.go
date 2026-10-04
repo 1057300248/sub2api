@@ -108,8 +108,44 @@ func validateQualityPolicy(plan *ScheduledTestPlan) error {
 // Transport errors alone are inconclusive, never evidence of degradation.
 // Multi-model rules pass only when every selected model/sample passed.
 // Preserve the legacy single-model transport-error policy for existing rules.
+func qualityModelOutcomes(results []*ScheduledTestResult, targets []string) map[string]string {
+	outcomes := make(map[string]string, len(targets))
+	for _, model := range targets {
+		var samples []*ScheduledTestResult
+		for _, result := range results {
+			if result != nil && result.PelicanConfig != nil && result.PelicanConfig.ModelID == model {
+				samples = append(samples, result)
+			}
+		}
+		if len(samples) > 0 && !qualityRoundHasResults(samples) {
+			outcomes[model] = "skipped"
+		} else {
+			outcomes[model] = qualityRoundOutcome(samples, false)
+		}
+	}
+	return outcomes
+}
+
+func qualityRoundHasResults(results []*ScheduledTestResult) bool {
+	for _, result := range results {
+		if result == nil || result.Status != "skipped" {
+			return true
+		}
+	}
+	return false
+}
+
 func qualityRoundOutcome(results []*ScheduledTestResult, multipleModels bool) string {
-	outcome := qualityOutcome(results)
+	effective := make([]*ScheduledTestResult, 0, len(results))
+	for _, result := range results {
+		if result == nil || result.Status != "skipped" {
+			effective = append(effective, result)
+		}
+	}
+	if len(effective) == 0 {
+		return "inconclusive"
+	}
+	outcome := qualityOutcome(effective)
 	if multipleModels && outcome != "passed" {
 		return "failed"
 	}
@@ -149,14 +185,20 @@ func (s *ScheduledTestService) ListQualityHistory(ctx context.Context, beforeID 
 	// During those writes (or after a failed write), never label a partial round
 	// as passing simply because its first saved sample passed.
 	for _, item := range items {
+		expected := item.TotalCount
 		if cfg := item.PelicanConfig; cfg != nil && len(cfg.ModelIDs) > 1 {
-			expected := len(cfg.ModelIDs) * cfg.ParallelCount
-			if item.TotalCount < expected {
-				item.TotalCount = expected
+			if planned := len(cfg.ModelIDs) * cfg.ParallelCount; planned > expected {
+				expected = planned
 			}
-			if item.PassedCount < item.TotalCount {
-				item.Status = "failed"
-			}
+		}
+		item.TotalCount = expected - item.SkippedCount
+		if item.TotalCount <= 0 {
+			item.TotalCount = 0
+			item.Status = "skipped"
+		} else if item.PassedCount == item.TotalCount {
+			item.Status = "success"
+		} else {
+			item.Status = "failed"
 		}
 	}
 	page := &QualityHistoryPage{Items: items}

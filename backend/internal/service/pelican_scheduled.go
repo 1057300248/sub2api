@@ -148,7 +148,7 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	if plan.TriggerSource == quality5xxSource && plan.PelicanConfig.Quality != nil &&
 		plan.PelicanConfig.Quality.Action == QualityActionRemoveModel && plan.Quality5xxEpisode == 0 && applyTriggeredQuality {
 		preCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
-		preAction, preErr := s.planRepo.ApplyQualityOutcome(preCtx, plan, until, "failed")
+		preAction, preErr := s.planRepo.ApplyQualityOutcome(preCtx, plan, until, "pending")
 		stop()
 		if preErr != nil || preAction == "stale_run" || preAction == "account_deleted" {
 			return false
@@ -173,6 +173,12 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		jobs <- i
 	}
 	close(jobs)
+	var unsupported sync.Map
+	var allowed []string
+	var catalogErr error
+	if plan.PelicanConfig.Quality != nil {
+		allowed, _, catalogErr = s.scheduledSvc.supportedQualityModels(runCtx, plan)
+	}
 	var wg sync.WaitGroup
 	workers := len(results)
 	if workers > 8 {
@@ -188,7 +194,29 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 				samplePlan.ModelID = models[index%len(models)]
 				cfg.ModelID = samplePlan.ModelID
 				samplePlan.PelicanConfig = &cfg
-				results[index] = s.runPelicanSample(runCtx, &samplePlan)
+				_, excluded := unsupported.Load(samplePlan.ModelID)
+				if plan.PelicanConfig.Quality != nil && (catalogErr != nil || excluded || !containsString(allowed, samplePlan.ModelID)) {
+					reason := "model_unsupported"
+					if catalogErr != nil {
+						reason = "model_catalog_unavailable"
+					}
+					results[index] = &ScheduledTestResult{Status: "skipped", ErrorMessage: reason, StartedAt: time.Now(), FinishedAt: time.Now(), PelicanConfig: &cfg}
+					continue
+				}
+				result := s.runPelicanSample(runCtx, &samplePlan)
+				if plan.PelicanConfig.Quality != nil && qualityModelUnsupported(result.ErrorMessage) {
+					unsupported.Store(samplePlan.ModelID, true)
+					persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(runCtx), 3*time.Second)
+					persistErr := s.scheduledSvc.rememberUnsupportedQualityModel(persistCtx, plan.AccountID, samplePlan.ModelID)
+					persistCancel()
+					if persistErr != nil {
+						logger.LegacyPrintf("service.scheduled_test_runner", "quality model exclusion could not be saved: account=%d", plan.AccountID)
+					}
+					result.Status = "skipped"
+					result.ErrorMessage = "model_unsupported"
+					result.QualityJudgment = nil
+				}
+				results[index] = result
 			}
 		}()
 	}
@@ -196,6 +224,9 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	// Persist timeout failures with a fresh context even after the request deadline.
 	saveCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 	defer stop()
+	if plan.PelicanConfig.Quality != nil && plan.PelicanConfig.Quality.Action == QualityActionRemoveModel {
+		plan.QualityModelOutcomes = qualityModelOutcomes(results, plan.PelicanConfig.Quality.RemoveModels)
+	}
 	qualityAction := ""
 	if plan.PelicanConfig.Quality != nil {
 		qualityAction = "inconclusive"
@@ -203,7 +234,7 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		if plan.TriggerSource == quality5xxSource && plan.TriggerObservedAt != nil && s.qualityTrigger != nil {
 			freshSignal = s.qualityTrigger.signalIsCurrent(plan.AccountID, *plan.TriggerObservedAt)
 		}
-		if applyTriggeredQuality && freshSignal {
+		if applyTriggeredQuality && freshSignal && qualityRoundHasResults(results) {
 			var actionErr error
 			qualityAction, actionErr = s.planRepo.ApplyQualityOutcome(saveCtx, plan, until, qualityRoundOutcome(results, len(models) > 1))
 			if actionErr != nil {

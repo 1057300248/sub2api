@@ -96,11 +96,11 @@ func (r *scheduledTestPlanRepository) applyImmediateQuality5xx(ctx context.Conte
 	if _, err = tx.ExecContext(ctx, `SELECT set_config('oauth_observation.source','quality_5xx',true),set_config('oauth_observation.rule_id',$1,true),set_config('oauth_observation.outcome','upstream_5xx',true)`, fmt.Sprint(planID)); err != nil {
 		return false, err
 	}
-	action, err := applyQualityModelOutcome(ctx, tx, plan, "failed", status, state)
+	action, err := applyQualityModelOutcome(ctx, tx, plan, "pending", status, state)
 	if err != nil {
 		return false, err
 	}
-	if action != "models_cooled" && action != "model_cooldown_refreshed" {
+	if action != "probe_pending" {
 		return false, nil
 	}
 	// Durable fallback if Redis publication fails; a running lease stays intact.

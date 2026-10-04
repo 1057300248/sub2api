@@ -1,4 +1,10 @@
 export default {
+  "cooldownPerModelHint": "Each model is cooled or restored using its own test verdict. Passing peers stay available; untested or unsupported models receive no new cooldown. A 5xx lowers account concurrency first, then test verdicts determine model cooldowns.",
+
+  "skipped": "Skipped",
+  "modelUnsupportedSkipped": "Unsupported model · skipped",
+  "catalogUnavailable": "Model list unavailable · skipped",
+
   "tooManyModelSamples": "Select up to 50 models and 100 samples per round. Reduce the model count or samples per model.",
   "models": "Models to test",
   "addModel": "Add model",
@@ -133,6 +139,12 @@ export default {
   "queued": "Queued for testing, expected to start within one minute.",
   "deleteConfirm": "Delete this rule and its history? Removed memberships, disabled scheduling or BPS enabled by this rule will not be restored. Resolve them on the Accounts page first.",
   "outcomes": {
+    "models_cooled": "Failed models cooled",
+    "model_cooldown_refreshed": "Model cooldown renewed",
+    "models_partially_restored": "Passing models restored; other models remain cooled",
+    "probe_pending": "Concurrency lowered; model tests pending",
+    "recovery_started": "Models restored; concurrency ramp started",
+
     "observed": "Test result recorded",
     "action_conflict": "Waiting for another rule to restore",
     "no_change": "No account changes",

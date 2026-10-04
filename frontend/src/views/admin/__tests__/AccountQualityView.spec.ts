@@ -643,6 +643,25 @@ describe('quality operations', () => {
     expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.configureJudge')
     wrapper.unmount()
   })
+  it('labels unsupported models as skipped and shows a single-account validation error', async () => {
+    const plan = rules()[0]
+    vi.mocked(listQualityPlans).mockResolvedValue([plan])
+    const skipped = { id: 9, status: 'skipped', error_message: 'model_unsupported', response_text: '', pelican_config: plan.pelican_config }
+    vi.mocked(scheduledTests.listResults).mockResolvedValue([skipped] as any)
+    vi.mocked(scheduledTests.getResult).mockResolvedValue(skipped as any)
+    const wrapper = mountView(); await flushPromises()
+    const vm = wrapper.vm as any
+    await vm.history(vm.plans[0]); await flushPromises()
+    expect(wrapper.get('[data-testid="quality-result-badge"]').text()).toBe('qualityOps.modelUnsupportedSkipped')
+    vm.closeDetails()
+    vm.edit(vm.plans[0]); await flushPromises()
+    vi.mocked(scheduledTests.update).mockRejectedValueOnce({ response: { data: { message: '账号 #1 不支持检测模型：model-A' } } })
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    expect(wrapper.text()).toContain('账号 #1 不支持检测模型：model-A')
+    expect(wrapper.find('#quality-rule-form').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('tags probe rules and labels probe results as full capability, degraded or inconclusive', async () => {
     const probe = { question_kind: 'state_probe', prompt: '', reasoning_effort: 'high', parallel_count: 1, quality: { expected_answer: '', action: 'disable_scheduling', remove_group_ids: [], auto_restore: false } }
     vi.mocked(listQualityPlans).mockResolvedValue([{ id: 1, account_id: 1, account_name: 'Probe account', model_id: 'gpt-6-astra', cron_expression: '*/30 * * * *', enabled: true, max_results: 100, pelican_config: probe }] as any)
