@@ -227,6 +227,9 @@ type AutoConfigConcurrencyState struct {
 	PausedUntil   time.Time  `json:"paused_until"`
 	LastUpgradeAt *time.Time `json:"last_upgrade_at,omitempty"`
 	LastFailureAt *time.Time `json:"last_failure_at,omitempty"`
+	// RecoveryTarget is a quality-rule-owned ceiling. Native success ramping
+	// may advance only up to this captured pre-quarantine value.
+	RecoveryTarget int `json:"recovery_target,omitempty"`
 }
 
 // AdvanceConcurrency is pure. A fresh cycle starts after a rule/manual change.
@@ -235,7 +238,11 @@ func AdvanceConcurrency(state AutoConfigConcurrencyState, current int, c OAuthAu
 		state = AutoConfigConcurrencyState{Revision: c.Revision, Concurrency: current}
 	}
 	state.Required = c.SuccessesPerStep
-	state.Maximum = c.MaxConcurrency
+	maximum := c.MaxConcurrency
+	if state.RecoveryTarget > 0 && state.RecoveryTarget < maximum {
+		maximum = state.RecoveryTarget
+	}
+	state.Maximum = maximum
 	state.Step = c.UpgradeStep
 	if !result.Success {
 		state.Successes = 0
@@ -243,17 +250,20 @@ func AdvanceConcurrency(state AutoConfigConcurrencyState, current int, c OAuthAu
 		state.PausedUntil = now.Add(time.Duration(c.CooldownSeconds) * time.Second)
 		return state, current
 	}
-	if current <= 0 || current >= c.MaxConcurrency || result.StartedAt.Before(state.PausedUntil) {
+	if current <= 0 || current >= maximum || result.StartedAt.Before(state.PausedUntil) {
 		return state, current
 	}
 	state.Successes++
 	if state.Successes >= c.SuccessesPerStep {
-		current = min(current+c.UpgradeStep, c.MaxConcurrency)
+		current = min(current+c.UpgradeStep, maximum)
 		state.Concurrency = current
 		state.Successes = 0
 		state.LastUpgradeAt = &now
 		state.LastFailureAt = nil
 		state.PausedUntil = now.Add(time.Duration(c.CooldownSeconds) * time.Second)
+		if state.RecoveryTarget > 0 && current >= state.RecoveryTarget {
+			state.RecoveryTarget = 0
+		}
 	}
 	return state, current
 }

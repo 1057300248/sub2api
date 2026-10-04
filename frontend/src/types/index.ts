@@ -2580,6 +2580,7 @@ export interface QualityPolicy {
   action: 'remove_groups' | 'remove_models' | 'disable_scheduling' | 'enable_bps' | 'observe_only'
   remove_group_ids: number[]
   remove_models?: string[]
+  recovery_concurrency?: number
   auto_restore: boolean
   bps?: QualityBPSPolicy
 }

@@ -97,6 +97,7 @@ export default {
   "removeGroups": "Remove selected group memberships",
   "removeModels": "Keep scheduling, cool down selected models",
   "removeModelsInput": "Models to cool down (comma separated)",
+  "recoveryConcurrency": "OAuth recovery concurrency cap (default 5)",
   "selectModels": "Enter at least one model",
   "disableScheduling": "Disable account scheduling (keep groups)",
   "autoRestore": "Automatically restore after every probe in a later round passes",

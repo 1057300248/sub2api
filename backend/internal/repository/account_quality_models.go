@@ -54,6 +54,7 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 		first := state.Action == ""
 		if first {
 			state.Action = service.QualityActionRemoveModel
+			state.RecoveryTarget = nil
 			state.ModelRateLimits = map[string]json.RawMessage{}
 			state.ModelApplied = map[string]json.RawMessage{}
 			for _, model := range models {
@@ -85,10 +86,20 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 			state.ModelApplied[key] = raw
 		}
 		account.Extra["model_rate_limits"] = limits
-		if first && account.Type == service.AccountTypeOAuth && account.Concurrency > 5 {
-			previous, applied := account.Concurrency, 5
-			state.PreviousConcurrency, state.AppliedConcurrency = &previous, &applied
-			account.Concurrency = applied
+		if first && account.Type == service.AccountTypeOAuth {
+			cap := state.RecoveryConcurrency
+			if cap <= 0 {
+				cap = 5
+			}
+			if account.Concurrency > cap {
+				previous, applied := account.Concurrency, cap
+				state.PreviousConcurrency, state.AppliedConcurrency = &previous, &applied
+				account.Concurrency = applied
+			} else {
+				// Never raise an account that is already below the configured cap.
+				applied := account.Concurrency
+				state.AppliedConcurrency = &applied
+			}
 		}
 		if first {
 			return "models_cooled", nil
@@ -123,14 +134,27 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 	}
 	if state.PreviousConcurrency != nil && state.AppliedConcurrency != nil {
 		if account.Concurrency == *state.AppliedConcurrency {
-			account.Concurrency = *state.PreviousConcurrency
-			state.PreviousConcurrency, state.AppliedConcurrency = nil, nil
+			if state.NativeRecovery {
+				target := *state.PreviousConcurrency
+				state.RecoveryTarget = &target
+				state.PreviousConcurrency, state.AppliedConcurrency = nil, nil
+			} else {
+				account.Concurrency = *state.PreviousConcurrency
+				state.PreviousConcurrency, state.AppliedConcurrency = nil, nil
+			}
 		} else {
 			conflict = true
 		}
 	}
 	if conflict {
 		return "restore_conflict", nil
+	}
+	if state.RecoveryTarget != nil {
+		// Keep ownership until the native success ramp reaches the captured
+		// pre-quarantine concurrency. The ramp, rather than this probe result,
+		// performs each intermediate upgrade.
+		state.Action = ""
+		return "recovery_started", nil
 	}
 	*state = qualityState{}
 	return "restored", nil
@@ -160,7 +184,8 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 		return "", err
 	}
 	beforeConcurrency := account.Concurrency
-	action, err := transitionQualityModels(account, &state, plan.ID, plan.PelicanConfig.Quality.RemoveModels, schedule.Next(now), outcome, plan.PelicanConfig.Quality.AutoRestore, now)
+	restore := plan.PelicanConfig.Quality.AutoRestore || plan.PelicanConfig.Quality.TriggerOnUpstream5xx
+	action, err := transitionQualityModels(account, &state, plan.ID, plan.PelicanConfig.Quality.RemoveModels, schedule.Next(now), outcome, restore, now)
 	if err != nil {
 		return "", err
 	}
@@ -188,10 +213,50 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 			return "", err
 		}
 	}
-	if state.Action == "" {
+	if outcome == "passed" && action == "recovery_started" && state.RecoveryTarget != nil {
+		if err := armNativeRecoveryRamp(ctx, tx, account.Extra, account.Concurrency, *state.RecoveryTarget); err != nil {
+			return "", err
+		}
+		updated, err = json.Marshal(account.Extra)
+		if err != nil {
+			return "", err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=$2::jsonb,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1`, plan.AccountID, string(updated)); err != nil {
+			return "", err
+		}
+	}
+	if state.Action == "" && state.RecoveryTarget == nil {
 		_, err = tx.ExecContext(ctx, `DELETE FROM account_quality_states WHERE plan_id=$1`, plan.ID)
 	} else {
 		err = qualityUpsertState(ctx, tx, plan.ID, state)
 	}
 	return action, err
+}
+
+// armNativeRecoveryRamp persists the captured ceiling into the existing
+// auto-config JSON state. No schema change is needed and manual edits still
+// invalidate the state through RecordConcurrencyResult's current-value check.
+func armNativeRecoveryRamp(ctx context.Context, tx *sql.Tx, extra map[string]any, current, target int) error {
+	if target <= current {
+		return nil
+	}
+	var raw string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyOAuthAutoConfig).Scan(&raw); err != nil {
+		return nil
+	}
+	c := service.DefaultOAuthAutoConfig()
+	if json.Unmarshal([]byte(raw), &c) != nil || !c.UpgradeEnabled {
+		return nil
+	}
+	max := target
+	if c.MaxConcurrency < max {
+		max = c.MaxConcurrency
+	}
+	state := service.AutoConfigConcurrencyState{Revision: c.Revision, Concurrency: current, Maximum: max, RecoveryTarget: max, PausedUntil: time.Now().UTC().Add(time.Duration(c.CooldownSeconds) * time.Second)}
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	extra[service.AutoConfigConcurrencyExtraKey] = json.RawMessage(encoded)
+	return nil
 }

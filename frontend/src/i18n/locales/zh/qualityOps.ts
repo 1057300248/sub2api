@@ -97,6 +97,7 @@ export default {
   "removeGroups": "移出指定分组（取消账户的分组勾选）",
   "removeModels": "保持调度，仅冷却指定模型",
   "removeModelsInput": "要冷却的模型（逗号分隔）",
+  "recoveryConcurrency": "OAuth 恢复并发上限（默认 5）",
   "selectModels": "请填写至少一个模型",
   "disableScheduling": "关闭账户调度（保留分组）",
   "autoRestore": "后续整轮测试通过时自动恢复",

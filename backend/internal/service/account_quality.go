@@ -12,13 +12,16 @@ const QualityActionRemoveModel = "remove_models"
 // QualityPolicy is opt-in. Legacy connectivity/HTML tests never modify membership.
 type QualityPolicy struct {
 	TriggerOnUpstream5xx bool                `json:"trigger_on_upstream_5xx"`
-	Judge          *QualityJudgeConfig `json:"judge,omitempty"`
-	ExpectedAnswer string              `json:"expected_answer"`
-	Action         string              `json:"action"`
-	RemoveGroupIDs []int64             `json:"remove_group_ids"`
-	RemoveModels   []string            `json:"remove_models,omitempty"`
-	AutoRestore    bool                `json:"auto_restore"`
-	BPS            *QualityBPSPolicy   `json:"bps,omitempty"`
+	Judge                *QualityJudgeConfig `json:"judge,omitempty"`
+	ExpectedAnswer       string              `json:"expected_answer"`
+	Action               string              `json:"action"`
+	RemoveGroupIDs       []int64             `json:"remove_group_ids"`
+	RemoveModels         []string            `json:"remove_models,omitempty"`
+	// RecoveryConcurrency is the temporary OAuth concurrency cap applied when
+	// this rule quarantines an account. Zero keeps the safe default of five.
+	RecoveryConcurrency int               `json:"recovery_concurrency,omitempty"`
+	AutoRestore         bool              `json:"auto_restore"`
+	BPS                 *QualityBPSPolicy `json:"bps,omitempty"`
 }
 
 func validateQualityPolicy(plan *ScheduledTestPlan) error {
@@ -81,6 +84,9 @@ func validateQualityPolicy(plan *ScheduledTestPlan) error {
 		q.RemoveGroupIDs = nil
 	} else {
 		q.RemoveModels = nil
+	}
+	if q.RecoveryConcurrency < 0 || q.RecoveryConcurrency > 10000 {
+		return fmt.Errorf("recovery concurrency must be 0-10000")
 	}
 	if q.Action == "remove_groups" && len(q.RemoveGroupIDs) == 0 {
 		return fmt.Errorf("select at least one group to remove")

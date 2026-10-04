@@ -61,6 +61,9 @@ type qualityState struct {
 	ModelApplied        map[string]json.RawMessage `json:"model_applied,omitempty"`
 	PreviousConcurrency *int                       `json:"previous_concurrency,omitempty"`
 	AppliedConcurrency  *int                       `json:"applied_concurrency,omitempty"`
+	RecoveryConcurrency int                        `json:"recovery_concurrency,omitempty"`
+	RecoveryTarget      *int                       `json:"recovery_target,omitempty"`
+	NativeRecovery      bool                       `json:"native_recovery,omitempty"`
 }
 
 // Lease/version checks, account mutation, ownership and scheduler invalidation
@@ -131,6 +134,10 @@ func (r *scheduledTestPlanRepository) ApplyQualityOutcome(ctx context.Context, p
 	}
 	// 已被本规则开过 BPS 的账号即便规则后来改了动作，也由 BPS 分支负责恢复。
 	if state.Action == service.QualityActionRemoveModel || (state.Action == "" && q.Action == service.QualityActionRemoveModel) {
+		if state.RecoveryConcurrency <= 0 {
+			state.RecoveryConcurrency = q.RecoveryConcurrency
+		}
+		state.NativeRecovery = q.TriggerOnUpstream5xx
 		action, err := applyQualityModelOutcome(ctx, tx, plan, outcome, status, state)
 		if err != nil {
 			return "", err
