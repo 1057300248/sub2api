@@ -117,7 +117,7 @@ func qualityModelOutcomes(results []*ScheduledTestResult, targets []string) map[
 				samples = append(samples, result)
 			}
 		}
-		if len(samples) > 0 && !qualityRoundHasResults(samples) {
+		if len(samples) == 0 || !qualityRoundHasResults(samples) {
 			outcomes[model] = "skipped"
 		} else {
 			outcomes[model] = qualityRoundOutcome(samples, false)

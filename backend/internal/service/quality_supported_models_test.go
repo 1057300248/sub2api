@@ -152,7 +152,7 @@ func TestQualityModelVerdictsDoNotSpreadToHealthyOrUntestedPeers(t *testing.T) {
 		{Status: "failed", ErrorMessage: "answer_mismatch", PelicanConfig: &PelicanTestConfig{ModelID: "gpt-6-astra"}, QualityJudgment: &QualityJudgment{Verdict: "incorrect"}},
 		{Status: "success", PelicanConfig: &PelicanTestConfig{ModelID: "gpt-6.1-sol"}, QualityJudgment: &QualityJudgment{Verdict: "correct"}},
 	}
-	require.Equal(t, map[string]string{"gpt-6-astra": "failed", "gpt-6.1-sol": "passed", "missing": "inconclusive"}, qualityModelOutcomes(results, []string{"gpt-6-astra", "gpt-6.1-sol", "missing"}))
+	require.Equal(t, map[string]string{"gpt-6-astra": "failed", "gpt-6.1-sol": "passed", "missing": "skipped"}, qualityModelOutcomes(results, []string{"gpt-6-astra", "gpt-6.1-sol", "missing"}))
 	results[0], results[1] = results[1], results[0]
 	require.Equal(t, "passed", qualityModelOutcomes(results, []string{"gpt-6.1-sol"})["gpt-6.1-sol"])
 }

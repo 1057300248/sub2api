@@ -126,3 +126,65 @@ func TestQualityPassingModelDoesNotUnlockRampWithUnknownPeer(t *testing.T) {
 	require.Equal(t, 4, a.Concurrency)
 	require.Equal(t, 20, *state.PreviousConcurrency)
 }
+
+func TestQualityModelRecoveryAfterExpiredEntriesWereCleared(t *testing.T) {
+	for _, outcome := range []string{"passed", "failed", "inconclusive"} {
+		t.Run(outcome, func(t *testing.T) {
+			now := time.Now().UTC().Truncate(time.Second)
+			a := &service.Account{Type: service.AccountTypeAPIKey, Concurrency: 15, Extra: map[string]any{}}
+			state := qualityState{}
+			_, err := transitionQualityModels(a, &state, 7, []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-6.1-sol"}, now.Add(-time.Minute), "failed", true, now.Add(-time.Hour))
+			require.NoError(t, err)
+			delete(a.Extra, "model_rate_limits")
+			action, err := transitionQualityModels(a, &state, 7, []string{"gpt-6-astra"}, now.Add(time.Hour), outcome, true, now)
+			require.NoError(t, err)
+			switch outcome {
+			case "passed":
+				require.Equal(t, "restored", action)
+				require.Empty(t, state.Action)
+			case "failed":
+				require.Equal(t, "model_cooldown_refreshed", action)
+				require.Len(t, state.ModelRateLimits, 1)
+				require.Contains(t, state.ModelRateLimits, "gpt-6-astra")
+			case "inconclusive":
+				require.Equal(t, "inconclusive", action)
+				require.Empty(t, state.ModelRateLimits)
+				require.NotContains(t, a.Extra, "model_rate_limits")
+			}
+			require.Equal(t, 15, a.Concurrency)
+		})
+	}
+}
+
+func TestQualityModelRecoveryRemovesOnlyExpiredOwnedEntries(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	a := &service.Account{Type: service.AccountTypeAPIKey, Extra: map[string]any{}}
+	state := qualityState{}
+	_, err := transitionQualityModels(a, &state, 7, []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-6.1-sol"}, now.Add(-time.Minute), "failed", true, now.Add(-time.Hour))
+	require.NoError(t, err)
+	limits := a.Extra["model_rate_limits"].(map[string]any)
+	manual := map[string]any{"reason": "upstream_429", "rate_limit_reset_at": now.Add(time.Hour).Format(time.RFC3339)}
+	limits["gpt-5.6-sol"] = manual
+	action, err := transitionQualityModels(a, &state, 7, []string{"gpt-6-astra"}, now.Add(time.Hour), "passed", true, now)
+	require.NoError(t, err)
+	require.NotEqual(t, "restore_conflict", action)
+	require.NotContains(t, state.ModelRateLimits, "gpt-6-astra")
+	require.Contains(t, state.ModelRateLimits, "gpt-5.6-sol")
+	require.NotContains(t, state.ModelRateLimits, "gpt-6.1-sol")
+	require.Equal(t, manual, limits["gpt-5.6-sol"])
+	require.NotContains(t, limits, "gpt-6-astra")
+	require.NotContains(t, limits, "gpt-6.1-sol")
+}
+
+func TestQualityModelActiveEntryDeletionStillConflicts(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	a := &service.Account{Type: service.AccountTypeAPIKey, Extra: map[string]any{}}
+	state := qualityState{}
+	_, err := transitionQualityModels(a, &state, 7, []string{"gpt-6-astra"}, now.Add(time.Hour), "failed", true, now)
+	require.NoError(t, err)
+	delete(a.Extra, "model_rate_limits")
+	action, err := transitionQualityModels(a, &state, 7, []string{"gpt-6-astra"}, now.Add(time.Hour), "passed", true, now)
+	require.NoError(t, err)
+	require.Equal(t, "restore_conflict", action)
+	require.Contains(t, state.ModelRateLimits, "gpt-6-astra")
+}

@@ -107,3 +107,45 @@ func TestQualitySkippedRoundHistoryCountsOnlyTestedModels(t *testing.T) {
 	require.Equal(t, 1, page.Items[0].SkippedCount)
 	require.Equal(t, "success", page.Items[0].Status)
 }
+
+func TestQualityLegacyModelOwnershipDoesNotBlockCurrentRound(t *testing.T) {
+	for _, peerVerdict := range []string{"passed", "skipped", "failed"} {
+		t.Run(peerVerdict, func(t *testing.T) {
+			f := newQualityBPSFixture(t, `{"unrelated":"kept"}`, &service.QualityPolicy{Action: service.QualityActionRemoveModel, RemoveModels: []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-6.1-sol"}, AutoRestore: true})
+			f.exec(`UPDATE accounts SET type='apikey',concurrency=15 WHERE id=$1`)
+			require.Equal(t, "models_cooled", f.apply("failed"))
+			var raw []byte
+			require.NoError(t, integrationDB.QueryRow(`SELECT state FROM account_quality_states WHERE plan_id=$1`, f.plan.ID).Scan(&raw))
+			var state qualityState
+			require.NoError(t, json.Unmarshal(raw, &state))
+			for model := range state.ModelApplied {
+				state.ModelApplied[model] = json.RawMessage(`{"reason":"quality_rule:old","rate_limit_reset_at":"2026-01-01T00:00:00Z"}`)
+			}
+			raw, err := json.Marshal(state)
+			require.NoError(t, err)
+			_, err = integrationDB.Exec(`UPDATE account_quality_states SET state=$2::jsonb WHERE plan_id=$1`, f.plan.ID, string(raw))
+			require.NoError(t, err)
+			f.exec(`UPDATE accounts SET extra=extra-'model_rate_limits' WHERE id=$1`)
+			f.plan.QualityModelOutcomes = map[string]string{"gpt-6-astra": "passed", "gpt-5.6-sol": "skipped", "gpt-6.1-sol": peerVerdict}
+			outcome := "passed"
+			if peerVerdict == "failed" {
+				outcome = "failed"
+			}
+			action := f.apply(outcome)
+			require.NotContains(t, action, "conflict")
+			extra := f.extra()
+			require.Equal(t, "kept", extra["unrelated"])
+			if peerVerdict == "failed" {
+				limits := extra["model_rate_limits"].(map[string]any)
+				require.Len(t, limits, 1)
+				require.Contains(t, limits, "gpt-6.1-sol")
+			} else {
+				require.Equal(t, "restored", action)
+				require.NotContains(t, extra, "model_rate_limits")
+				var n int
+				require.NoError(t, integrationDB.QueryRow(`SELECT count(*) FROM account_quality_states WHERE plan_id=$1`, f.plan.ID).Scan(&n))
+				require.Zero(t, n)
+			}
+		})
+	}
+}

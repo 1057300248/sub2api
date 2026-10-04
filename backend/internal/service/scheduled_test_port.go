@@ -7,7 +7,10 @@ import (
 
 // PelicanTestConfig stores intelligence test inputs; a missing kind preserves legacy HTML plans.
 type PelicanTestConfig struct {
-	TriggerSource string `json:"trigger_source,omitempty"`
+	// Filled only on saved result snapshots, never used to configure a rule.
+	QualityModelOutcomes map[string]string `json:"quality_model_outcomes,omitempty"`
+	QualityModelActions  map[string]string `json:"quality_model_actions,omitempty"`
+	TriggerSource        string            `json:"trigger_source,omitempty"`
 	// BPSRecoveryPending is filled from persisted ownership when the runner
 	// claims a plan. It is never accepted from or written to configuration JSON.
 	BPSRecoveryPending bool           `json:"-"`
@@ -25,6 +28,7 @@ type PelicanTestConfig struct {
 
 // ScheduledTestPlan represents a scheduled test plan domain model.
 type ScheduledTestPlan struct {
+	QualityModelActions  map[string]string  `json:"-"`
 	QualityModelOutcomes map[string]string  `json:"-"`
 	Quality5xxEpisode    int64              `json:"-"`
 	TriggerSource        string             `json:"-"`

@@ -108,6 +108,8 @@ func computeNextRun(cronExpr string, from time.Time) (time.Time, error) {
 
 func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
 	if cfg := plan.PelicanConfig; cfg != nil {
+		cfg.QualityModelOutcomes = nil
+		cfg.QualityModelActions = nil
 		if cfg.TestChannel != "" && cfg.TestChannel != "account" && cfg.TestChannel != "bps" {
 			return time.Time{}, fmt.Errorf("invalid test channel")
 		}

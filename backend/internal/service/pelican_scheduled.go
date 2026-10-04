@@ -248,6 +248,13 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		result.QualityAction = qualityAction
 		if plan.PelicanConfig.Quality != nil {
 			result.QualityRoundID = until.Format(time.RFC3339Nano)
+			result.PelicanConfig.QualityModelOutcomes = plan.QualityModelOutcomes
+			// A rejected transaction must never advertise uncommitted changes.
+			if qualityAction != "action_error" && qualityAction != "action_conflict" && qualityAction != "restore_conflict" && qualityAction != "stale_run" {
+				result.PelicanConfig.QualityModelActions = plan.QualityModelActions
+			} else {
+				result.PelicanConfig.QualityModelActions = nil
+			}
 		}
 		if result.Status == "success" {
 			succeeded = true

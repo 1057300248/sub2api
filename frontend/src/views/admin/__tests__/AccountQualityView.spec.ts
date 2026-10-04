@@ -643,8 +643,10 @@ describe('quality operations', () => {
     expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.configureJudge')
     wrapper.unmount()
   })
-  it('labels unsupported models as skipped and shows a single-account validation error', async () => {
+  it.each(['state_probe', 'candy'] as const)('shows unsupported %s models as neutral skips without a fabricated answer', async kind => {
     const plan = rules()[0]
+    plan.pelican_config!.question_kind = kind
+    if (kind === 'candy') plan.pelican_config!.quality!.judge = { group_id: 21, model_id: 'test-judge', prompt: 'Compare answers' }
     vi.mocked(listQualityPlans).mockResolvedValue([plan])
     const skipped = { id: 9, status: 'skipped', error_message: 'model_unsupported', response_text: '', pelican_config: plan.pelican_config }
     vi.mocked(scheduledTests.listResults).mockResolvedValue([skipped] as any)
@@ -653,12 +655,53 @@ describe('quality operations', () => {
     const vm = wrapper.vm as any
     await vm.history(vm.plans[0]); await flushPromises()
     expect(wrapper.get('[data-testid="quality-result-badge"]').text()).toBe('qualityOps.modelUnsupportedSkipped')
+    expect(wrapper.get('[data-testid="quality-result-badge"]').classes()).toContain('tone-neutral')
+    expect(wrapper.get('.result-navigation button span:last-child').classes()).not.toContain('text-rose-600')
+    expect(wrapper.get('.response-content').text()).not.toContain('model_unsupported')
+    expect(wrapper.find('.answer-reference').exists()).toBe(false)
     vm.closeDetails()
     vm.edit(vm.plans[0]); await flushPromises()
     vi.mocked(scheduledTests.update).mockRejectedValueOnce({ response: { data: { message: '账号 #1 不支持检测模型：model-A' } } })
     await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
     expect(wrapper.text()).toContain('账号 #1 不支持检测模型：model-A')
     expect(wrapper.find('#quality-rule-form').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('distinguishes actual model cooldowns from configured targets in a round', async () => {
+    const plan = rules()[0]
+    const cfg = { ...plan.pelican_config!, model_ids: ['gpt-6-astra', 'gpt-6.1-sol'],
+      quality: { ...plan.pelican_config!.quality!, action: 'remove_models', remove_models: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-6.1-sol'] },
+      quality_model_outcomes: { 'gpt-6-astra': 'passed', 'gpt-6.1-sol': 'failed', 'gpt-5.6-sol': 'skipped' },
+      quality_model_actions: { 'gpt-6-astra': 'passed', 'gpt-6.1-sol': 'models_cooled' } }
+    const op = { id: 11, plan_id: plan.id, account_id: 1, account_name: 'Account 1', passed_count: 1, total_count: 2,
+      status: 'failed', quality_action: 'models_cooled', result_ids: [], pelican_config: cfg }
+    vi.mocked(listQualityPlans).mockResolvedValue([plan])
+    vi.mocked(listQualityOperations).mockResolvedValue({ items: [op as any], next_cursor: 0 })
+    const wrapper = mountView(); await flushPromises()
+    await (wrapper.vm as any).operationDetails(op); await flushPromises()
+    const rows = wrapper.findAll('[data-testid="quality-model-summary"] tbody tr')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('gpt-6-astra')
+    expect(rows[0].text()).toContain('qualityOps.noNewCooldown')
+    expect(rows[1].text()).toContain('gpt-6.1-sol')
+    expect(rows[1].text()).toContain('qualityOps.cooldownApplied')
+    expect(wrapper.get('.detail-policy dt').text()).toBe('qualityOps.cooldownTargets')
+    wrapper.unmount()
+  })
+
+  it('shows an uncertain action result without claiming an old record or successful cooldown', async () => {
+    const cfg = { ...rules()[0].pelican_config!, model_ids: ['gpt-6-astra'],
+      quality: { ...rules()[0].pelican_config!.quality!, action: 'remove_models', remove_models: ['gpt-6-astra'] },
+      quality_model_outcomes: { 'gpt-6-astra': 'failed' } }
+    const op = { id: 12, plan_id: 1, account_id: 1, account_name: 'Account 1', passed_count: 0, total_count: 1,
+      status: 'failed', quality_action: 'action_error', result_ids: [], pelican_config: cfg }
+    const wrapper = mountView(); await flushPromises()
+    await (wrapper.vm as any).operationDetails(op); await flushPromises()
+    const summary = wrapper.get('[data-testid="quality-model-summary"]').text()
+    expect(summary).toContain('qualityOps.cooldownUnconfirmed')
+    expect(summary).not.toContain('qualityOps.cooldownNotRecorded')
+    expect(summary).not.toContain('qualityOps.cooldownApplied')
     wrapper.unmount()
   })
 

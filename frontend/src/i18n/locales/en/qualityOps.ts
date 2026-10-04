@@ -3,6 +3,18 @@ export default {
 
   "skipped": "Skipped",
   "modelUnsupportedSkipped": "Unsupported model · skipped",
+  "skippedCount": "{n} skipped",
+  "skipReason": "Reason for skipping",
+  "unsupportedSkipHelp": "This account does not currently support this model. It was not tested and skipping did not add a cooldown.",
+  "catalogSkipHelp": "The account's available model list could not be read. No test was run; the rule will try again on its next run.",
+  "roundModelAction": "Model actions this round",
+  "newCooldown": "Cooldown added this round",
+  "noNewCooldown": "None",
+  "cooldownApplied": "Applied / renewed",
+  "cooldownNotRecorded": "Not available in older records",
+  "cooldownUnconfirmed": "Action result unconfirmed",
+  "cooldownTargets": "Models eligible for cooldown",
+  "cooldownTargetsHint": "Only models with adverse test results are cooled. Untested and skipped models receive no new cooldown.",
   "catalogUnavailable": "Model list unavailable · skipped",
 
   "tooManyModelSamples": "Select up to 50 models and 100 samples per round. Reduce the model count or samples per model.",
@@ -141,12 +153,12 @@ export default {
   "outcomes": {
     "models_cooled": "Failed models cooled",
     "model_cooldown_refreshed": "Model cooldown renewed",
-    "models_partially_restored": "Passing models restored; other models remain cooled",
+    "models_partially_restored": "Some models restored",
     "probe_pending": "Concurrency lowered; model tests pending",
     "recovery_started": "Models restored; concurrency ramp started",
 
     "observed": "Test result recorded",
-    "action_conflict": "Waiting for another rule to restore",
+    "action_conflict": "Account state conflict; no action applied",
     "no_change": "No account changes",
     "inconclusive": "Testing or grading inconclusive; no action",
     "already_quarantined": "Still quarantined",
@@ -260,7 +272,7 @@ export default {
   "disableSchedulingShort": "Disable scheduling, keep groups",
   "actionHelp": {
     "observed": "This round only recorded the answer and grading result. Account settings, BPS, groups and scheduling were not changed.",
-    "action_conflict": "Another rule changed action types but still owns a pending restoration in this scope. Restore or resolve that rule first; this round did not overwrite its settings.",
+    "action_conflict": "The account state differs from this rule's saved action record, or another rule still owns this action scope. Existing settings were preserved. Check the account state and related rules in account management.",
     "no_change": "This round did not modify the account.",
     "inconclusive": "The request or grading was inconclusive. No account action was taken.",
     "already_quarantined": "This rule had already isolated the account. No additional membership or scheduling change was made.",

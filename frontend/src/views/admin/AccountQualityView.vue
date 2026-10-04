@@ -60,7 +60,7 @@
               <tr v-for="operation in filteredOperations" :key="operation.id" :class="{ 'selected-row': detailOperation?.id === operation.id && !!historyPlan }" :data-operation-id="operation.id">
                 <td class="time-cell" :data-label="t('qualityOps.time')"><strong>{{ clock(operation.started_at) }}</strong><span>{{ day(operation.started_at) }}</span></td>
                 <td class="account-cell"><button :title="operation.account_name" @click="store.selectedPlanId = operation.plan_id"><strong>{{ operation.account_name || `#${operation.account_id}` }}</strong></button><span>{{ t('qualityOps.rule') }} {{ operation.plan_id }}<span class="mx-1">·</span>#{{ operation.account_id }}</span></td>
-                <td :data-label="t('qualityOps.testResult')"><span class="test-count" :class="allPassed(operation) ? 'test-passed' : 'test-other'"><Icon :name="allPassed(operation) ? 'checkCircle' : 'exclamationCircle'" size="xs" />{{ operation.passed_count }} / {{ operation.total_count }}</span><span class="cell-secondary">{{ t(operation.status === 'skipped' ? 'qualityOps.skipped' : allPassed(operation) ? 'qualityOps.roundPassed' : 'qualityOps.roundNotPassed') }}</span></td>
+                <td :data-label="t('qualityOps.testResult')"><span class="test-count" :class="allPassed(operation) ? 'test-passed' : 'test-other'"><Icon :name="allPassed(operation) ? 'checkCircle' : 'exclamationCircle'" size="xs" />{{ operation.passed_count }} / {{ operation.total_count }}</span><span class="cell-secondary">{{ t(operation.status === 'skipped' ? 'qualityOps.skipped' : allPassed(operation) ? 'qualityOps.roundPassed' : 'qualityOps.roundNotPassed') }}<template v-if="operation.skipped_count"> · {{ t('qualityOps.skippedCount', { n: operation.skipped_count }) }}</template></span></td>
                 <td class="action-cell" :data-label="t('qualityOps.accountAction')"><button class="outcome-badge" :class="tone(operation.quality_action)" @click="operationDetails(operation)"><span />{{ operationLabel(operation) }}</button><span class="cell-secondary" :title="operationGroups(operation)">{{ operationGroups(operation) }}</span></td>
                 <td class="detail-cell"><button class="detail-button" :aria-label="t('qualityOps.openRound', { account: operation.account_name, time: date(operation.started_at) })" @click="operationDetails(operation)"><span>{{ t('qualityOps.details') }}</span><Icon name="arrowRight" size="sm" /></button></td>
               </tr>
@@ -169,11 +169,15 @@
     <BaseDialog :show="!!historyPlan" :title="detailOperation ? t('qualityOps.roundDetail') : t('qualityOps.history')" placement="right" width="extra-wide" close-on-click-outside @close="closeDetails">
       <template v-if="historyPlan">
         <div class="detail-heading"><span class="account-avatar">{{ detailAccountName.slice(0, 1) }}</span><div><h3>{{ detailAccountName }}</h3><p>{{ t('qualityOps.rule') }} {{ historyPlan.id }}<span class="mx-2">·</span>{{ detailOperation ? date(detailOperation.started_at) : t('qualityOps.historyHelp') }}</p></div><a class="account-management-link" href="/admin/accounts">{{ t('qualityOps.manageAccount') }}<Icon name="externalLink" size="xs" /></a></div>
-        <div v-if="detailOperation" class="round-overview"><div><span>{{ t('qualityOps.testResult') }}</span><strong :class="allPassed(detailOperation) ? 'text-emerald-600' : 'text-rose-600'">{{ detailOperation.passed_count }} / {{ detailOperation.total_count }} {{ t('qualityOps.passed') }}</strong></div><div><span>{{ t('qualityOps.accountAction') }}</span><strong>{{ operationLabel(detailOperation) }}</strong></div></div>
+        <div v-if="detailOperation" class="round-overview"><div><span>{{ t('qualityOps.testResult') }}</span><strong :class="allPassed(detailOperation) ? 'text-emerald-600' : 'text-rose-600'">{{ detailOperation.passed_count }} / {{ detailOperation.total_count }} {{ t('qualityOps.passed') }}</strong><span v-if="detailOperation.skipped_count">{{ t('qualityOps.skippedCount', { n: detailOperation.skipped_count }) }}</span></div><div><span>{{ t('qualityOps.accountAction') }}</span><strong>{{ operationLabel(detailOperation) }}</strong></div></div>
         <aside v-if="detailAction === 'restore_conflict'" class="conflict-explanation" role="note"><Icon name="exclamationTriangle" size="md" /><div v-if="detailBPS"><h4>{{ t('qualityOps.conflictTitle') }}</h4><p>{{ t('qualityOps.bpsConflictExplanation') }}</p><details class="conflict-causes"><summary>{{ t('qualityOps.conflictChecks') }}</summary><ul><li>{{ t('qualityOps.bpsConflictOptions') }}</li><li>{{ t('qualityOps.bpsConflict403') }}</li><li>{{ t('qualityOps.bpsConflictAvailability') }}</li></ul></details><p class="conflict-limit">{{ t('qualityOps.conflictUnknown') }}</p><strong>{{ t('qualityOps.bpsConflictNextStep') }}</strong></div>
           <div v-else><h4>{{ t('qualityOps.conflictTitle') }}</h4><p>{{ t('qualityOps.conflictExplanation') }}</p><details class="conflict-causes"><summary>{{ t('qualityOps.conflictChecks') }}</summary><ul><li>{{ t('qualityOps.conflictAccount') }}</li><li>{{ t('qualityOps.conflictMembership') }}</li><li>{{ t('qualityOps.conflictAvailability') }}</li></ul></details><p class="conflict-limit">{{ t('qualityOps.conflictUnknown') }}</p><strong>{{ t('qualityOps.conflictNextStep') }}</strong></div></aside>
         <div v-else-if="detailAction" class="action-explanation"><Icon name="infoCircle" size="sm" /><p>{{ actionExplanation(detailAction) }}</p></div>
-        <dl v-if="detailOperation?.pelican_config?.quality" class="detail-policy"><div><dt>{{ t(detailBPS ? 'qualityOps.ruleAction' : 'qualityOps.targetGroups') }}</dt><dd>{{ operationGroups(detailOperation) }}</dd></div><div><dt>{{ t(detailBPS ? 'qualityOps.bpsAutoDisableShort' : 'qualityOps.autoRestoreShort') }}</dt><dd>{{ t(detailOperation.pelican_config.quality.auto_restore ? 'qualityOps.on' : 'qualityOps.off') }}</dd></div></dl>
+        <section v-if="detailModelCooldown" class="model-summary">
+          <h4>{{ t('qualityOps.roundModelAction') }}</h4>
+          <table data-testid="quality-model-summary"><thead><tr><th>{{ t('qualityOps.model') }}</th><th>{{ t('qualityOps.testResult') }}</th><th>{{ t('qualityOps.newCooldown') }}</th></tr></thead><tbody><tr v-for="model in detailTestModels" :key="model"><td><code>{{ model }}</code></td><td>{{ modelVerdictLabel(model) }}</td><td>{{ modelCooldownLabel(model) }}</td></tr></tbody></table>
+        </section>
+        <dl v-if="detailOperation?.pelican_config?.quality" class="detail-policy"><div><dt>{{ t(detailModelCooldown ? 'qualityOps.cooldownTargets' : detailBPS ? 'qualityOps.ruleAction' : 'qualityOps.targetGroups') }}</dt><dd>{{ detailModelCooldown ? detailOperation.pelican_config.quality.remove_models?.join(' / ') : operationGroups(detailOperation) }}<p v-if="detailModelCooldown">{{ t('qualityOps.cooldownTargetsHint') }}</p></dd></div><div><dt>{{ t(detailBPS ? 'qualityOps.bpsAutoDisableShort' : 'qualityOps.autoRestoreShort') }}</dt><dd>{{ t(detailOperation.pelican_config.quality.auto_restore ? 'qualityOps.on' : 'qualityOps.off') }}</dd></div></dl>
         <div v-if="detailsError" class="panel-error" role="alert">{{ detailsError }}<button @click="retryDetails">{{ t('qualityOps.retry') }}</button></div>
         <div v-if="detailsLoading" class="detail-loading" role="status"><span class="cell-skeleton" /><span class="cell-skeleton" />{{ t('qualityOps.loading') }}</div>
         <div v-else class="detail-grid">
@@ -181,9 +185,9 @@
           <section class="answer-detail" :aria-busy="answerLoading">
             <div v-if="answerLoading" class="detail-loading" role="status"><span class="cell-skeleton" /><span class="cell-skeleton" />{{ t('qualityOps.loadingAnswer') }}</div>
             <template v-else-if="selectedResult"><header class="answer-heading"><h4>{{ t(isProbeResult(selectedResult) ? 'qualityOps.probeVerdictTitle' : 'qualityOps.answerAndVerdict') }}</h4><span class="outcome-badge" :class="resultTone(selectedResult)" data-testid="quality-result-badge">{{ resultLabel(selectedResult) }}</span></header>
-              <div v-if="!isProbeResult(selectedResult)" class="answer-reference"><span>{{ t('qualityOps.answer') }}</span><p>{{ selectedResult.pelican_config?.quality?.expected_answer || detailOperation?.pelican_config?.quality?.expected_answer || '—' }}</p></div>
-              <div class="response-heading">{{ t(isProbeResult(selectedResult) ? 'qualityOps.probeDetail' : 'qualityOps.actualAnswer') }}<span v-if="selectedResult.latency_ms">{{ (selectedResult.latency_ms / 1000).toFixed(1) }}s</span></div>
-              <pre class="response-content">{{ selectedResult.response_text || selectedResult.error_message || t('qualityOps.noAnswer') }}</pre>
+              <div v-if="selectedResult.status !== 'skipped' && !isProbeResult(selectedResult)" class="answer-reference"><span>{{ t('qualityOps.answer') }}</span><p>{{ selectedResult.pelican_config?.quality?.expected_answer || detailOperation?.pelican_config?.quality?.expected_answer || '—' }}</p></div>
+              <div class="response-heading">{{ t(selectedResult.status === 'skipped' ? 'qualityOps.skipReason' : isProbeResult(selectedResult) ? 'qualityOps.probeDetail' : 'qualityOps.actualAnswer') }}<span v-if="selectedResult.latency_ms">{{ (selectedResult.latency_ms / 1000).toFixed(1) }}s</span></div>
+              <pre class="response-content">{{ resultContent(selectedResult) }}</pre>
               <div v-if="selectedResult.quality_judgment && !isProbeResult(selectedResult)" class="judge-reason"><h5>{{ t('qualityOps.judgeReason') }}</h5><p>{{ selectedResult.quality_judgment.reason || '—' }}</p><span>{{ selectedResult.quality_judgment.model_id || '—' }} · {{ groupNames[selectedResult.quality_judgment.group_id || 0] || selectedResult.quality_judgment.group_id || '—' }}</span></div>
             </template><div v-else-if="!detailsError" class="panel-empty">{{ t('qualityOps.noResults') }}</div>
           </section>
@@ -354,6 +358,26 @@ const operationIndex = computed(() => filteredOperations.value.findIndex(op => o
 const detailAccountName = computed(() => detailOperation.value?.account_name || (historyPlan.value ? name(historyPlan.value) : ''))
 const detailAction = computed(() => detailOperation.value?.quality_action || selectedResult.value?.quality_action)
 const detailBPS = computed(() => (detailOperation.value ?? selectedResult.value)?.pelican_config?.quality?.action === 'enable_bps')
+const detailModelCooldown = computed(() => detailOperation.value?.pelican_config?.quality?.action === 'remove_models')
+const detailTestModels = computed(() => {
+  const cfg = detailOperation.value?.pelican_config
+  return cfg?.model_ids?.length ? cfg.model_ids : cfg?.model_id ? [cfg.model_id] : []
+})
+function modelVerdictLabel(model: string) {
+  const verdict = detailOperation.value?.pelican_config?.quality_model_outcomes?.[model]
+  if (verdict) return t({ passed: 'qualityOps.passed', failed: 'qualityOps.roundNotPassed', inconclusive: 'qualityOps.judgeUnknown', skipped: 'qualityOps.skipped' }[verdict])
+  const samples = results.value.filter(result => result.status && result.pelican_config?.model_id === model)
+  if (!samples.length || samples.some(result => !loadedAnswers.has(result.id))) return t('qualityOps.notLoaded')
+  return samples.every(result => result.status === 'success') ? t('qualityOps.passed') : resultLabel(samples.find(result => result.status !== 'success')!)
+}
+function modelCooldownLabel(model: string) {
+  if (detailAction.value === 'action_error') return t('qualityOps.cooldownUnconfirmed')
+  const actions = detailOperation.value?.pelican_config?.quality_model_actions
+  const action = actions?.[model]
+  if (action === 'models_cooled' || action === 'model_cooldown_refreshed') return t('qualityOps.cooldownApplied')
+  if (actions || ['action_conflict', 'restore_conflict', 'stale_run', 'account_deleted', 'passed', 'inconclusive', 'no_change'].includes(detailAction.value || '')) return t('qualityOps.noNewCooldown')
+  return t('qualityOps.cooldownNotRecorded')
+}
 function name(plan: ScheduledTestPlan) { return plan.account_name || accountNames.value[plan.account_id] || `#${plan.account_id ?? plan.id}` }
 function date(value: string | null | undefined) { return value ? new Date(value).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—' }
 function clock(value: string | number | undefined) { return value ? new Date(value).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '—' }
@@ -370,7 +394,7 @@ function bpsTrigger(policy?: QualityBPSPolicy) {
 function policyTarget(quality?: QualityPolicy) {
   if (quality?.action === 'observe_only') return t('qualityOps.observeOnly')
   if (quality?.action === 'remove_groups') return quality.remove_group_ids.map(id => groupNames.value[id] || `#${id}`).join(' / ')
-  if (quality?.action === 'remove_models') return `${t('qualityOps.removeModels')}: ${(quality.remove_models || []).join(' / ')}`
+  if (quality?.action === 'remove_models') return `${t('qualityOps.cooldownTargets')}: ${(quality.remove_models || []).join(' / ')}`
   if (quality?.action !== 'enable_bps') return t('qualityOps.disableSchedulingShort')
   const trigger = bpsTrigger(quality.bps)
   return trigger ? `${t('qualityOps.enableBPSShort')}（${trigger}）` : t('qualityOps.enableBPSShort')
@@ -421,12 +445,18 @@ function resultLabel(result: ScheduledTestResult) {
 // 探针「无法判断」不是账号问题，用中性色，避免和降智混在一起。
 function resultTextClass(result: ScheduledTestResult) {
   if (!result.status) return 'text-gray-400'
+  if (result.status === 'skipped') return 'text-gray-500 dark:text-gray-400'
   if (stateProbeVerdict(result) === 'inconclusive') return 'text-gray-500'
   return result.status === 'success' ? 'text-emerald-600' : 'text-rose-600'
 }
 function resultTone(result: ScheduledTestResult) {
+  if (result.status === 'skipped') return 'tone-neutral'
   if (stateProbeVerdict(result) === 'inconclusive') return 'tone-neutral'
   return result.status === 'success' ? 'tone-success' : 'tone-danger'
+}
+function resultContent(result: ScheduledTestResult) {
+  if (result.status === 'skipped') return t(result.error_message === 'model_catalog_unavailable' ? 'qualityOps.catalogSkipHelp' : 'qualityOps.unsupportedSkipHelp')
+  return result.response_text || result.error_message || t('qualityOps.noAnswer')
 }
 function defaults() {
   return { model_id: 'gpt-6-astra', cron_expression: '*/30 * * * *', enabled: true, max_results: 100, auto_recover: false,
@@ -998,7 +1028,15 @@ onBeforeUnmount(() => { alive = false; accountSelectionRequest++; detailRequest+
 .detail-policy { @apply mb-5 space-y-2 text-xs; }
 .detail-policy > div { @apply flex justify-between gap-4; }
 .detail-policy dt { @apply shrink-0 text-gray-400; }
-.detail-policy dd { @apply text-right text-gray-600 dark:text-gray-300; }
+.detail-policy dd { @apply min-w-0 break-words text-right text-gray-600 dark:text-gray-300; }
+.detail-policy dd p { @apply mt-1 text-gray-500 dark:text-gray-400; }
+.model-summary { @apply mb-5 min-w-0; }
+.model-summary h4 { @apply mb-2 text-sm font-semibold; }
+.model-summary table { @apply w-full table-fixed text-left text-xs; }
+.model-summary th { @apply py-2 font-normal text-gray-500 dark:text-gray-400; }
+.model-summary td { @apply break-words border-t border-gray-200 py-3 pr-3 dark:border-dark-700; }
+.model-summary th:first-child { width: 42%; }
+.model-summary code { @apply break-all; }
 .detail-grid { display: grid; grid-template-columns: 145px minmax(0, 1fr); @apply gap-4; }
 .result-navigation { @apply max-h-[55dvh] space-y-2 overflow-y-auto; }
 .result-navigation > p { @apply mb-3 flex justify-between text-xs text-gray-400; }

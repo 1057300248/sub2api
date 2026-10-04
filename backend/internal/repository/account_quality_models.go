@@ -35,11 +35,39 @@ func cooldownEntryUntil(entry any) time.Time {
 	return until
 }
 
+// Native/manual expiry cleanup can remove the live entry before a probe runs.
+// Relinquish only expired snapshots that are absent or still exactly ours.
+// An active snapshot or a replacement entry remains protected by ownership.
+func pruneExpiredQualityModels(account *service.Account, state *qualityState, now time.Time) {
+	limits, _ := account.Extra["model_rate_limits"].(map[string]any)
+	for model, applied := range state.ModelApplied {
+		var entry any
+		if json.Unmarshal(applied, &entry) != nil {
+			continue
+		}
+		until := cooldownEntryUntil(entry)
+		if until.IsZero() || until.After(now) {
+			continue
+		}
+		current := limits[model]
+		if current != nil && !cooldownEntryEqual(current, applied) {
+			continue
+		}
+		delete(limits, model)
+		delete(state.ModelRateLimits, model)
+		delete(state.ModelApplied, model)
+	}
+	if len(limits) == 0 {
+		delete(account.Extra, "model_rate_limits")
+	}
+}
+
 // Keep ownership at entry granularity: a newer native error or manual edit wins.
 func transitionQualityModels(account *service.Account, state *qualityState, planID int64, models []string, until time.Time, outcome string, restore bool, now time.Time) (string, error) {
 	return transitionQualityModelsScoped(account, state, planID, models, until, outcome, restore, now, false)
 }
 func transitionQualityModelsScoped(account *service.Account, state *qualityState, planID int64, models []string, until time.Time, outcome string, restore bool, now time.Time, holdRecovery bool) (string, error) {
+	pruneExpiredQualityModels(account, state, now)
 	if outcome == "inconclusive" {
 		owned := false
 		for _, model := range models {
@@ -258,6 +286,7 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 	beforeConcurrency := account.Concurrency
 	restore := plan.PelicanConfig.Quality.AutoRestore || plan.PelicanConfig.Quality.TriggerOnUpstream5xx
 	action := "inconclusive"
+	modelActions := map[string]string{}
 	if plan.QualityModelOutcomes == nil {
 		action, err = transitionQualityModels(account, &state, plan.ID, plan.PelicanConfig.Quality.RemoveModels, schedule.Next(now), outcome, restore, now)
 	} else {
@@ -276,6 +305,7 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 				if modelAction == "restore_conflict" || modelAction == "action_conflict" {
 					return modelAction, nil
 				}
+				modelActions[model] = modelAction
 				if modelAction != "passed" && modelAction != "inconclusive" {
 					action = modelAction
 				}
@@ -350,6 +380,9 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 		_, err = tx.ExecContext(ctx, `DELETE FROM account_quality_states WHERE plan_id=$1`, plan.ID)
 	} else {
 		err = qualityUpsertState(ctx, tx, plan.ID, state)
+	}
+	if err == nil {
+		plan.QualityModelActions = modelActions
 	}
 	return action, err
 }
