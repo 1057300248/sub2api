@@ -1626,10 +1626,6 @@ type grokUsageSnapshotOptions struct {
 	installSchedulingExtras bool
 }
 
-func (s *OpenAIGatewayService) updateGrokUsageSnapshotWithRateLimit(ctx context.Context, account *Account, snapshot *xai.QuotaSnapshot, installRateLimit bool) {
-	s.updateGrokUsageSnapshotWithOptions(ctx, account, snapshot, grokUsageSnapshotOptions{installRateLimit: installRateLimit, installSchedulingExtras: installRateLimit})
-}
-
 func (s *OpenAIGatewayService) updateGrokUsageSnapshotWithOptions(ctx context.Context, account *Account, snapshot *xai.QuotaSnapshot, options grokUsageSnapshotOptions) {
 	if s == nil || account == nil || account.ID <= 0 || snapshot == nil {
 		return
