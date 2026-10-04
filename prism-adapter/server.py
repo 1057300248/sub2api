@@ -118,10 +118,24 @@ def terminal_failure_diagnostics(data):
         return {}
     response = data.get('response')
     payload = response.get('payload') if isinstance(response, dict) else None
-    details = payload.get('diagnostics') if isinstance(payload, dict) else None
-    if not isinstance(details, dict):
+    if not isinstance(payload, dict):
         return {}
+    details = payload.get('diagnostics')
     result = {}
+    text = ' '.join(str(payload.get(key, ''))[:4096].lower() for key in ('message', 'rootCause'))
+    hints = [label for label, words in (
+        ('rate_limit', ('rate limit', 'rate_limit', 'too many')),
+        ('quota', ('quota', 'usage limit')),
+        ('sandbox', ('sandbox', 'runtime')),
+        ('sync', ('synchron', 'sync_', 'sync ')),
+        ('timeout', ('timeout', 'timed out')),
+        ('connection', ('connect', 'network', 'fetch failed')),
+        ('context', ('context length', 'conversation too')),
+    ) if any(word in text for word in words)]
+    if hints:
+        result['upstream_hints'] = hints
+    if not isinstance(details, dict):
+        return result
     if details.get('code') in ('server_error', 'sandbox_disconnected', 'timeout',
                               'workspace_sync_timeout', 'workspace_sync_unavailable'):
         result['upstream_code'] = details['code']
