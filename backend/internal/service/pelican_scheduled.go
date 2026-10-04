@@ -199,7 +199,11 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	qualityAction := ""
 	if plan.PelicanConfig.Quality != nil {
 		qualityAction = "inconclusive"
-		if applyTriggeredQuality {
+		freshSignal := true
+		if plan.TriggerSource == quality5xxSource && plan.TriggerObservedAt != nil && s.qualityTrigger != nil {
+			freshSignal = s.qualityTrigger.signalIsCurrent(plan.AccountID, *plan.TriggerObservedAt)
+		}
+		if applyTriggeredQuality && freshSignal {
 			var actionErr error
 			qualityAction, actionErr = s.planRepo.ApplyQualityOutcome(saveCtx, plan, until, qualityRoundOutcome(results, len(models) > 1))
 			if actionErr != nil {

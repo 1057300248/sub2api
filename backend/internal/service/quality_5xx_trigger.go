@@ -26,6 +26,19 @@ type quality5xxTrigger struct {
 	ownsClient bool
 }
 
+func (s *quality5xxTrigger) signalIsCurrent(accountID int64, observedAt time.Time) bool {
+	if s == nil || s.redis == nil || accountID <= 0 {
+		return true
+	}
+	score, err := s.redis.ZScore(context.Background(), quality5xxPendingKey, strconv.FormatInt(accountID, 10)).Result()
+	if err != nil {
+		// Redis loss must fail closed: an old successful probe must not release
+		// quarantine when the fencing signal cannot be read.
+		return false
+	}
+	return score <= float64(observedAt.UnixMilli())
+}
+
 func newQuality5xxTrigger(shared *redis.Client) *quality5xxTrigger {
 	if shared == nil {
 		return nil
