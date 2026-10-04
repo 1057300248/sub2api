@@ -540,3 +540,13 @@ class RuntimeReconnectTests(unittest.IsolatedAsyncioTestCase):
     async def test_failure_reason_never_returns_arbitrary_upstream_text(self):
         for value in ['private-token','https://private.invalid','Bearer secret',{'token':'secret'},None]:
             self.assertEqual(adapter.terminal_failure_reason({'response':{'payload':{'reason':value}}}),'unknown')
+
+
+class ErrorDiagnosticsTests(unittest.TestCase):
+    def test_only_documented_diagnostic_enums_and_numeric_status_are_public(self):
+        value={'response':{'payload':{'message':'secret-prompt','rootCause':'secret-token','diagnostics':{
+            'operation':'start','code':'workspace_sync_timeout','httpStatus':504,'requestId':'secret-id','token':'secret'}}}}
+        self.assertEqual(adapter.terminal_failure_diagnostics(value),{
+            'upstream_operation':'start','upstream_code':'workspace_sync_timeout','upstream_status':504})
+        value['response']['payload']['diagnostics']={'operation':'secret','code':'secret','httpStatus':'secret'}
+        self.assertEqual(adapter.terminal_failure_diagnostics(value),{})

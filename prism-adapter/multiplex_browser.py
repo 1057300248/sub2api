@@ -487,7 +487,8 @@ class MultiplexBrowser:
                         response_failed=response.get('status') in ('failed', 'error'),
                         turn_failed=data.get('status') in ('failed', 'error'),
                         from_start=polls == 0,
-                        reason=self.api.terminal_failure_reason(data))
+                        reason=self.api.terminal_failure_reason(data),
+                        **self.api.terminal_failure_diagnostics(data))
                     raise result
                 if session_id and reuse_project:
                     actor.projects[session_id] = (start.project, time.monotonic())

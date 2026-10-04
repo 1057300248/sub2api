@@ -113,6 +113,26 @@ def terminal_failure_reason(data):
                                 'project_edit_access_required') else 'unknown'
 
 
+def terminal_failure_diagnostics(data):
+    if not isinstance(data, dict):
+        return {}
+    response = data.get('response')
+    payload = response.get('payload') if isinstance(response, dict) else None
+    details = payload.get('diagnostics') if isinstance(payload, dict) else None
+    if not isinstance(details, dict):
+        return {}
+    result = {}
+    if details.get('code') in ('server_error', 'sandbox_disconnected', 'timeout',
+                              'workspace_sync_timeout', 'workspace_sync_unavailable'):
+        result['upstream_code'] = details['code']
+    if details.get('operation') in ('start', 'check_status', 'stop', 'process'):
+        result['upstream_operation'] = details['operation']
+    status = details.get('httpStatus')
+    if type(status) is int and 400 <= status <= 599:
+        result['upstream_status'] = status
+    return result
+
+
 def terminal_text(data):
     if not isinstance(data, dict):
         return None
@@ -221,6 +241,8 @@ class State:
                 "start_count": start_count, "status_count": status_count, "completed_at": int(time.time()),
                 "status": "failed" if isinstance(result, AdapterError) else "completed", "usage_source": "unavailable",
                 "session_cache_hit": cache_hit}
+        if isinstance(result, AdapterError):
+            data['error_code'] = result.code
         if isinstance(result, str):
             data["answer_sha256"] = hashlib.sha256(result.encode()).hexdigest()
             data["answer_chars"] = len(result)
