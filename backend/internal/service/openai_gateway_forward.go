@@ -105,7 +105,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	modelForBPS := gjson.GetBytes(body, "model").String()
-	if accountHasPrismBrowser(account) {
+	if account.IsPrismBrowserEnabledForModel(modelForBPS) {
 		return s.forwardPrismBrowser(ctx, c, account, body, startTime)
 	}
 	if c.GetBool(bpsAccountProbeRequiredContextKey) &&

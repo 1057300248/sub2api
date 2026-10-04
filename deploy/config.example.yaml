@@ -17,6 +17,9 @@ runtime:
 # 服务器配置
 # =============================================================================
 server:
+  # Shared PostgreSQL/Redis readiness budget: 0 = 1s (default), allowed 1..60s.
+  # If changed, Kubernetes readinessProbe.timeoutSeconds must exceed this budget.
+  readiness_timeout_seconds: 0
   # HTTP/WS request drain budget after load-balancer withdrawal (seconds).
   # Default 5 preserves existing deployments; Kubernetes example uses 240.
   graceful_shutdown_timeout: 5

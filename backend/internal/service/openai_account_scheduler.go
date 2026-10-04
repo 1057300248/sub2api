@@ -1996,6 +1996,11 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if account == nil {
 		return false, "account_nil"
 	}
+	if source, ok := CompositeRouteSourceFromContext(ctx); ok && source == CompositeRouteSourceAccount {
+		if publicModel, modelOK := RequestedPublicModelFromContext(ctx); modelOK && !explicitModelMappingClaims(*account, publicModel) {
+			return false, "account_model_not_owned"
+		}
+	}
 	if req.RequirePrivacySet && !account.IsPrivacySet() {
 		return false, "privacy_not_set"
 	}
@@ -2757,7 +2762,7 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 	}
 	// Prism runs one HTTP turn per request; the WS entry would only close the
 	// session after selection, so keep WS clients on the other accounts.
-	if accountHasPrismBrowser(account) {
+	if len(requestedModels) > 0 && account.IsPrismBrowserEnabledForModel(requestedModels[0]) {
 		return false
 	}
 	if requiredTransport == OpenAIUpstreamTransportResponsesWebsocketV2Ingress {
