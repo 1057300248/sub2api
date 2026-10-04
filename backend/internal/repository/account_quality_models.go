@@ -112,6 +112,10 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 				// Never raise an account that is already below the configured cap.
 				applied := account.Concurrency
 				state.AppliedConcurrency = &applied
+				if state.PreviousConcurrency == nil {
+					previous := applied
+					state.PreviousConcurrency = &previous
+				}
 			}
 		}
 		if first {
@@ -265,7 +269,7 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 // auto-config JSON state. No schema change is needed and manual edits still
 // invalidate the state through RecordConcurrencyResult's current-value check.
 func armNativeRecoveryRamp(ctx context.Context, tx *sql.Tx, extra map[string]any, current, target int) error {
-	if target <= current {
+	if target < current {
 		return nil
 	}
 	var raw string

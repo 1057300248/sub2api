@@ -45,10 +45,11 @@ type qualityGroup struct {
 	AllowedModels json.RawMessage `json:"allowed_models"`
 }
 type qualityState struct {
-	Action         string          `json:"action"`
-	AccountVersion time.Time       `json:"account_version"`
-	Removed        []qualityGroup  `json:"removed"`
-	Remaining      json.RawMessage `json:"remaining"`
+	Quality5xxEpisode int64           `json:"quality_5xx_episode,omitempty"`
+	Action            string          `json:"action"`
+	AccountVersion    time.Time       `json:"account_version"`
+	Removed           []qualityGroup  `json:"removed"`
+	Remaining         json.RawMessage `json:"remaining"`
 	// 以下只用于「降智开 BPS」：连续降智轮数、开启后连续满血轮数，以及开启前 / 开启时 BPS 相关 Extra 的快照。
 	FailureStreak int                        `json:"failure_streak,omitempty"`
 	PassStreak    int                        `json:"pass_streak,omitempty"`
@@ -114,6 +115,11 @@ func (r *scheduledTestPlanRepository) ApplyQualityOutcome(ctx context.Context, p
 		if err := json.Unmarshal(raw, &state); err != nil {
 			return "", err
 		}
+	}
+	// Checked under the same account/plan locks as restoration. A 5xx that
+	// arrives during a probe invalidates that probe even across replicas.
+	if state.Quality5xxEpisode != plan.Quality5xxEpisode {
+		return "stale_run", nil
 	}
 	q := plan.PelicanConfig.Quality
 	// Changing a rule's action does not discard its previous ownership. While

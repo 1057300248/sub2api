@@ -143,10 +143,10 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 			return false
 		}
 	}
-	// An upstream 5xx is affirmative degradation evidence for opt-in model
-	// cooldown rules. Apply that owned cooldown before the probe starts.
+	// Fallback for queued legacy signals without an immediately applied episode.
+	// A 5xx triggers protection; it is not itself a quality verdict.
 	if plan.TriggerSource == quality5xxSource && plan.PelicanConfig.Quality != nil &&
-		plan.PelicanConfig.Quality.Action == QualityActionRemoveModel && applyTriggeredQuality {
+		plan.PelicanConfig.Quality.Action == QualityActionRemoveModel && plan.Quality5xxEpisode == 0 && applyTriggeredQuality {
 		preCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 		preAction, preErr := s.planRepo.ApplyQualityOutcome(preCtx, plan, until, "failed")
 		stop()

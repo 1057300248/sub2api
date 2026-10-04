@@ -21,7 +21,12 @@ type qualityProbeContextKey struct{}
 
 // Redis bridges request-serving replicas and the existing singleton test worker.
 // Only account IDs enter this bounded, coalescing queue; never upstream bodies.
+type quality5xxImmediateRepository interface {
+	ApplyQuality5xx(context.Context, int64) error
+}
+
 type quality5xxTrigger struct {
+	immediate  quality5xxImmediateRepository
 	redis      *redis.Client
 	ownsClient bool
 }
@@ -67,6 +72,16 @@ var queueQuality5xx = redis.NewScript(`
 func (s *quality5xxTrigger) Observe(ctx context.Context, account *Account, status int) {
 	if s == nil || s.redis == nil || account == nil || account.ID <= 0 || account.Type != AccountTypeOAuth || status < 500 || status > 599 || ctx.Value(qualityProbeContextKey{}) != nil {
 		return
+	}
+	// Complete native account protection before retry/selection can continue.
+	// This has no dependency on worker slots or a running probe's lease.
+	if s.immediate != nil {
+		actionCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		err := s.immediate.ApplyQuality5xx(actionCtx, account.ID)
+		stop()
+		if err != nil {
+			slog.Warn("quality 5xx immediate protection failed", "account_id", account.ID, "error", err)
+		}
 	}
 	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 150*time.Millisecond)
 	defer cancel()
@@ -164,7 +179,7 @@ func (s *ScheduledTestRunnerService) runQualityTriggeredAccount(ctx context.Cont
 		}
 		plan.TriggerSource = quality5xxSource
 		plan.TriggerObservedAt = &observedAt
-		if plan.LastRunAt != nil && !plan.LastRunAt.Before(observedAt) {
+		if qualitySignalCovered(plan, observedAt) {
 			continue // An overlapping scheduled/event test already covered this signal.
 		}
 		if plan.RunningUntil != nil && plan.RunningUntil.After(time.Now()) {
@@ -183,7 +198,7 @@ func (s *ScheduledTestRunnerService) runQualityTriggeredAccount(ctx context.Cont
 			if current.RunningUntil != nil && current.RunningUntil.After(time.Now()) {
 				return fmt.Errorf("quality plan %d is still running", plan.ID)
 			}
-			if current.LastRunAt != nil && !current.LastRunAt.Before(observedAt) {
+			if qualitySignalCovered(current, observedAt) {
 				continue
 			}
 			return fmt.Errorf("quality plan %d could not be claimed", plan.ID)
@@ -259,4 +274,11 @@ func quality5xxTestConfig(account *Account, model string, cfg PelicanTestConfig)
 		applyOutcome = policy.Action != QualityActionEnableBPS && !cfg.BPSRecoveryPending
 	}
 	return cfg, applyOutcome
+}
+
+func qualitySignalCovered(plan *ScheduledTestPlan, observedAt time.Time) bool {
+	if plan.PelicanConfig != nil && plan.PelicanConfig.Quality != nil && plan.PelicanConfig.Quality.Action == QualityActionRemoveModel {
+		return false
+	}
+	return plan.LastRunAt != nil && !plan.LastRunAt.Before(observedAt)
 }
