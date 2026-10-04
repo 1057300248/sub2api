@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/qualityqueue"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
@@ -561,9 +562,16 @@ func ProvideRateLimitService(
 	tokenCacheInvalidator TokenCacheInvalidator,
 	ollamaCloudUsage *OllamaCloudUsageService,
 	accountOps *AccountOpsService,
+	rdb *redis.Client,
 ) *RateLimitService {
 	svc := NewRateLimitService(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
 	svc.accountOps = accountOps
+	if rdb != nil {
+		svc.qualityTrigger = &quality5xxTrigger{queue: qualityqueue.NewRedis(rdb)}
+	}
+	if svc.qualityTrigger != nil {
+		svc.qualityTrigger.immediate, _ = accountRepo.(quality5xxImmediateRepository)
+	}
 	if healthCache, ok := tempUnschedCache.(OpenAIAPIKeyHealthCache); ok {
 		svc.SetOpenAIAPIKeyHealthCache(healthCache)
 	}
@@ -698,9 +706,14 @@ func ProvideScheduledTestService(
 	planRepo ScheduledTestPlanRepository,
 	resultRepo ScheduledTestResultRepository,
 	templateRepo QualityRuleTemplateRepository,
+	accountTests *AccountTestService,
 ) *ScheduledTestService {
 	svc := NewScheduledTestService(planRepo, resultRepo)
 	svc.templateRepo = templateRepo
+	svc.accountTests = accountTests
+	if accountTests != nil {
+		svc.qualityModels = svc.accountQualityModels
+	}
 	return svc
 }
 
@@ -712,10 +725,14 @@ func ProvideScheduledTestRunnerService(
 	rateLimitSvc *RateLimitService,
 	cfg *config.Config,
 	judge *QualityJudgeService,
+	rdb *redis.Client,
 	groupTests *PelicanGroupTestService,
 	monitor *ChannelMonitorV2Service,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
+	if rdb != nil {
+		svc.qualityTrigger = &quality5xxTrigger{queue: qualityqueue.NewRedis(rdb)}
+	}
 	svc.judgeQuality = judge.Judge
 	svc.groupTests = groupTests
 	svc.candyMonitor = monitor.candy

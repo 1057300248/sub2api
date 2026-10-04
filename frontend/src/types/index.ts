@@ -2577,13 +2577,18 @@ export interface QualityBPSPolicy {
 export interface QualityPolicy {
   judge?: QualityJudgeConfig
   expected_answer: string
-  action: 'remove_groups' | 'disable_scheduling' | 'enable_bps' | 'observe_only'
+  action: 'remove_groups' | 'remove_models' | 'disable_scheduling' | 'enable_bps' | 'observe_only'
   remove_group_ids: number[]
+  remove_models?: string[]
+  recovery_concurrency?: number
   auto_restore: boolean
   bps?: QualityBPSPolicy
 }
 
 export interface PelicanTestConfig {
+  quality_model_outcomes?: Record<string, 'passed' | 'failed' | 'inconclusive' | 'skipped'>
+  quality_model_actions?: Record<string, string>
+  trigger_source?: string
   quality?: QualityPolicy
   question_kind?: 'candy' | 'pelican' | 'state_probe'
   test_channel?: 'account' | 'bps'
@@ -2591,6 +2596,7 @@ export interface PelicanTestConfig {
   reasoning_effort: string
   parallel_count: number
   model_id?: string
+  model_ids?: string[]
 }
 
 export interface ScheduledTestPlan {
