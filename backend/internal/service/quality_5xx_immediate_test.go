@@ -52,8 +52,12 @@ func TestQuality5xxWorkerProviderHasQueue(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := queuetest.NewClient(mr.Addr())
 	defer func() { _ = rdb.Close() }()
-	cfg := &config.Config{}
+	// Exercise provider wiring without starting singleton cron jobs with nil
+	// repositories. Such jobs can outlive this test and panic on a later tick.
+	cfg := &config.Config{Runtime: config.RuntimeConfig{Role: config.RuntimeRoleGateway}}
 	svc := ProvideScheduledTestRunnerService(nil, nil, &AccountTestService{}, &RateLimitService{}, cfg, &QualityJudgeService{}, rdb, nil, &ChannelMonitorV2Service{})
+	t.Cleanup(svc.Stop)
 	require.NotNil(t, svc.qualityTrigger, "worker provider must connect the cross-instance queue")
-	defer func() { _ = svc.qualityTrigger.queue.Close() }()
+	require.Nil(t, svc.cron)
+	require.Nil(t, svc.triggerCancel)
 }
