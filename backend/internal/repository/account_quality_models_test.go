@@ -53,3 +53,21 @@ func TestQualityModelCooldownPreservesNativeAndManualChanges(t *testing.T) {
 	_, err = json.Marshal(state)
 	require.NoError(t, err)
 }
+
+func TestQualityModelInconclusiveRetainsOwnedRestriction(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	a := &service.Account{Type: service.AccountTypeOAuth, Concurrency: 12, Extra: map[string]any{}}
+	state := qualityState{RecoveryConcurrency: 3, NativeRecovery: true}
+	_, err := transitionQualityModels(a, &state, 7, []string{"target"}, now.Add(time.Minute), "failed", true, now)
+	require.NoError(t, err)
+	_, err = transitionQualityModels(a, &state, 7, []string{"target"}, now.Add(time.Hour), "inconclusive", true, now)
+	require.NoError(t, err)
+	require.Equal(t, 3, a.Concurrency)
+	require.Equal(t, 12, *state.PreviousConcurrency)
+	limits := a.Extra["model_rate_limits"].(map[string]any)
+	require.Equal(t, now.Add(time.Hour), cooldownEntryUntil(limits["target"]))
+	_, err = transitionQualityModels(a, &state, 7, []string{"target"}, now.Add(time.Hour), "passed", true, now)
+	require.NoError(t, err)
+	require.Equal(t, 3, a.Concurrency)
+	require.Equal(t, 12, *state.RecoveryTarget)
+}

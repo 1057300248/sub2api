@@ -38,7 +38,10 @@ func cooldownEntryUntil(entry any) time.Time {
 // Keep ownership at entry granularity: a newer native error or manual edit wins.
 func transitionQualityModels(account *service.Account, state *qualityState, planID int64, models []string, until time.Time, outcome string, restore bool, now time.Time) (string, error) {
 	if outcome == "inconclusive" {
-		return "inconclusive", nil
+		if state.Action == "" {
+			return "inconclusive", nil
+		}
+		outcome = "failed"
 	}
 	if outcome == "passed" && (state.Action == "" || !restore) {
 		return "passed", nil
@@ -172,7 +175,10 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 
 func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.ScheduledTestPlan, outcome, status string, state qualityState) (string, error) {
 	if outcome == "inconclusive" {
-		return "inconclusive", nil
+		if state.Action == "" {
+			return "inconclusive", nil
+		}
+		outcome = "failed"
 	}
 	if outcome == "passed" && state.Action != "" && plan.PelicanConfig.Quality.AutoRestore && status != "active" {
 		return "restore_conflict", nil
