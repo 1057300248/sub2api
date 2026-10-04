@@ -204,6 +204,27 @@
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
           <ServerlessSettings v-if="activeTab === 'gateway'" />
+          <div class="card" data-testid="prism-browser-settings">
+            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Prism 浏览器桥</h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">管理员在这里启用全局开关；账号仍需单独勾选 Prism。</p>
+            </div>
+            <div class="space-y-4 p-6">
+              <label class="flex items-center gap-3">
+                <input v-model="form.prism_browser_enabled" type="checkbox" class="h-4 w-4" data-testid="prism-browser-enabled" />
+                <span class="font-medium text-gray-900 dark:text-white">启用 Prism 浏览器桥</span>
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm text-gray-600 dark:text-gray-300">适配器 Base URL</span>
+                <input v-model="form.prism_browser_base_url" class="input w-full" placeholder="http://127.0.0.1:8319/v1" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm text-gray-600 dark:text-gray-300">桥接 API Key（留空保持原值）</span>
+                <input v-model="form.prism_browser_api_key" type="password" autocomplete="new-password" class="input w-full" />
+              </label>
+              <p v-if="form.prism_browser_enabled && !form.prism_browser_api_key_configured" class="text-sm text-amber-600">启用前必须配置至少 32 个字符的适配器密钥。</p>
+            </div>
+          </div>
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
@@ -10136,11 +10157,16 @@ type SettingsForm = Omit<
   // 系统全局平台限额 map；form 内始终归一化为全 4 平台对象（模板非空绑定依赖此不变量）
   default_platform_quotas: DefaultPlatformQuotasMap;
   account_scheduling_thresholds: ReturnType<typeof normalizeAccountSchedulingThresholdsMap>;
+  prism_browser_api_key: string;
 };
 
 const schedulingThresholdPlatforms = SCHEDULING_THRESHOLD_PLATFORMS;
 
 const form = reactive<SettingsForm>({
+  prism_browser_enabled: false,
+  prism_browser_base_url: "http://127.0.0.1:8319/v1",
+  prism_browser_api_key_configured: false,
+  prism_browser_api_key: "",
   registration_enabled: true,
   email_verify_enabled: false,
   registration_email_suffix_whitelist: [],
@@ -11538,6 +11564,10 @@ async function loadSettings() {
     form.channel_monitor_hide_user_ranking = Boolean(
       settings.channel_monitor_hide_user_ranking
     );
+    form.prism_browser_enabled = Boolean(settings.prism_browser_enabled);
+    form.prism_browser_base_url = settings.prism_browser_base_url || "http://127.0.0.1:8319/v1";
+    form.prism_browser_api_key_configured = Boolean(settings.prism_browser_api_key_configured);
+    form.prism_browser_api_key = "";
     form.login_agreement_updated_at =
       settings.login_agreement_updated_at || "2026-03-31";
     form.login_agreement_documents =
@@ -11976,6 +12006,9 @@ async function saveSettings() {
     }
 
     const payload: UpdateSettingsRequest = {
+      prism_browser_enabled: form.prism_browser_enabled,
+      prism_browser_base_url: form.prism_browser_base_url,
+      ...(form.prism_browser_api_key ? { prism_browser_api_key: form.prism_browser_api_key } : {}),
       registration_enabled: form.registration_enabled,
       email_verify_enabled: form.email_verify_enabled,
       registration_email_suffix_whitelist:
