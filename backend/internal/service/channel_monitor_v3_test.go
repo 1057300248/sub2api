@@ -450,6 +450,18 @@ func TestChannelMonitorV3IncidentsBridgeQuietSlots(t *testing.T) {
 	require.Equal(t, monitorV3Slot(18), *runs[0].EndedAt, "an hour and a half of silence since does not keep it open")
 }
 
+func TestChannelMonitorV3HidesUnusableGroupsFromUsers(t *testing.T) {
+	public := ChannelMonitorV3Component{GroupID: 7, Visibility: ChannelMonitorV3VisibilityPublic, GroupStatus: StatusActive}
+	user := ChannelMonitorV3Viewer{AllowedGroups: map[int64]bool{7: true}}
+	require.True(t, user.canSee(public))
+	deleted, disabled := public, public
+	deleted.GroupDeleted = true
+	disabled.GroupStatus = StatusDisabled
+	require.False(t, user.canSee(deleted), "a deleted group has nothing to show")
+	require.False(t, user.canSee(disabled), "users cannot use a disabled group")
+	require.True(t, ChannelMonitorV3Viewer{Admin: true}.canSee(disabled), "admins still see it, flagged as unavailable")
+}
+
 func TestChannelMonitorV3Validation(t *testing.T) {
 	repo := &monitorV3RepoFake{config: monitorV3Config(), categories: []ChannelMonitorV3Category{{ID: 1, Name: "GPT"}}}
 	s := monitorV3Service(repo)

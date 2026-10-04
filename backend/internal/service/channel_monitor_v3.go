@@ -264,8 +264,16 @@ type ChannelMonitorV3Viewer struct {
 	GroupRates map[int64]float64
 }
 
+// canSee hides components of deleted or disabled groups from users; admins
+// still see them, flagged as unavailable on the settings page.
 func (v ChannelMonitorV3Viewer) canSee(c ChannelMonitorV3Component) bool {
-	return v.Admin || c.Visibility == ChannelMonitorV3VisibilityPublic || v.AllowedGroups[c.GroupID]
+	if v.Admin {
+		return true
+	}
+	if c.GroupDeleted || (c.GroupStatus != "" && c.GroupStatus != StatusActive) {
+		return false
+	}
+	return c.Visibility == ChannelMonitorV3VisibilityPublic || v.AllowedGroups[c.GroupID]
 }
 
 type ChannelMonitorV3Repository interface {
