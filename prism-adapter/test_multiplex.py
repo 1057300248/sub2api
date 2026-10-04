@@ -454,3 +454,34 @@ class PollDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
         observer.assert_called_once_with('prism_poll_failed',sent=False,http_status=429,transport_error=None)
         self.assertEqual(actor.expected,{})
         self.assertNotIn('secret',str(observer.call_args))
+
+
+class TerminalConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_immediate_upstream_failure_does_not_count_as_live_polling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine=multiplex_browser.MultiplexBrowser(adapter.State(directory),'fixture',adapter)
+            actor=SimpleNamespace(refs=0,projects={})
+            async def account(*_args):
+                actor.refs+=1
+                return actor
+            engine.account=account
+            class Start:
+                def __init__(self,engine,actor,journal,session,model,effort):
+                    self.sent=self.violation=self.cache_hit=False
+                    self.request_id='terminal-fixture'
+                    self.project='project'
+                    self.phase='awaiting_start'
+                async def run(self,_prompt):
+                    self.sent=True
+                    return {'request_id':self.request_id,'status':'failed'},None
+                async def close(self):pass
+            with mock.patch.object(multiplex_browser,'BrowserStart',Start), \
+                    mock.patch.object(multiplex_browser,'cgroup_memory_bytes',lambda:None), \
+                    mock.patch.object(engine,'observe') as observe:
+                with self.assertRaises(adapter.AdapterError):
+                    await engine.run('300','fixture','prompt','session','gpt-6.1-sol','xhigh')
+            events=[c.args[0] for c in observe.call_args_list]
+            self.assertNotIn('prism_poll_start',events)
+            self.assertIn('prism_upstream_terminal_failure',events)
+            self.assertEqual((engine.polling,engine.preparing,actor.refs),(0,0,0))
+            self.assertEqual(list(engine.state.pending.iterdir()),[])

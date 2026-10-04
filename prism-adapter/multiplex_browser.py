@@ -430,8 +430,10 @@ class MultiplexBrowser:
                             self.observe('prism_prepare_end', journal, submitted=start.sent)
                     if start.violation:
                         raise self.api.AdapterError(502, 'unexpected_start', 'Prism attempted an unexpected model start')
-                self.polling += 1
-                self.observe('prism_poll_start', journal, model=model, effort=effort)
+                needs_poll = self.api.terminal_text(data) is None
+                if needs_poll:
+                    self.polling += 1
+                    self.observe('prism_poll_start', journal, model=model, effort=effort)
                 try:
                     polls = 0
                     while self.api.terminal_text(data) is None:
@@ -447,12 +449,18 @@ class MultiplexBrowser:
                             jitter = int(journal.local_id[:2], 16) / 255 * 0.25
                             await asyncio.sleep(self.poll_seconds + jitter)
                 finally:
-                    self.polling -= 1
-                    self.observe('prism_poll_end', journal)
+                    if needs_poll:
+                        self.polling -= 1
+                        self.observe('prism_poll_end', journal)
                 result = self.api.terminal_text(data)
                 self.state.receipt(account_id, start.request_id, 1, polls, result, start.cache_hit, model=model, effort=effort)
                 journal.finish()
                 if isinstance(result, self.api.AdapterError):
+                    response = data.get('response') if isinstance(data.get('response'), dict) else {}
+                    self.observe('prism_upstream_terminal_failure', journal,
+                        response_failed=response.get('status') in ('failed', 'error'),
+                        turn_failed=data.get('status') in ('failed', 'error'),
+                        from_start=polls == 0)
                     raise result
                 if session_id and reuse_project:
                     actor.projects[session_id] = (start.project, time.monotonic())
