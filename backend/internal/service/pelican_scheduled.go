@@ -143,6 +143,17 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 			return false
 		}
 	}
+	// An upstream 5xx is affirmative degradation evidence for opt-in model
+	// cooldown rules. Apply that owned cooldown before the probe starts.
+	if plan.TriggerSource == quality5xxSource && plan.PelicanConfig.Quality != nil &&
+		plan.PelicanConfig.Quality.Action == QualityActionRemoveModel && applyTriggeredQuality {
+		preCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
+		preAction, preErr := s.planRepo.ApplyQualityOutcome(preCtx, plan, until, "failed")
+		stop()
+		if preErr != nil || preAction == "stale_run" || preAction == "account_deleted" {
+			return false
+		}
+	}
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	observationTrigger := "scheduled"

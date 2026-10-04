@@ -261,9 +261,6 @@ func AdvanceConcurrency(state AutoConfigConcurrencyState, current int, c OAuthAu
 		state.LastUpgradeAt = &now
 		state.LastFailureAt = nil
 		state.PausedUntil = now.Add(time.Duration(c.CooldownSeconds) * time.Second)
-		if state.RecoveryTarget > 0 && current >= state.RecoveryTarget {
-			state.RecoveryTarget = 0
-		}
 	}
 	return state, current
 }

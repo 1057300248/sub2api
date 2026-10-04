@@ -98,6 +98,7 @@ export default {
   "removeModels": "保持调度，仅冷却指定模型",
   "removeModelsInput": "要冷却的模型（逗号分隔）",
   "recoveryConcurrency": "OAuth 恢复并发上限（默认 5）",
+  "invalidRecoveryConcurrency": "恢复并发必须是 1 到 10000 的整数",
   "selectModels": "请填写至少一个模型",
   "disableScheduling": "关闭账户调度（保留分组）",
   "autoRestore": "后续整轮测试通过时自动恢复",

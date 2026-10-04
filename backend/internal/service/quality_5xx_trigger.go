@@ -140,9 +140,9 @@ func (s *ScheduledTestRunnerService) runQualityTriggeredAccount(ctx context.Cont
 		if lookupErr != nil || account == nil {
 			return fmt.Errorf("quality 5xx account %d could not be loaded", accountID)
 		}
-		if s.rateLimitSvc.temporarilyUnscheduleQuality5xx(ctx, account) {
-			return fmt.Errorf("quality 5xx account %d is cooling down", accountID)
-		}
+		// The quality rule owns the quarantine state. Do not apply the generic
+		// account-wide ten-minute temporary unschedule here: it would delay the
+		// probe and make an opted-in 5xx signal ineffective.
 	}
 	for _, plan := range plans {
 		if !plan.Enabled || plan.PelicanConfig == nil || plan.PelicanConfig.Quality == nil || !plan.PelicanConfig.Quality.TriggerOnUpstream5xx {

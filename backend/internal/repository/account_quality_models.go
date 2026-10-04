@@ -54,7 +54,13 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 		first := state.Action == ""
 		if first {
 			state.Action = service.QualityActionRemoveModel
-			state.RecoveryTarget = nil
+			// A second failure while ramping must retain the original captured
+			// ceiling rather than replacing it with an intermediate value.
+			if state.RecoveryTarget != nil {
+				target := *state.RecoveryTarget
+				state.PreviousConcurrency = &target
+				state.RecoveryTarget = nil
+			}
 			state.ModelRateLimits = map[string]json.RawMessage{}
 			state.ModelApplied = map[string]json.RawMessage{}
 			for _, model := range models {
@@ -92,7 +98,11 @@ func transitionQualityModels(account *service.Account, state *qualityState, plan
 				cap = 5
 			}
 			if account.Concurrency > cap {
-				previous, applied := account.Concurrency, cap
+				previous := account.Concurrency
+				if state.PreviousConcurrency != nil {
+					previous = *state.PreviousConcurrency
+				}
+				applied := cap
 				state.PreviousConcurrency, state.AppliedConcurrency = &previous, &applied
 				account.Concurrency = applied
 			} else {
@@ -213,6 +223,18 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 			return "", err
 		}
 	}
+	if outcome == "failed" && plan.PelicanConfig.Quality.TriggerOnUpstream5xx && action != "inconclusive" {
+		if err := blockNativeRecoveryRamp(ctx, tx, account.Extra, account.Concurrency); err != nil {
+			return "", err
+		}
+		updated, err = json.Marshal(account.Extra)
+		if err != nil {
+			return "", err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=$2::jsonb,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1`, plan.AccountID, string(updated)); err != nil {
+			return "", err
+		}
+	}
 	if outcome == "passed" && action == "recovery_started" && state.RecoveryTarget != nil {
 		if err := armNativeRecoveryRamp(ctx, tx, account.Extra, account.Concurrency, *state.RecoveryTarget); err != nil {
 			return "", err
@@ -253,6 +275,24 @@ func armNativeRecoveryRamp(ctx context.Context, tx *sql.Tx, extra map[string]any
 		max = c.MaxConcurrency
 	}
 	state := service.AutoConfigConcurrencyState{Revision: c.Revision, Concurrency: current, Maximum: max, RecoveryTarget: max, PausedUntil: time.Now().UTC().Add(time.Duration(c.CooldownSeconds) * time.Second)}
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	extra[service.AutoConfigConcurrencyExtraKey] = json.RawMessage(encoded)
+	return nil
+}
+
+func blockNativeRecoveryRamp(ctx context.Context, tx *sql.Tx, extra map[string]any, current int) error {
+	var raw string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyOAuthAutoConfig).Scan(&raw); err != nil {
+		return nil
+	}
+	c := service.DefaultOAuthAutoConfig()
+	if json.Unmarshal([]byte(raw), &c) != nil || !c.UpgradeEnabled {
+		return nil
+	}
+	state := service.AutoConfigConcurrencyState{Revision: c.Revision, Concurrency: current, Maximum: current, PausedUntil: time.Now().UTC().Add(time.Duration(c.CooldownSeconds) * time.Second)}
 	encoded, err := json.Marshal(state)
 	if err != nil {
 		return err

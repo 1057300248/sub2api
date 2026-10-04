@@ -588,7 +588,7 @@ function payload() {
   if (!isProbe.value) {
     const nextQuality: any = { ...quality, bps: undefined, remove_group_ids: quality.action === 'remove_groups' ? [...quality.remove_group_ids] : [], auto_restore: quality.action === 'observe_only' ? false : quality.auto_restore }
     if (quality.action === 'remove_models') nextQuality.remove_models = [...(quality.remove_models || [])]
-    else delete nextQuality.remove_models
+    else { delete nextQuality.remove_models; delete nextQuality.recovery_concurrency }
     return { ...form.value, max_results, pelican_config: { ...form.value.pelican_config, model_ids, quality: nextQuality } }
   }
   const { action, remove_group_ids, auto_restore, trigger_on_upstream_5xx } = quality

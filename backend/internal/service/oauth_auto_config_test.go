@@ -110,7 +110,7 @@ func TestAutoConfigRecoveryRampStopsAtCapturedTarget(t *testing.T) {
 	state.PausedUntil = now.Add(-time.Second)
 	state, n = AdvanceConcurrency(state, 7, c, good, now)
 	require.Equal(t, 9, n)
-	require.Zero(t, state.RecoveryTarget)
+	require.Equal(t, 9, state.RecoveryTarget)
 }
 func TestAutoConfigQueueOverflowFailsClosed(t *testing.T) {
 	s := NewAccountOpsService(nil, nil, nil)
