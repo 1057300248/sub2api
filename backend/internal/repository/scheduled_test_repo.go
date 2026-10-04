@@ -315,6 +315,13 @@ func (r *scheduledTestPlanRepository) FinishPelican(ctx context.Context, id int6
 	return err
 }
 
+func (r *scheduledTestPlanRepository) FinishTriggeredQuality(ctx context.Context, plan *service.ScheduledTestPlan, until, finished, next time.Time) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE scheduled_test_plans SET running_until=NULL,last_run_at=$3,
+ next_run_at=CASE WHEN updated_at=$4 AND next_run_at=$5 AND next_run_at<=$3 THEN $6 ELSE next_run_at END
+ WHERE id=$1 AND running_until=$2`, plan.ID, until, finished, plan.UpdatedAt, plan.NextRunAt, next)
+	return err
+}
+
 // Also prunes paused plans; bounded batches avoid long transactions on large histories.
 func (r *scheduledTestResultRepository) PruneExpiredPelican(ctx context.Context, before time.Time) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM scheduled_test_results WHERE id IN (

@@ -53,7 +53,6 @@ func TestQuality5xxWorkerProviderHasQueue(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 	cfg := &config.Config{}
-	cfg.Server.ProcessRole = config.ProcessRoleAPI
 	svc := ProvideScheduledTestRunnerService(nil, nil, &AccountTestService{}, &RateLimitService{}, cfg, &QualityJudgeService{}, rdb, nil, &ChannelMonitorV2Service{})
 	require.NotNil(t, svc.qualityTrigger, "worker provider must connect the cross-instance queue")
 	defer svc.qualityTrigger.redis.Close()

@@ -14,6 +14,15 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func qualityUnsupportedModelKey(model string) string {
 	return fmt.Sprintf("quality_unsupported_model_%x", sha256.Sum256([]byte(model)))
 }
