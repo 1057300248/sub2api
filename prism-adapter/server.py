@@ -102,6 +102,17 @@ def parse_prompt(payload):
     return prompt, payload.get("stream", False)
 
 
+def terminal_failure_reason(data):
+    # Values are official reason enums. Never expose arbitrary upstream text.
+    if not isinstance(data, dict):
+        return 'unknown'
+    response = data.get('response')
+    payload = response.get('payload') if isinstance(response, dict) else None
+    reason = payload.get('reason') if isinstance(payload, dict) else None
+    return reason if reason in ('sandbox_reconnecting', 'conversation_too_large',
+                                'project_edit_access_required') else 'unknown'
+
+
 def terminal_text(data):
     if not isinstance(data, dict):
         return None
@@ -113,6 +124,13 @@ def terminal_text(data):
     if not isinstance(response, dict) or response.get("status") not in ("success", "failed", "error"):
         return None
     if response.get("status") in ("failed", "error"):
+        reason = terminal_failure_reason(data)
+        if reason == 'sandbox_reconnecting':
+            return AdapterError(503, 'sandbox_reconnecting', 'Prism project runtime is reconnecting')
+        if reason == 'project_edit_access_required':
+            return AdapterError(403, 'project_edit_access_required', 'Prism project edit access is required')
+        if reason == 'conversation_too_large':
+            return AdapterError(422, 'conversation_too_large', 'Prism conversation exceeds the upstream limit')
         return AdapterError(502, "prism_failed", "Prism turn failed")
     output = (response.get("payload") or {}).get("output") or []
     texts = [part.get("text", "") for item in output if isinstance(item, dict) and item.get("type") == "message"

@@ -34,10 +34,12 @@ window.chat=[];
 document.querySelector('textarea').addEventListener('keydown', async (e) => {
   if (e.key !== 'Enter') return;
   e.preventDefault(); window.chat.push(e.target.value);
-  const result = await fetch('/api/llm/response_with_tools_start', {
+  let result; do { result = await fetch('/api/llm/response_with_tools_start', {
     method:'POST', body:JSON.stringify({metadata:{model:currentModel,reasoning_effort:currentEffort,
     projectId:new URL(location.href).searchParams.get('u')},input:window.chat})
   }).then(r=>r.json());
+  if (result.response?.payload?.reason === 'sandbox_reconnecting') await new Promise(r=>setTimeout(r,20));
+  } while (result.response?.payload?.reason === 'sandbox_reconnecting');
   await fetch('/api/llm/response_with_tools_status', {method:'POST',
     body:JSON.stringify({request_id:result.request_id,turn_state:result.turn_state})});
 });</script>'''
@@ -74,6 +76,12 @@ class Fixture(BaseHTTPRequestHandler):
                 self.reply(200, json.dumps({'uuid':body['project_uuid']}))
                 return
             if self.path == api.START:
+                project = body['metadata']['projectId']
+                if self.server.reconnect_first and project not in self.server.reconnected:
+                    self.server.reconnected.add(project)
+                    self.reply(200, json.dumps({'request_id':uuid.uuid4().hex,'status':'completed',
+                        'response':{'status':'error','payload':{'reason':'sandbox_reconnecting'}}}))
+                    return
                 if len(body['input']) != 1:
                     self.reply(409, '{"error":"duplicate input"}')
                     return
@@ -110,6 +118,7 @@ def main():
     parser.add_argument('--chrome', required=True)
     parser.add_argument('--concurrency', type=int, default=20, choices=range(1, 31))
     parser.add_argument('--output')
+    parser.add_argument('--reconnect-first', action='store_true')
     parser.add_argument('--model', choices=api.MODELS)
     parser.add_argument('--effort', choices=api.EFFORTS, default='xhigh')
     parser.add_argument('--rounds', type=int, default=1, choices=range(1, 5))
@@ -118,6 +127,8 @@ def main():
     upstream.daemon_threads = True
     upstream.lock = threading.Lock()
     upstream.asset_requests = 0
+    upstream.reconnect_first = args.reconnect_first
+    upstream.reconnected = set()
     upstream.jobs, upstream.release, upstream.mismatches, upstream.target = {}, None, 0, args.concurrency
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     api.BASE = f'http://127.0.0.1:{upstream.server_port}'
@@ -187,7 +198,7 @@ def main():
                 'concurrency':args.concurrency,'rounds':args.rounds,'model':args.model,'effort':args.effort,'completed':len(ids),'starts':len(upstream.jobs),
                 'projects':len({j['project'] for j in upstream.jobs.values()}),'peak':peak,
                 'state_mismatches':upstream.mismatches,'real_prism_requests':0,
-                'asset_network_requests':upstream.asset_requests,
+                'asset_network_requests':upstream.asset_requests,'reconnects':len(upstream.reconnected),
                 'elapsed_seconds':round(time.monotonic()-started,3)}
             print(json.dumps(result), flush=True)
             if args.output:

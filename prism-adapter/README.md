@@ -168,3 +168,9 @@ python prism-adapter/smoke_multiplex.py --chrome /path/to/chrome \
 ```
 
 systemd 部署还需注意环境变量优先级：`EnvironmentFile` 中的值会覆盖 `Environment=`。若已有环境文件配置了并发，应更新对应文件，或在 drop-in 中追加最后读取的专用 `EnvironmentFile`；重启后必须核对进程实际环境，不能只看 drop-in 文本。Docker Compose 则在适配器服务的 `environment:` 下设置变量。
+
+### 项目环境重连与真实失败
+
+multiplex 识别官方 start 返回的明确 `completed / response.status=error / payload.reason=sandbox_reconnecting`。此时保持准备页面，让官方页面等待自己的 `ensureSandboxConnection` 后继续提交，而不是立刻关闭页面。仅允许同一输入、previousResponseId、conversationId、项目、模型和强度；sandbox 元数据由官方页面刷新。每轮最多 3 次 start 尝试，仍受请求总时限限制。未知结果、一般 HTTP/网络错误、其他终态失败都不能重新放行 start。
+
+日志记录重连次数；回执 `start_count` 如实包含这类明确环境重连尝试。`conversation_too_large`、`project_edit_access_required` 与 `sandbox_reconnecting` 分别报告，不再全部掩盖为 `prism_failed`；其他未知失败保持通用错误，且不输出上游任意报错文本。

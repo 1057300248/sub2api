@@ -199,6 +199,9 @@ class BrowserStart:
         self.poll_body = asyncio.get_running_loop().create_future()
         self.cache_hit = False
         self.phase = 'initializing'
+        self.start_attempts = 0
+        self.intent = None
+        self.reconnects = 0
 
     async def route(self, route):
         try:
@@ -209,6 +212,13 @@ class BrowserStart:
                 if (not self.closed and self.armed and not self.sent and isinstance(metadata, dict)
                         and metadata.get('model') == self.model and metadata.get('reasoning_effort') == self.effort
                         and metadata.get('projectId') == self.project and request.method == 'POST'):
+                    intent = fingerprint({key:body.get(key) for key in ('input', 'previousResponseId', 'conversationId')})
+                    if self.intent is not None and intent != self.intent:
+                        self.violation = True
+                        await route.abort()
+                        return
+                    self.intent = intent
+                    self.start_attempts += 1
                     self.sent = True
                     self.start_request = request
                     self.start_fingerprint = fingerprint(body)
@@ -242,6 +252,22 @@ class BrowserStart:
             request_id = data.get('request_id')
             if not isinstance(request_id, str) or not request_id or len(request_id) > 1024:
                 self.start_response.set_result(None)
+                return
+            if (data.get('status') == 'completed'
+                    and isinstance(data.get('response'), dict)
+                    and data['response'].get('status') == 'error'
+                    and self.api.terminal_failure_reason(data) == 'sandbox_reconnecting'
+                    and self.start_attempts < 3):
+                # The official UI waits for ensureSandboxConnection then authors
+                # another start. Only this explicit pre-execution result permits
+                # rearming; never synthesize a retry or repeat an unknown start.
+                self.reconnects += 1
+                self.journal.update(stage='runtime_reconnecting', request_id=request_id)
+                self.sent = False
+                self.start_fingerprint = None
+                self.phase = 'waiting_runtime_reconnect'
+                self.engine.observe('prism_runtime_reconnect_wait', self.journal,
+                                    attempts=self.start_attempts)
                 return
             self.request_id = request_id
             self.start_response.set_result(data)
@@ -453,14 +479,15 @@ class MultiplexBrowser:
                         self.polling -= 1
                         self.observe('prism_poll_end', journal)
                 result = self.api.terminal_text(data)
-                self.state.receipt(account_id, start.request_id, 1, polls, result, start.cache_hit, model=model, effort=effort)
+                self.state.receipt(account_id, start.request_id, getattr(start, 'start_attempts', 1), polls, result, start.cache_hit, model=model, effort=effort)
                 journal.finish()
                 if isinstance(result, self.api.AdapterError):
                     response = data.get('response') if isinstance(data.get('response'), dict) else {}
                     self.observe('prism_upstream_terminal_failure', journal,
                         response_failed=response.get('status') in ('failed', 'error'),
                         turn_failed=data.get('status') in ('failed', 'error'),
-                        from_start=polls == 0)
+                        from_start=polls == 0,
+                        reason=self.api.terminal_failure_reason(data))
                     raise result
                 if session_id and reuse_project:
                     actor.projects[session_id] = (start.project, time.monotonic())

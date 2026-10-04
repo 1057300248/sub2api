@@ -485,3 +485,58 @@ class TerminalConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('prism_upstream_terminal_failure',events)
             self.assertEqual((engine.polling,engine.preparing,actor.refs),(0,0,0))
             self.assertEqual(list(engine.state.pending.iterdir()),[])
+
+class RuntimeReconnectTests(unittest.IsolatedAsyncioTestCase):
+    def request(self, start, *, prompt='original', token='sandbox-a'):
+        body={'input':[{'role':'user','content':prompt}], 'conversationId':'conversation-a',
+              'metadata':{'model':start.model,'reasoning_effort':start.effort,'projectId':'project', 'sandbox_token':token}}
+        route=mock.Mock(abort=mock.AsyncMock(),continue_=mock.AsyncMock())
+        route.request=SimpleNamespace(url=adapter.BASE+adapter.START,method='POST',post_data_json=body)
+        return route
+
+    async def response(self, start, route, reason):
+        data={'request_id':'attempt-'+str(start.start_attempts),'status':'completed',
+              'response':{'status':'error','payload':{'reason':reason}}}
+        response=SimpleNamespace(url=adapter.BASE+adapter.START,status=200,request=route.request,json=mock.AsyncMock(return_value=data))
+        await start.response(response)
+        return data
+
+    async def test_only_explicit_reconnect_allows_ui_to_continue_same_intent(self):
+        engine=SimpleNamespace(api=adapter,observe=mock.Mock())
+        journal=SimpleNamespace(local_id='fixture',update=mock.Mock())
+        start=multiplex_browser.BrowserStart(engine,None,journal,'scope','gpt-6.1-sol','xhigh')
+        start.project,start.armed='project',True
+        first=self.request(start)
+        await start.route(first)
+        await self.response(start,first,'sandbox_reconnecting')
+        self.assertFalse(start.sent)
+        self.assertFalse(start.start_response.done())
+        retry=self.request(start,token='sandbox-b')
+        await start.route(retry)
+        retry.continue_.assert_awaited_once()
+        await self.response(start,retry,'sandbox_reconnecting')
+        last=self.request(start,token='sandbox-c')
+        await start.route(last)
+        await self.response(start,last,'sandbox_reconnecting')
+        self.assertTrue(start.start_response.done())
+        self.assertEqual(start.start_attempts,3)
+        fourth=self.request(start,token='sandbox-d')
+        await start.route(fourth)
+        fourth.continue_.assert_not_awaited()
+
+    async def test_reconnect_never_authorizes_changed_prompt_or_unknown_failure(self):
+        for reason in ['sandbox_reconnecting','unknown']:
+            engine=SimpleNamespace(api=adapter,observe=mock.Mock())
+            start=multiplex_browser.BrowserStart(engine,None,SimpleNamespace(update=mock.Mock()),None)
+            start.project,start.armed='project',True
+            first=self.request(start)
+            await start.route(first)
+            await self.response(start,first,reason)
+            second=self.request(start,prompt='different' if reason=='sandbox_reconnecting' else 'original')
+            await start.route(second)
+            second.continue_.assert_not_awaited()
+            second.abort.assert_awaited_once()
+
+    async def test_failure_reason_never_returns_arbitrary_upstream_text(self):
+        for value in ['private-token','https://private.invalid','Bearer secret',{'token':'secret'},None]:
+            self.assertEqual(adapter.terminal_failure_reason({'response':{'payload':{'reason':value}}}),'unknown')
