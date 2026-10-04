@@ -267,8 +267,11 @@ func armNativeRecoveryRamp(ctx context.Context, tx *sql.Tx, extra map[string]any
 		return nil
 	}
 	c := service.DefaultOAuthAutoConfig()
-	if json.Unmarshal([]byte(raw), &c) != nil || !c.UpgradeEnabled {
-		return nil
+	if json.Unmarshal([]byte(raw), &c) != nil {
+		return fmt.Errorf("decode OAuth auto-config")
+	}
+	if !c.UpgradeEnabled {
+		return fmt.Errorf("quality recovery requires OAuth concurrency upgrades to be enabled")
 	}
 	max := target
 	if c.MaxConcurrency < max {
