@@ -244,6 +244,7 @@ gateway:
     # rules:
     #   - domain: api.vendor.example
     #     region: us
+    #     account_ids: [123] # optional upstream account IDs, not client API Key IDs
     #   - domain: "*.us.vendor.example"
     #     region: us
     # Inject SUB2API_EGRESS_US_PROXY_URL via Secret/EnvironmentFile, for example
