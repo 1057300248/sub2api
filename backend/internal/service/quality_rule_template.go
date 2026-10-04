@@ -190,6 +190,7 @@ func prepareQualityTemplate(t *QualityRuleTemplate) error {
 	if _, err := nextPlanRun(sample, time.Now()); err != nil {
 		return fmt.Errorf("invalid test schedule: %w", err)
 	}
+	t.ModelID = sample.ModelID
 	t.MaxResults = sample.MaxResults
 	t.PelicanConfig = sample.PelicanConfig
 	return nil

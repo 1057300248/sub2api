@@ -18,6 +18,8 @@ type PelicanTestConfig struct {
 	ParallelCount      int            `json:"parallel_count"`
 	// ModelID is recorded with each result so later edits do not relabel history.
 	ModelID string `json:"model_id,omitempty"`
+	// ModelIDs selects all models in a quality round; old plans use ModelID.
+	ModelIDs []string `json:"model_ids,omitempty"`
 }
 
 // ScheduledTestPlan represents a scheduled test plan domain model.

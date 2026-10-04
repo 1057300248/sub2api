@@ -74,11 +74,16 @@ export function buildQualityRulePatch(
     patch.cron_expression = draft.cron_expression.trim()
   }
   if (fields.includes('enabled')) patch.enabled = draft.enabled
-  if (!fields.some(field => ['test', 'action', 'restore'].includes(field))) return patch
+  if (!fields.some(field => ['test', 'action', 'restore'].includes(field)) &&
+    !(fields.includes('model') && (draft.pelican_config.model_ids?.length || plan.pelican_config?.model_ids?.length))) return patch
 
   if (!plan.pelican_config?.quality) throw new Error('qualityOps.ruleConfigMissing')
   const config: PelicanTestConfig & { quality: QualityPolicy } = JSON.parse(JSON.stringify(plan.pelican_config))
   const source = draft.pelican_config
+  if (fields.includes('model')) {
+    config.model_ids = [...new Set([draft.model_id.trim(), ...(source.model_ids || []).map(model => model.trim())])]
+    if (config.model_ids.some(model => !model || model.length > 100)) throw new Error('qualityOps.modelRequired')
+  }
   if (fields.includes('test')) {
     config.question_kind = source.question_kind
     if (source.test_channel) config.test_channel = source.test_channel
@@ -88,7 +93,7 @@ export function buildQualityRulePatch(
     config.prompt = probe ? '' : source.prompt
     config.parallel_count = probe ? 1 : source.parallel_count
     config.quality.expected_answer = probe ? '' : source.quality.expected_answer
-    if (probe) delete config.quality.judge
+    if (probe) { delete config.quality.judge; config.model_ids = [patch.model_id || plan.model_id] }
     else {
       const judge = source.quality.judge
       if (!judge?.group_id || !judge.model_id.trim() || !judge.prompt.trim()) throw new Error('qualityOps.configureJudge')
@@ -128,6 +133,10 @@ export function buildQualityRulePatch(
     config.quality.bps.pass_threshold = from.pass_threshold
     config.quality.bps.hold_on_usage = from.hold_on_usage
   }
+  if (config.question_kind === STATE_PROBE_QUESTION && (config.model_ids?.length || 0) > 1) throw new Error('qualityOps.probeSingleModel')
+  const samples = (config.model_ids?.length || 1) * config.parallel_count
+  if (samples > 100 || (config.model_ids?.length || 0) > 50) throw new Error('qualityOps.tooManyModelSamples')
+  if (samples > plan.max_results) patch.max_results = samples
   patch.pelican_config = config
   return patch
 }

@@ -36,6 +36,7 @@ const (
 )
 
 func (s *AccountTestService) RunPelicanBackground(ctx context.Context, accountID int64, model string, cfg *PelicanTestConfig) (*ScheduledTestResult, error) {
+	ctx = context.WithValue(ctx, qualityProbeContextKey{}, true)
 	// 探针题型不下发题目，直接走门票探针。
 	if isOpenAICodexStateProbePlan(cfg) {
 		return s.runOpenAICodexStateProbeScheduled(ctx, accountID, model, cfg)
@@ -84,12 +85,26 @@ func (s *AccountTestService) RunPelicanBackground(ctx context.Context, accountID
 	return &ScheduledTestResult{Status: status, ResponseText: output, ErrorMessage: message, LatencyMs: finished.Sub(started).Milliseconds(), StartedAt: started, FinishedAt: finished, PelicanConfig: &snapshot}, nil
 }
 
-func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *ScheduledTestPlan) {
+func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *ScheduledTestPlan) bool {
+	var triggeredAccount *Account
+	if plan.TriggerSource == quality5xxSource && s.accountTestSvc != nil {
+		var lookupErr error
+		triggeredAccount, lookupErr = s.accountTestSvc.accountRepo.GetByID(ctx, plan.AccountID)
+		if lookupErr != nil || triggeredAccount == nil {
+			return false // Keep the queued signal; no completed run has taken place.
+		}
+		if triggeredAccount.TempUnschedulableUntil != nil && triggeredAccount.TempUnschedulableUntil.After(time.Now()) {
+			return false // Let the native cooldown drain before probing the account again.
+		}
+	}
 	now := time.Now()
 	next, err := nextPlanRun(plan, now)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "pelican plan=%d invalid config: %v", plan.ID, err)
-		return
+		return false
+	}
+	if plan.TriggerSource == quality5xxSource && plan.NextRunAt != nil && plan.NextRunAt.After(now) {
+		next = *plan.NextRunAt
 	}
 	// Persisted lease prevents duplicate execution across ticks and server replicas.
 	// It also recovers automatically after a process crash.
@@ -99,8 +114,19 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		logger.LegacyPrintf("service.scheduled_test_runner", "pelican plan=%d claim failed: %v", plan.ID, err)
 	}
 	if err != nil || !claimed {
-		return
+		return false
 	}
+	// Result-only metadata must not mutate the stored rule or shared plan config.
+	snapshot := *plan.PelicanConfig
+	snapshot.TriggerSource = plan.TriggerSource
+	if snapshot.TriggerSource == "" {
+		snapshot.TriggerSource = "scheduled"
+	}
+	applyTriggeredQuality := true
+	if triggeredAccount != nil {
+		snapshot, applyTriggeredQuality = quality5xxTestConfig(triggeredAccount, plan.ModelID, snapshot)
+	}
+	plan.PelicanConfig = &snapshot
 	// Legacy rules can target API-key accounts, or an account can change type
 	// after a rule is saved. Advance the claimed schedule without running a
 	// probe or recording a misleading inconclusive quality round.
@@ -114,19 +140,46 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 			if finishErr := s.planRepo.FinishPelican(finishCtx, plan.ID, until, time.Now()); finishErr != nil {
 				logger.LegacyPrintf("service.scheduled_test_runner", "pelican plan=%d finish failed: %v", plan.ID, finishErr)
 			}
-			return
+			return false
 		}
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	results := make([]*ScheduledTestResult, plan.PelicanConfig.ParallelCount)
-	var wg sync.WaitGroup
+	observationTrigger := "scheduled"
+	if plan.TriggerSource == quality5xxSource {
+		observationTrigger = "upstream_5xx"
+	}
+	runCtx = context.WithValue(runCtx, oauthProbeRuleKey{}, oauthProbeRule{id: plan.ID, roundID: until.Format(time.RFC3339Nano), triggerSource: observationTrigger})
+	models := []string{plan.ModelID}
+	if len(plan.PelicanConfig.ModelIDs) > 0 {
+		models = plan.PelicanConfig.ModelIDs
+	}
+	results := make([]*ScheduledTestResult, len(models)*plan.PelicanConfig.ParallelCount)
+	// Samples are interleaved by model so each model can start before repeats.
+	// Bound upstream concurrency while waiting for every result, even failures.
+	jobs := make(chan int, len(results))
 	for i := range results {
+		jobs <- i
+	}
+	close(jobs)
+	var wg sync.WaitGroup
+	workers := len(results)
+	if workers > 8 {
+		workers = 8
+	}
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
-		go func(index int) {
+		go func() {
 			defer wg.Done()
-			results[index] = s.runPelicanSample(runCtx, plan)
-		}(i)
+			for index := range jobs {
+				samplePlan := *plan
+				cfg := *plan.PelicanConfig
+				samplePlan.ModelID = models[index%len(models)]
+				cfg.ModelID = samplePlan.ModelID
+				samplePlan.PelicanConfig = &cfg
+				results[index] = s.runPelicanSample(runCtx, &samplePlan)
+			}
+		}()
 	}
 	wg.Wait()
 	// Persist timeout failures with a fresh context even after the request deadline.
@@ -134,11 +187,14 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	defer stop()
 	qualityAction := ""
 	if plan.PelicanConfig.Quality != nil {
-		var actionErr error
-		qualityAction, actionErr = s.planRepo.ApplyQualityOutcome(saveCtx, plan, until, qualityOutcome(results))
-		if actionErr != nil {
-			qualityAction = "action_error"
-			logger.LegacyPrintf("service.scheduled_test_runner", "quality plan=%d action failed: %v", plan.ID, actionErr)
+		qualityAction = "inconclusive"
+		if applyTriggeredQuality {
+			var actionErr error
+			qualityAction, actionErr = s.planRepo.ApplyQualityOutcome(saveCtx, plan, until, qualityRoundOutcome(results, len(models) > 1))
+			if actionErr != nil {
+				qualityAction = "action_error"
+				logger.LegacyPrintf("service.scheduled_test_runner", "quality plan=%d action failed: %v", plan.ID, actionErr)
+			}
 		}
 	}
 	succeeded := false
@@ -157,9 +213,23 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	if succeeded && plan.AutoRecover && plan.PelicanConfig.Quality == nil && !isBuiltinCandyPlan(plan.PelicanConfig) && !isOpenAICodexStateProbePlan(plan.PelicanConfig) {
 		s.tryRecoverAccount(saveCtx, plan.AccountID, plan.ID)
 	}
-	if err := s.planRepo.FinishPelican(saveCtx, plan.ID, until, time.Now()); err != nil {
-		logger.LegacyPrintf("service.scheduled_test_runner", "pelican plan=%d finish failed: %v", plan.ID, err)
+	finished := time.Now()
+	if plan.TriggerSource == quality5xxSource {
+		// The stored rule was validated before claiming. The execution-only
+		// question may now be candy even for a state-probe BPS recovery rule.
+		following, nextErr := computeNextRun(plan.CronExpression, finished)
+		if nextErr != nil {
+			return false
+		}
+		err = s.planRepo.FinishTriggeredQuality(saveCtx, plan, until, finished, following)
+	} else {
+		err = s.planRepo.FinishPelican(saveCtx, plan.ID, until, finished)
 	}
+	if err != nil {
+		logger.LegacyPrintf("service.scheduled_test_runner", "pelican plan=%d finish failed: %v", plan.ID, err)
+		return false
+	}
+	return true
 }
 
 // Each sample runs in its own goroutine, outside Gin recovery. Always return a
@@ -185,10 +255,16 @@ func (s *ScheduledTestRunnerService) runPelicanSample(ctx context.Context, plan 
 	if result == nil {
 		return failure("scheduled_test_empty_result: background sample returned no result")
 	}
+	result.PelicanConfig = plan.PelicanConfig
 	// 探针题型的结果自带 correct/incorrect/unknown 判定，不经过判题模型。
 	if plan.PelicanConfig.Quality != nil && result.Status == "success" && !isOpenAICodexStateProbePlan(plan.PelicanConfig) {
 		var judgment *QualityJudgment
-		if s.judgeQuality != nil {
+		if plan.TriggerSource == quality5xxSource && isBuiltinCandyPlan(plan.PelicanConfig) {
+			judgment = &QualityJudgment{Verdict: "incorrect", Reason: "builtin_candy", AccountID: plan.AccountID}
+			if CandyAnswerCorrect(result.ResponseText) {
+				judgment.Verdict = "correct"
+			}
+		} else if s.judgeQuality != nil {
 			judgment = s.judgeQuality(ctx, plan.AccountID, plan.PelicanConfig, result.ResponseText)
 		}
 		applyQualityJudgment(result, judgment)

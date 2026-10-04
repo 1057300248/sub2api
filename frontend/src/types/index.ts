@@ -2592,6 +2592,7 @@ export interface PelicanTestConfig {
   reasoning_effort: string
   parallel_count: number
   model_id?: string
+  model_ids?: string[]
 }
 
 export interface ScheduledTestPlan {

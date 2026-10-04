@@ -100,6 +100,16 @@ func validateQualityPolicy(plan *ScheduledTestPlan) error {
 
 // One completed wrong answer quarantines; restoration requires every probe to pass.
 // Transport errors alone are inconclusive, never evidence of degradation.
+// Multi-model rules pass only when every selected model/sample passed.
+// Preserve the legacy single-model transport-error policy for existing rules.
+func qualityRoundOutcome(results []*ScheduledTestResult, multipleModels bool) string {
+	outcome := qualityOutcome(results)
+	if multipleModels && outcome != "passed" {
+		return "failed"
+	}
+	return outcome
+}
+
 func qualityOutcome(results []*ScheduledTestResult) string {
 	allPassed := len(results) > 0
 	for _, r := range results {
@@ -128,6 +138,20 @@ func (s *ScheduledTestService) ListQualityHistory(ctx context.Context, beforeID 
 	items, err := s.resultRepo.ListQualityHistory(ctx, beforeID, 101)
 	if err != nil {
 		return nil, err
+	}
+	// Results are persisted individually after all model requests have ended.
+	// During those writes (or after a failed write), never label a partial round
+	// as passing simply because its first saved sample passed.
+	for _, item := range items {
+		if cfg := item.PelicanConfig; cfg != nil && len(cfg.ModelIDs) > 1 {
+			expected := len(cfg.ModelIDs) * cfg.ParallelCount
+			if item.TotalCount < expected {
+				item.TotalCount = expected
+			}
+			if item.PassedCount < item.TotalCount {
+				item.Status = "failed"
+			}
+		}
 	}
 	page := &QualityHistoryPage{Items: items}
 	if len(items) > 100 {
