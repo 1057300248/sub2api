@@ -44,7 +44,7 @@ func (r *scheduledTestPlanRepository) applyImmediateQuality5xx(ctx context.Conte
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	// All quality transitions lock plan then account; never acquire a probe lease.
 	plan, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id,account_id,model_id,cron_expression,enabled,max_results,auto_recover,last_run_at,next_run_at,created_at,updated_at,pelican_config,running_until FROM scheduled_test_plans WHERE id=$1 AND account_id=$2 FOR UPDATE`, planID, accountID))
 	if err == sql.ErrNoRows {

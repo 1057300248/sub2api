@@ -5,8 +5,8 @@ package service
 import (
 	"context"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/qualityqueue/queuetest"
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
@@ -23,12 +23,12 @@ func (r *immediateQualityAccountRepo) ApplyQuality5xx(ctx context.Context, id in
 }
 func TestQuality5xxProductionProviderAppliesBeforeReturning(t *testing.T) {
 	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	defer rdb.Close()
+	rdb := queuetest.NewClient(mr.Addr())
+	defer func() { _ = rdb.Close() }()
 	repo := &immediateQualityAccountRepo{}
 	svc := ProvideRateLimitService(repo, nil, &config.Config{}, nil, nil, nil, nil, nil, nil, nil, nil, rdb)
 	require.NotNil(t, svc.qualityTrigger)
-	defer svc.qualityTrigger.redis.Close()
+	defer func() { _ = svc.qualityTrigger.queue.Close() }()
 	svc.observeQualityStatus(context.Background(), &Account{ID: 12, Type: AccountTypeOAuth}, 503)
 	require.Equal(t, 1, repo.calls, "protection must finish before observer returns")
 	members, err := mr.ZMembers(quality5xxPendingKey)
@@ -50,10 +50,10 @@ func TestQuality5xxPendingRemoveModelsNotCoveredByOlderFinish(t *testing.T) {
 
 func TestQuality5xxWorkerProviderHasQueue(t *testing.T) {
 	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	defer rdb.Close()
+	rdb := queuetest.NewClient(mr.Addr())
+	defer func() { _ = rdb.Close() }()
 	cfg := &config.Config{}
 	svc := ProvideScheduledTestRunnerService(nil, nil, &AccountTestService{}, &RateLimitService{}, cfg, &QualityJudgeService{}, rdb, nil, &ChannelMonitorV2Service{})
 	require.NotNil(t, svc.qualityTrigger, "worker provider must connect the cross-instance queue")
-	defer svc.qualityTrigger.redis.Close()
+	defer func() { _ = svc.qualityTrigger.queue.Close() }()
 }

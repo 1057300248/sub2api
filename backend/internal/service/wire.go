@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/qualityqueue"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
@@ -565,7 +566,9 @@ func ProvideRateLimitService(
 ) *RateLimitService {
 	svc := NewRateLimitService(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
 	svc.accountOps = accountOps
-	svc.qualityTrigger = newQuality5xxTrigger(rdb)
+	if rdb != nil {
+		svc.qualityTrigger = &quality5xxTrigger{queue: qualityqueue.NewRedis(rdb)}
+	}
 	if svc.qualityTrigger != nil {
 		svc.qualityTrigger.immediate, _ = accountRepo.(quality5xxImmediateRepository)
 	}
@@ -727,7 +730,9 @@ func ProvideScheduledTestRunnerService(
 	monitor *ChannelMonitorV2Service,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
-	svc.qualityTrigger = newQuality5xxTrigger(rdb)
+	if rdb != nil {
+		svc.qualityTrigger = &quality5xxTrigger{queue: qualityqueue.NewRedis(rdb)}
+	}
 	svc.judgeQuality = judge.Judge
 	svc.groupTests = groupTests
 	svc.candyMonitor = monitor.candy

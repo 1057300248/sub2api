@@ -38,18 +38,22 @@ func TestQualityModelCooldownPreservesNativeAndManualChanges(t *testing.T) {
 	require.NoError(t, err)
 	_, err = transitionQualityModels(account, &state, 7, []string{"target"}, now.Add(30*time.Minute), "passed", true, now)
 	require.NoError(t, err)
-	require.Equal(t, old, account.Extra["model_rate_limits"].(map[string]any)["target"])
-	require.Equal(t, old, account.Extra["model_rate_limits"].(map[string]any)["other"])
+	limits, ok := account.Extra["model_rate_limits"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, old, limits["target"])
+	require.Equal(t, old, limits["other"])
 	state = qualityState{}
 	_, err = transitionQualityModels(account, &state, 7, []string{"target"}, now.Add(30*time.Minute), "failed", true, now)
 	require.NoError(t, err)
 	account.Concurrency = 9
-	account.Extra["model_rate_limits"].(map[string]any)["target"] = old
+	limits, ok = account.Extra["model_rate_limits"].(map[string]any)
+	require.True(t, ok)
+	limits["target"] = old
 	action, err := transitionQualityModels(account, &state, 7, []string{"target"}, now.Add(30*time.Minute), "passed", true, now)
 	require.NoError(t, err)
 	require.Equal(t, "restore_conflict", action)
 	require.Equal(t, 9, account.Concurrency)
-	require.Equal(t, old, account.Extra["model_rate_limits"].(map[string]any)["target"])
+	require.Equal(t, old, limits["target"])
 	_, err = json.Marshal(state)
 	require.NoError(t, err)
 }
@@ -64,7 +68,8 @@ func TestQualityModelInconclusiveRetainsOwnedRestriction(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 3, a.Concurrency)
 	require.Equal(t, 12, *state.PreviousConcurrency)
-	limits := a.Extra["model_rate_limits"].(map[string]any)
+	limits, ok := a.Extra["model_rate_limits"].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, now.Add(time.Hour), cooldownEntryUntil(limits["target"]))
 	_, err = transitionQualityModels(a, &state, 7, []string{"target"}, now.Add(time.Hour), "passed", true, now)
 	require.NoError(t, err)
@@ -162,7 +167,8 @@ func TestQualityModelRecoveryRemovesOnlyExpiredOwnedEntries(t *testing.T) {
 	state := qualityState{}
 	_, err := transitionQualityModels(a, &state, 7, []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-6.1-sol"}, now.Add(-time.Minute), "failed", true, now.Add(-time.Hour))
 	require.NoError(t, err)
-	limits := a.Extra["model_rate_limits"].(map[string]any)
+	limits, ok := a.Extra["model_rate_limits"].(map[string]any)
+	require.True(t, ok)
 	manual := map[string]any{"reason": "upstream_429", "rate_limit_reset_at": now.Add(time.Hour).Format(time.RFC3339)}
 	limits["gpt-5.6-sol"] = manual
 	action, err := transitionQualityModels(a, &state, 7, []string{"gpt-6-astra"}, now.Add(time.Hour), "passed", true, now)

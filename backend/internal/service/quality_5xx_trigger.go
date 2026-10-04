@@ -5,15 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/qualityqueue"
 )
 
 const quality5xxSource = "upstream_5xx"
-const quality5xxPendingKey = "quality:5xx:pending"
+const quality5xxPendingKey = qualityqueue.PendingKey
 const quality5xxTempUnschedReason = "quality_5xx"
 const quality5xxTempUnschedDuration = 10 * time.Minute
 
@@ -26,54 +25,25 @@ type quality5xxImmediateRepository interface {
 }
 
 type quality5xxTrigger struct {
-	immediate  quality5xxImmediateRepository
-	redis      *redis.Client
-	ownsClient bool
+	immediate quality5xxImmediateRepository
+	queue     qualityqueue.Queue
 }
 
 func (s *quality5xxTrigger) signalIsCurrent(accountID int64, observedAt time.Time) bool {
-	if s == nil || s.redis == nil || accountID <= 0 {
+	if s == nil || s.queue == nil || accountID <= 0 {
 		return true
 	}
-	score, err := s.redis.ZScore(context.Background(), quality5xxPendingKey, strconv.FormatInt(accountID, 10)).Result()
+	score, err := s.queue.Score(context.Background(), accountID)
 	if err != nil {
 		// Redis loss must fail closed: an old successful probe must not release
 		// quarantine when the fencing signal cannot be read.
 		return false
 	}
-	return score <= float64(observedAt.UnixMilli())
+	return !score.After(observedAt)
 }
-
-func newQuality5xxTrigger(shared *redis.Client) *quality5xxTrigger {
-	if shared == nil {
-		return nil
-	}
-	// Same Redis database and credentials, separate tiny pool so stalled signal
-	// delivery cannot hold a user request behind an unrelated shared-pool wait.
-	opts := *shared.Options()
-	opts.ContextTimeoutEnabled = true
-	opts.ReadTimeout = 150 * time.Millisecond
-	opts.WriteTimeout = 150 * time.Millisecond
-	opts.DialTimeout = 150 * time.Millisecond
-	opts.PoolTimeout = 150 * time.Millisecond
-	opts.MaxRetries = -1
-	opts.PoolSize = 4
-	opts.MinIdleConns = 0
-	return &quality5xxTrigger{redis: redis.NewClient(&opts), ownsClient: true}
-}
-
-var queueQuality5xx = redis.NewScript(`
- -- Every 5xx starts a newer episode. Replacing the score fences an older
- -- probe's completion cleanup and guarantees the signal is retried after it.
- local score = tonumber(ARGV[2])
- local prior = tonumber(redis.call('ZSCORE', KEYS[1], ARGV[1]))
- if prior and prior >= score then score = prior + 1 end
- redis.call('ZADD', KEYS[1], score, ARGV[1])
- redis.call('EXPIRE', KEYS[1], 1200)
- return 1`)
 
 func (s *quality5xxTrigger) Observe(ctx context.Context, account *Account, status int) {
-	if s == nil || s.redis == nil || account == nil || account.ID <= 0 || account.Type != AccountTypeOAuth || status < 500 || status > 599 || ctx.Value(qualityProbeContextKey{}) != nil {
+	if s == nil || s.queue == nil || account == nil || account.ID <= 0 || account.Type != AccountTypeOAuth || status < 500 || status > 599 || ctx.Value(qualityProbeContextKey{}) != nil {
 		return
 	}
 	// Complete native account protection before retry/selection can continue.
@@ -88,14 +58,13 @@ func (s *quality5xxTrigger) Observe(ctx context.Context, account *Account, statu
 	}
 	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 150*time.Millisecond)
 	defer cancel()
-	id := strconv.FormatInt(account.ID, 10)
-	if _, err := queueQuality5xx.Run(enqueueCtx, s.redis, []string{quality5xxPendingKey}, id, time.Now().UnixMilli()).Result(); err != nil {
+	if err := s.queue.Enqueue(enqueueCtx, account.ID, time.Now()); err != nil {
 		slog.Warn("quality 5xx trigger could not be queued", "account_id", account.ID)
 	}
 }
 
 func (s *ScheduledTestRunnerService) startQualityTriggers() {
-	if s.qualityTrigger == nil || s.qualityTrigger.redis == nil {
+	if s.qualityTrigger == nil || s.qualityTrigger.queue == nil {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -114,18 +83,14 @@ func (s *ScheduledTestRunnerService) startQualityTriggers() {
 			case <-ticker.C:
 			}
 			scanCtx, stop := context.WithTimeout(ctx, 2*time.Second)
-			rdb := s.qualityTrigger.redis
-			_ = rdb.ZRemRangeByScore(scanCtx, quality5xxPendingKey, "-inf", strconv.FormatInt(time.Now().Add(-20*time.Minute).UnixMilli(), 10)).Err()
-			pending, err := rdb.ZRangeWithScores(scanCtx, quality5xxPendingKey, 0, 99).Result()
+			queue := s.qualityTrigger.queue
+			pending, err := queue.Pending(scanCtx, time.Now().Add(-20*time.Minute))
 			stop()
 			if err != nil {
 				continue
 			}
 			for _, entry := range pending {
-				id, err := strconv.ParseInt(fmt.Sprint(entry.Member), 10, 64)
-				if err != nil {
-					continue
-				}
+				id := entry.AccountID
 				if _, loaded := active.LoadOrStore(id, true); loaded {
 					continue
 				}
@@ -136,19 +101,19 @@ func (s *ScheduledTestRunnerService) startQualityTriggers() {
 					continue
 				}
 				s.triggerWG.Add(1)
-				go func(id int64, entry redis.Z) {
+				go func(id int64, entry qualityqueue.Signal) {
 					defer s.triggerWG.Done()
 					defer func() { <-slots; active.Delete(id) }()
 					runCtx, cancel := context.WithTimeout(ctx, 12*time.Minute)
 					defer cancel()
-					if err := s.runQualityTriggeredAccount(runCtx, id, time.UnixMilli(int64(entry.Score))); err != nil {
+					if err := s.runQualityTriggeredAccount(runCtx, id, entry.ObservedAt); err != nil {
 						return
 					}
 					if runCtx.Err() != nil {
 						return
 					}
 					// Do not remove a newer signal that arrived after queue expiry.
-					_ = rdb.Eval(runCtx, `if tonumber(redis.call('ZSCORE',KEYS[1],ARGV[1])) == tonumber(ARGV[2]) then return redis.call('ZREM',KEYS[1],ARGV[1]) end return 0`, []string{quality5xxPendingKey}, entry.Member, entry.Score).Err()
+					_ = queue.Acknowledge(runCtx, entry)
 				}(id, entry)
 			}
 		}

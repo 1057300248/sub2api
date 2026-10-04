@@ -9,16 +9,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/qualityqueue"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/qualityqueue/queuetest"
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
 func TestQuality5xxSignalsFilterAndCoalesceAcrossReplicas(t *testing.T) {
 	r := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: r.Addr()})
-	defer client.Close()
-	trigger := &quality5xxTrigger{redis: client}
+	client := queuetest.NewClient(r.Addr())
+	defer func() { _ = client.Close() }()
+	trigger := &quality5xxTrigger{queue: qualityqueue.NewRedis(client)}
+	t.Cleanup(func() { _ = trigger.queue.Close() })
 	ctx := context.Background()
 	oauth := &Account{ID: 42, Type: AccountTypeOAuth}
 	trigger.Observe(ctx, oauth, 429)
@@ -87,9 +89,10 @@ func (r *qualityTriggerPlans) FinishTriggeredQuality(ctx context.Context, p *Sch
 
 func TestQuality5xxOnlyObservesActualHTTPFailures(t *testing.T) {
 	r := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: r.Addr()})
-	defer client.Close()
-	limiter := &RateLimitService{qualityTrigger: &quality5xxTrigger{redis: client}}
+	client := queuetest.NewClient(r.Addr())
+	defer func() { _ = client.Close() }()
+	limiter := &RateLimitService{qualityTrigger: &quality5xxTrigger{queue: qualityqueue.NewRedis(client)}}
+	t.Cleanup(func() { _ = limiter.qualityTrigger.queue.Close() })
 	ctx := context.Background()
 	account := &Account{ID: 21, Type: AccountTypeOAuth}
 	limiter.observeQualityResponse(ctx, account, nil, errors.New("network"))
@@ -194,15 +197,16 @@ func (r *qualityClaimFailureRepo) ClaimPelican(context.Context, *ScheduledTestPl
 }
 func TestQuality5xxWorkerRetainsSignalAfterClaimFailure(t *testing.T) {
 	r := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: r.Addr()})
-	defer client.Close()
+	client := queuetest.NewClient(r.Addr())
+	defer func() { _ = client.Close() }()
 	plan := pelicanPlan()
 	future := time.Now().Add(time.Hour)
 	plan.NextRunAt = &future
 	plan.PelicanConfig.QuestionKind = "candy"
 	plan.PelicanConfig.Quality = &QualityPolicy{TriggerOnUpstream5xx: true, Action: "disable_scheduling", ExpectedAnswer: "21"}
 	repo := &qualityClaimFailureRepo{plan: plan}
-	runner := &ScheduledTestRunnerService{planRepo: repo, qualityTrigger: &quality5xxTrigger{redis: client}}
+	runner := &ScheduledTestRunnerService{planRepo: repo, qualityTrigger: &quality5xxTrigger{queue: qualityqueue.NewRedis(client)}}
+	t.Cleanup(func() { _ = runner.qualityTrigger.queue.Close() })
 	runner.qualityTrigger.Observe(context.Background(), &Account{ID: 42, Type: AccountTypeOAuth}, 503)
 	runner.startQualityTriggers()
 	defer func() { runner.triggerCancel(); runner.triggerWG.Wait() }()
@@ -210,30 +214,18 @@ func TestQuality5xxWorkerRetainsSignalAfterClaimFailure(t *testing.T) {
 	require.Equal(t, []string{"42"}, client.ZRange(context.Background(), quality5xxPendingKey, 0, -1).Val())
 }
 
-func TestQuality5xxQueueHasIndependentShortTimeouts(t *testing.T) {
-	r := miniredis.RunT(t)
-	shared := redis.NewClient(&redis.Options{Addr: r.Addr(), ReadTimeout: 3 * time.Second, PoolSize: 50})
-	defer shared.Close()
-	trigger := newQuality5xxTrigger(shared)
-	defer trigger.redis.Close()
-	require.Equal(t, 3*time.Second, shared.Options().ReadTimeout)
-	require.Equal(t, 150*time.Millisecond, trigger.redis.Options().ReadTimeout)
-	require.True(t, trigger.redis.Options().ContextTimeoutEnabled)
-	trigger.Observe(context.Background(), &Account{ID: 5, Type: AccountTypeOAuth}, 500)
-	require.Equal(t, []string{"5"}, shared.ZRange(context.Background(), quality5xxPendingKey, 0, -1).Val())
-}
-
 func TestQuality5xxQueueFencesNewerEpisode(t *testing.T) {
 	r := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: r.Addr()})
-	defer client.Close()
-	trigger := &quality5xxTrigger{redis: client}
+	client := queuetest.NewClient(r.Addr())
+	defer func() { _ = client.Close() }()
+	trigger := &quality5xxTrigger{queue: qualityqueue.NewRedis(client)}
+	t.Cleanup(func() { _ = trigger.queue.Close() })
 	ctx := context.Background()
 	observedAt := time.Now().UnixMilli()
-	require.NoError(t, queueQuality5xx.Run(ctx, client, []string{quality5xxPendingKey}, "9", observedAt).Err())
+	require.NoError(t, trigger.queue.Enqueue(ctx, 9, time.UnixMilli(observedAt)))
 	first := client.ZScore(ctx, quality5xxPendingKey, "9").Val()
 	// Reuse the exact clock value to prove same-millisecond events are distinct.
-	require.NoError(t, queueQuality5xx.Run(ctx, client, []string{quality5xxPendingKey}, "9", observedAt).Err())
+	require.NoError(t, trigger.queue.Enqueue(ctx, 9, time.UnixMilli(observedAt)))
 	second := client.ZScore(ctx, quality5xxPendingKey, "9").Val()
 	require.Greater(t, second, first)
 	require.False(t, trigger.signalIsCurrent(9, time.UnixMilli(int64(first))))

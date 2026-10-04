@@ -10,18 +10,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/qualityqueue"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/qualityqueue/queuetest"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
-func qualitySignalTestLimiter(t *testing.T) (*RateLimitService, *redis.Client) {
+func qualitySignalTestLimiter(t *testing.T) (*RateLimitService, *miniredis.Miniredis) {
 	t.Helper()
 	r := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: r.Addr()})
+	client := queuetest.NewClient(r.Addr())
 	t.Cleanup(func() { _ = client.Close() })
-	return &RateLimitService{qualityTrigger: &quality5xxTrigger{redis: client}}, client
+	queue := qualityqueue.NewRedis(client)
+	t.Cleanup(func() { _ = queue.Close() })
+	return &RateLimitService{qualityTrigger: &quality5xxTrigger{queue: queue}}, r
 }
 
 func TestQuality5xxSemanticStreams(t *testing.T) {
@@ -47,7 +50,7 @@ func TestQuality5xxSemanticStreams(t *testing.T) {
 				} else {
 					_, _ = svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "gpt-5.5", "gpt-5.5")
 				}
-				require.Equal(t, tc.want, client.ZScore(context.Background(), quality5xxPendingKey, "417").Err() == nil)
+				require.Equal(t, tc.want, client.Exists(quality5xxPendingKey))
 			})
 		}
 	}
@@ -59,7 +62,7 @@ func TestQuality5xxSemanticProbeDoesNotRecurse(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest("POST", "/", nil).WithContext(context.WithValue(context.Background(), qualityProbeContextKey{}, true))
 	svc.recordOpenAIStreamUpstreamError(c, &Account{ID: 417, Type: AccountTypeOAuth}, false, "", "stream_failed", []byte(`{"type":"response.failed"}`), "failed")
-	require.Zero(t, client.ZCard(context.Background(), quality5xxPendingKey).Val())
+	require.Zero(t, len(client.Keys()))
 }
 
 func TestQuality5xxWebsocketSemanticFailure(t *testing.T) {
@@ -74,7 +77,7 @@ func TestQuality5xxWebsocketSemanticFailure(t *testing.T) {
 			} else {
 				svc.handleOpenAIWSFailureAccountSideEffects(context.Background(), account, "gpt-5.5", nil, payload)
 			}
-			require.Equal(t, []string{"417"}, client.ZRange(context.Background(), quality5xxPendingKey, 0, -1).Val())
+			require.Equal(t, []string{"417"}, qualityTestMembers(t, client))
 		})
 	}
 }
@@ -90,7 +93,7 @@ func TestQuality5xxBPSStreamFailure(t *testing.T) {
 	account := excelAccount()
 	_, err := svc.Forward(c.Request.Context(), c, account, []byte(`{"model":"gpt-6-astra","stream":true,"input":"hi"}`))
 	require.Error(t, err)
-	require.Equal(t, []string{fmt.Sprint(account.ID)}, client.ZRange(context.Background(), quality5xxPendingKey, 0, -1).Val())
+	require.Equal(t, []string{fmt.Sprint(account.ID)}, qualityTestMembers(t, client))
 }
 
 func TestQuality5xxChoosesProbeOrCandyWithoutChangingRule(t *testing.T) {
@@ -177,4 +180,11 @@ func TestQuality5xxCoalescesWithOverlappingCron(t *testing.T) {
 	plan.LastRunAt, plan.RunningUntil = &finished, nil
 	require.NoError(t, runner.runQualityTriggeredAccount(context.Background(), plan.AccountID, observed))
 	require.False(t, plans.claimed, "cron completion must consume the old signal without a second test")
+}
+
+func qualityTestMembers(t *testing.T, server *miniredis.Miniredis) []string {
+	t.Helper()
+	members, err := server.ZMembers(quality5xxPendingKey)
+	require.NoError(t, err)
+	return members
 }

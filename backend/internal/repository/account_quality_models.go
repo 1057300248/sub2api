@@ -332,7 +332,7 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 	if err != nil {
 		return "", err
 	}
-	changed := !bytes.Equal(updated, extra) // Database JSON order differs; compare decoded content below.
+	// Database JSON order differs; compare canonical decoded content.
 	var original any
 	var current any
 	if err := json.Unmarshal(extra, &original); err != nil {
@@ -343,7 +343,7 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 	}
 	originalRaw, _ := json.Marshal(original)
 	currentRaw, _ := json.Marshal(current)
-	changed = !bytes.Equal(originalRaw, currentRaw) || beforeConcurrency != account.Concurrency
+	changed := !bytes.Equal(originalRaw, currentRaw) || beforeConcurrency != account.Concurrency
 	if changed {
 		if _, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=$2::jsonb,concurrency=$3,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1`, plan.AccountID, string(updated), account.Concurrency); err != nil {
 			return "", err

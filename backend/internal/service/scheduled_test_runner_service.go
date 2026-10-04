@@ -85,8 +85,8 @@ func (s *ScheduledTestRunnerService) Stop() {
 		return
 	}
 	s.stopOnce.Do(func() {
-		if s.qualityTrigger != nil && s.qualityTrigger.ownsClient {
-			defer s.qualityTrigger.redis.Close()
+		if s.qualityTrigger != nil && s.qualityTrigger.queue != nil {
+			defer func() { _ = s.qualityTrigger.queue.Close() }()
 		}
 		if s.triggerCancel != nil {
 			s.triggerCancel()
