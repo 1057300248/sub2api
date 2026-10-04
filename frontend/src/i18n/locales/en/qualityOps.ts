@@ -271,6 +271,11 @@ export default {
   "discard": "Discard changes",
   "disableSchedulingShort": "Disable scheduling, keep groups",
   "actionHelp": {
+    "models_cooled": "This rule cooled only models that failed their tests. Passed, skipped and untested models received no new cooldown. See the per-model results below.",
+    "model_cooldown_refreshed": "Models that still failed retain this rule's cooldown; models that passed recover independently. Other rules and manual settings are preserved.",
+    "models_partially_restored": "Models that passed and were cooled by this rule have been restored. Other models still await a conclusive recovery result.",
+    "probe_pending": "The 5xx lowered OAuth concurrency while model tests are pending. A 5xx alone is not evidence of model degradation.",
+    "recovery_started": "Model tests met the recovery conditions and this rule's model cooldowns were released. Native successful-request upgrades gradually restore OAuth concurrency.",
     "observed": "This round only recorded the answer and grading result. Account settings, BPS, groups and scheduling were not changed.",
     "action_conflict": "The account state differs from this rule's saved action record, or another rule still owns this action scope. Existing settings were preserved. Check the account state and related rules in account management.",
     "no_change": "This round did not modify the account.",

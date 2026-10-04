@@ -228,13 +228,20 @@ func TestQuality5xxQueueFencesNewerEpisode(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: r.Addr()})
 	defer client.Close()
 	trigger := &quality5xxTrigger{redis: client}
-	account := &Account{ID: 9, Type: AccountTypeOAuth}
-	trigger.Observe(context.Background(), account, 503)
-	first := client.ZScore(context.Background(), quality5xxPendingKey, "9").Val()
-	time.Sleep(time.Millisecond)
-	trigger.Observe(context.Background(), account, 504)
-	second := client.ZScore(context.Background(), quality5xxPendingKey, "9").Val()
+	ctx := context.Background()
+	observedAt := time.Now().UnixMilli()
+	require.NoError(t, queueQuality5xx.Run(ctx, client, []string{quality5xxPendingKey}, "9", observedAt).Err())
+	first := client.ZScore(ctx, quality5xxPendingKey, "9").Val()
+	// Reuse the exact clock value to prove same-millisecond events are distinct.
+	require.NoError(t, queueQuality5xx.Run(ctx, client, []string{quality5xxPendingKey}, "9", observedAt).Err())
+	second := client.ZScore(ctx, quality5xxPendingKey, "9").Val()
 	require.Greater(t, second, first)
+	require.False(t, trigger.signalIsCurrent(9, time.UnixMilli(int64(first))))
+	require.True(t, trigger.signalIsCurrent(9, time.UnixMilli(int64(second))))
+	removed, err := client.Eval(ctx, `if tonumber(redis.call('ZSCORE',KEYS[1],ARGV[1])) == tonumber(ARGV[2]) then return redis.call('ZREM',KEYS[1],ARGV[1]) end return 0`, []string{quality5xxPendingKey}, "9", first).Int()
+	require.NoError(t, err)
+	require.Zero(t, removed, "an older completion cannot remove the newer signal")
+	require.Equal(t, second, client.ZScore(ctx, quality5xxPendingKey, "9").Val())
 }
 
 func TestQuality5xxKeepsSignalWhileAnExistingLeaseCouldBeInterrupted(t *testing.T) {

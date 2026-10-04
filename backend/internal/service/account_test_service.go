@@ -368,7 +368,8 @@ func createTestPayload(modelID string) (map[string]any, error) {
 // mode is optional - "compact" routes OpenAI accounts to the /responses/compact probe path
 // opts is optional media (image/audio data URLs for real generation / STT).
 func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string, opts ...AccountTestOptions) error {
-	ctx := c.Request.Context()
+	ctx := context.WithValue(c.Request.Context(), qualityProbeContextKey{}, true)
+	c.Request = c.Request.WithContext(ctx)
 	testOpts := firstAccountTestOptions(opts)
 
 	// Get account

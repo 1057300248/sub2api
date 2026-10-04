@@ -729,6 +729,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	}
 	upstreamStart := time.Now()
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	s.rateLimitService.observeQualityResponse(upstreamReq.Context(), account, resp, err)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
@@ -832,6 +833,7 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 	}
 	upstreamStart := time.Now()
 	statusResp, err := s.httpUpstream.Do(statusReq, proxyURL, account.ID, account.Concurrency)
+	s.rateLimitService.observeQualityResponse(statusReq.Context(), account, statusResp, err)
 	if err != nil {
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
@@ -891,6 +893,7 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 	}
 
 	contentResp, err := s.httpUpstream.Do(contentReq, proxyURL, account.ID, account.Concurrency)
+	s.rateLimitService.observeQualityResponse(contentReq.Context(), account, contentResp, err)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)

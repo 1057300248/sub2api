@@ -65,7 +65,10 @@ func newQuality5xxTrigger(shared *redis.Client) *quality5xxTrigger {
 var queueQuality5xx = redis.NewScript(`
  -- Every 5xx starts a newer episode. Replacing the score fences an older
  -- probe's completion cleanup and guarantees the signal is retried after it.
- redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+ local score = tonumber(ARGV[2])
+ local prior = tonumber(redis.call('ZSCORE', KEYS[1], ARGV[1]))
+ if prior and prior >= score then score = prior + 1 end
+ redis.call('ZADD', KEYS[1], score, ARGV[1])
  redis.call('EXPIRE', KEYS[1], 1200)
  return 1`)
 

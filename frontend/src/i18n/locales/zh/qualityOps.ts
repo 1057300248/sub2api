@@ -271,6 +271,11 @@ export default {
   "discard": "放弃修改",
   "disableSchedulingShort": "关闭调度，保留分组",
   "actionHelp": {
+    "models_cooled": "本规则仅冷却了检测失败的模型；通过、跳过或未检测的模型不新增冷却。逐模型结果见下表。",
+    "model_cooldown_refreshed": "仍未通过的模型保留本规则的冷却，恢复通过的模型独立处理；其他规则或人工设置保持不变。",
+    "models_partially_restored": "已恢复本规则冷却且检测通过的模型；其余模型继续等待明确的恢复结果。",
+    "probe_pending": "5xx 已触发 OAuth 并发降低，等待模型检测；5xx 本身不作为模型降智证据。",
+    "recovery_started": "模型检测满足恢复条件，已解除本规则拥有的模型冷却；OAuth 并发由原生成功请求升档机制逐渐恢复。",
     "observed": "本轮仅记录回答和判题结果，没有修改账号、BPS 开关、分组或调度。",
     "action_conflict": "账号当前状态与规则保存的处理记录不一致，或同类处置仍由其他规则管理。本轮未覆盖现有设置；请在账号管理中核对当前状态和相关规则。",
     "no_change": "本轮没有修改账号设置。",
