@@ -1028,6 +1028,12 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		loadRateSumSquares += loadRate * loadRate
 	}
 	plan.loadSkew = calcLoadSkewByMoments(loadRateSum, loadRateSumSquares, len(candidates))
+	// Priority scheduling supplies its own scores and uses every overflow peer.
+	// Do not read legacy weights or calculate reset/cost factors only to discard them.
+	if s.applyPriorityScheduling(req, &plan) {
+		plan.selectionOrder = s.buildOpenAISelectionOrder(req, plan)
+		return plan
+	}
 
 	weights := s.service.openAIWSSchedulerWeightsForRequest(ctx)
 	now := time.Now()
@@ -1137,7 +1143,6 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		plan.topK = 1
 	}
 
-	s.applyPriorityScheduling(req, &plan)
 	plan.selectionOrder = s.buildOpenAISelectionOrder(req, plan)
 	return plan
 }
