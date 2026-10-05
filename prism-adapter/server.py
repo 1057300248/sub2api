@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import sync_playwright
 
-from model_selection import MODELS, EFFORTS, select_options
+from model_selection import MODELS, EFFORTS, CAPABILITIES, request_capabilities, select_options
 from tool_bridge import ToolBridge, has_tools, strict_json
 from tool_state import ToolState, digest
 from response_events import completed_events
@@ -51,6 +51,9 @@ class AdapterError(Exception):
 def parse_prompt(payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("model"), str) or payload["model"] not in MODELS:
         raise AdapterError(422, "unsupported_model", "Unsupported Prism model; choose " + ", ".join(MODELS))
+    unsupported = request_capabilities(payload) - CAPABILITIES[payload['model']]
+    if unsupported:
+        raise AdapterError(422, 'unsupported_capability', 'Requested Prism capabilities are unavailable: ' + ', '.join(sorted(unsupported)))
     if payload.get("tools") or payload.get("additional_tools") or payload.get("previous_response_id") or payload.get("conversation"):
         raise AdapterError(422, "unsupported_request", "Prism adapter does not yet support tools or server-side conversation state")
     if any(payload.get(key) is not None for key in ("max_output_tokens", "temperature", "top_p")) or payload.get("background") or payload.get("store"):
