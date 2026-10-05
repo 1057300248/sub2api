@@ -99,7 +99,7 @@ async function loadSnapshot(attempt: number) {
       snapshot.value = value
       // A bounded follow-up picks up the asynchronous result without requiring
       // another billable request. Unmount/logout cancels further reads.
-      if (value?.history_refreshing && attempt < 3) {
+      if ((value?.history_refreshing || value?.history_status === 'loading' || value?.history_status === 'partial') && attempt < 3) {
         historyTimer = setTimeout(() => { if (active(version)) void loadSnapshot(attempt + 1) }, 1000)
       }
     }

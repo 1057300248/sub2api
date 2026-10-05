@@ -38,7 +38,12 @@
 - 后端目录 `GOMAXPROCS=3 go test -tags=unit ./internal/service ./internal/handler/admin -run 'Test(Priority|OpenAIAccountScheduler|OpenAI.*Scheduler|Scheduler)' -count=1`：通过。
 - 后端目录 `GOMAXPROCS=2 go test -tags=integration ./internal/repository -run '^TestPriority' -count=1 -v`：3 个测试通过，未跳过。
 - 根目录 `npx --yes pnpm@9 --dir frontend run lint:check`、`npx --yes pnpm@9 --dir frontend run typecheck`、`npx --yes pnpm@9 --dir frontend run build`：通过；构建有既有 chunk 大小及 Browserslist 数据陈旧提示。
-- 根目录 `npx --yes pnpm@9 --dir frontend exec vitest run src/views/admin/__tests__/PrioritySchedulingView.spec.ts src/views/admin/__tests__/AccountsView.schedulerScore.spec.ts src/views/admin/__tests__/AccountsView.priorityColumn.spec.ts src/components/account/__tests__/AccountPriorityCell.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts`：26 个测试通过。
+- 根目录 `npx --yes pnpm@9 --dir frontend exec vitest run src/views/admin/__tests__/PrioritySchedulingView.spec.ts src/views/admin/__tests__/AccountsView.schedulerScore.spec.ts src/views/admin/__tests__/AccountsView.priorityColumn.spec.ts src/components/account/__tests__/AccountPriorityCell.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts`：27 个测试通过。
 - 本地实际 Vue 组件截图及“刷新评分”交互完成，无浏览器 page error；布局、鉴权、API 使用 mock，仅含虚构账号。见 `docs/screenshots/priority-scheduling/manifest.json`。
-- 完整 service/repository/admin 单测、`TestPriority` race 和 golangci-lint 正在执行，结果待补。
+- 后端目录 `GOMAXPROCS=2 /tmp/sub2api-priority-lint/golangci-lint-2.13.0-darwin-arm64/golangci-lint run --timeout=30m ./internal/service/... ./internal/repository/... ./internal/handler/admin/...`：通过，0 issues。首次 10 分钟时限超时，未计为通过。
+- 后端目录本机 `CGO_ENABLED=0 GOMAXPROCS=2 go build -tags embed -trimpath -ldflags='-X main.Version=2.9.10-priority-audit -X main.Commit=9b2e8fd55f95f7fcce21b3c0fb09d32ac81d0ba7' -o /tmp/sub2api-priority-audit-local ./cmd/server`：通过，版本/提交回读正确；仅对应首个修复提交，未部署。
+- 后端目录 `CGO_ENABLED=0 GOMAXPROCS=2 go test -tags=unit ./internal/service ./internal/repository ./internal/handler/admin -count=1`：三个包均通过（service 233.411s、repository 12.060s、admin 4.448s，不含编译时间）。
+- 后端目录 `GOMAXPROCS=2 GOMEMLIMIT=1500MiB go test -race -tags=unit ./internal/service -run '^TestPriority' -count=1`：通过。
+- 后端目录 `CGO_ENABLED=0 GOMAXPROCS=2 go test -tags=unit ./internal/service -run '^$' -bench '^BenchmarkPriorityHistoryWarm$' -benchtime=1s -count=1`：通过。Apple M1 Pro / darwin arm64，100 个候选的单线程缓存命中为 11730 ns/op、11976 B/op、10 allocs/op；仅为本机微基准，没有前后对照，不代表生产吞吐。
+- 最后补充的“查询名额等待/补查节流期间继续有限次数读取”分支已跑上述 27 个前端用例及最终构建；相关 Vue/测试文件 ESLint 通过。
 - 未进行真实模型请求或生产部署；未声明吞吐/延迟收益百分比。

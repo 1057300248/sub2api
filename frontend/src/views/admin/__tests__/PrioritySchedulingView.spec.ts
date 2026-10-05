@@ -84,10 +84,10 @@ describe('priority history refresh', () => {
     expect(wrapper.text()).not.toContain('priorityScheduling.historyStates.error')
     wrapper.unmount()
   })
-  it('picks up asynchronous history and stops polling once complete', async () => {
+  it.each([true, false])('picks up history while refreshing=%s and stops polling once complete', async (refreshing) => {
     vi.useFakeTimers()
     try {
-      const snapshot = { at: '2026-10-06T00:00:00Z', model: 'test', group_id: 11, mode: 'balanced', history_ready: false, history_status: 'loading' as const, history_refreshing: true, candidates: [] }
+      const snapshot = { at: '2026-10-06T00:00:00Z', model: 'test', group_id: 11, mode: 'balanced', history_ready: false, history_status: 'loading' as const, history_refreshing: refreshing, candidates: [] }
       vi.mocked(getPrioritySnapshot).mockResolvedValueOnce(snapshot).mockResolvedValue({ ...snapshot, history_ready: true, history_status: 'ready', history_refreshing: false })
       const wrapper = mount(PrioritySchedulingView); await flushPromises()
       await vi.advanceTimersByTimeAsync(1000); await flushPromises()
