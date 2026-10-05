@@ -81,6 +81,12 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(prompt, "[instructions]\nAnswer exactly.\n\n[user]\nhi")
         self.assertTrue(stream)
 
+    def test_prompt_budget_counts_utf8_bytes(self):
+        with mock.patch.object(adapter, 'MAX_PROMPT_BYTES', 20):
+            with self.assertRaises(adapter.AdapterError) as raised:
+                adapter.parse_prompt({'model': adapter.MODEL, 'input': '中' * 20})
+            self.assertEqual(raised.exception.code, 'invalid_request')
+
     def test_unsupported_features_fail_closed(self):
         for change in ({"model": "gpt-6-astra"}, {"tools": [{"type": "function", "name": "x"}]},
                        {"previous_response_id": "resp_1"}, {"reasoning": {"effort": "unsupported"}}):
