@@ -34,6 +34,7 @@ STATUS = "/api/llm/response_with_tools_status"
 MAX_REQUEST_BYTES = 1 << 20
 MAX_PROMPT_CHARS = 32000
 MAX_PROMPT_BYTES = int(os.environ.get('PRISM_MAX_PROMPT_BYTES', '86000'))
+PENDING_LEASE_SECONDS = max(30, int(os.environ.get('PRISM_PENDING_LEASE_SECONDS', '900')))
 SESSION_ID = re.compile(r"^[0-9a-f]{64}$")
 MODEL = "gpt-5.6-sol"
 PROJECT_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f-]{27,}$")
@@ -238,7 +239,9 @@ class State:
         except FileExistsError:
             raise AdapterError(409, "pending_turn", "Previous Prism turn outcome is unknown; inspect it before a new request") from None
         with os.fdopen(fd, "w") as file:
-            json.dump({"stage": "submitting", "project_id": project_id, "at": int(time.time())}, file)
+            json.dump({"stage": "submitting", "project_id": project_id, "at": int(time.time()),
+                       "lease_owner": "%s:%s" % (os.uname().nodename if hasattr(os, 'uname') else 'host', os.getpid()),
+                       "lease_expires": int(time.time()) + PENDING_LEASE_SECONDS}, file)
             file.flush()
             os.fsync(file.fileno())
         self.sync_directory(self.pending)
@@ -251,6 +254,7 @@ class State:
         path = self.pending / account_id
         previous = json.loads(path.read_text())
         previous.update(data)
+        previous['lease_expires'] = int(time.time()) + PENDING_LEASE_SECONDS
         self.atomic_write(path, previous)
 
     def receipt(self, account_id, request_id, start_count, status_count, result, cache_hit=False, *, model=MODEL, effort="medium"):

@@ -108,6 +108,19 @@ class AdapterTests(unittest.TestCase):
                 state.begin("300")
             self.assertEqual(raised.exception.status, 409)
             state.finish("300")
+
+    def test_pending_journal_has_renewable_lease_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = adapter.State(directory)
+            state.begin('300')
+            journal = json.loads((state.pending / '300').read_text())
+            self.assertIn('lease_owner', journal)
+            self.assertGreater(journal['lease_expires'], journal['at'])
+            before = journal['lease_expires']
+            state.update('300', {'stage': 'polling'})
+            after = json.loads((state.pending / '300').read_text())['lease_expires']
+            self.assertGreaterEqual(after, before)
+            state.finish('300')
             state.begin("300")
             state.finish("300")
 
