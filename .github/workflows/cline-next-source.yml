@@ -44,9 +44,12 @@ jobs:
               s, count = re.subn(r'<<<<<<< HEAD\n(.*?)\n=======\n(.*?)\n>>>>>>> [^\n]*\n', resolve, s, flags=re.S)
               assert count == 1, (path,count)
               p.write_text(s)
+              if path.endswith('.go'):
+                  subprocess.run(['gofmt','-w',path],check=True)
               subprocess.run(['git','add','--',path],check=True)
           PY
           git diff --cached --check
+          echo "Resolved tree: $(git write-tree)"
           test "$(git write-tree)" = 9bf417c5ac9d27ba139ec26df77fc6188c25a5ae
           git commit -m 'merge: pin upstream v2.9.11 while preserving Cline atomic creation and frontend security'
           test "$(git rev-parse HEAD)" = 304f3008dabe431324cbc0d84b692207431e5126
