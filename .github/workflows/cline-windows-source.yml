@@ -1,0 +1,71 @@
+name: Prepare Windows-safe Cline test paths
+on:
+  push:
+    branches: [codex/cline-advanced-windows-20261006]
+permissions:
+  contents: read
+jobs:
+  prepare:
+    if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/cline-advanced-windows-20261006'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare pinned source and store blobs without moving any branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/windows-safe-cline"
+          git worktree add --detach "$work" 1e9a4b744cee664e16d3262afea42edfa7678ae3
+          cd "$work"
+          python3 - <<'PY'
+          import base64, hashlib, json, os, subprocess, urllib.request
+          from pathlib import Path
+          def git(*args): return subprocess.check_output(['git',*args]).decode().strip()
+          old='frontend/src/components/account/__tests__/clineAdvancedSettings.spec.ts'
+          new='frontend/src/components/account/__tests__/clineAdvancedSettingsPayload.spec.ts'
+          subprocess.run(['git','mv',old,new],check=True)
+          for name in ('.github/workflows/cline-only.yml','Makefile','docs/cline/patches.json'):
+              p=Path(name);text=p.read_text();a=old.removeprefix('frontend/');b=new.removeprefix('frontend/')
+              assert text.count(a)==1
+              p.write_text(text.replace(a,b))
+          p=Path('tools/verify_cline_platform.py');text=p.read_text()
+          anchor="modules={item['id']:item for item in manifest['modules']}"
+          addition="# Account development is also performed on Windows. Case-only file pairs\n# would pass Linux tests but overwrite each other in a case-insensitive checkout.\ncase_paths = {}\nfor name in manifest['allowed_changed_files']:\n    folded = name.casefold()\n    if folded in case_paths and case_paths[folded] != name:\n        errors.append(f'case-insensitive path collision: {case_paths[folded]} / {name}')\n    case_paths[folded] = name\n"
+          assert text.count(anchor)==1
+          p.write_text(text.replace(anchor,addition+anchor))
+          subprocess.run(['git','add','.github/workflows/cline-only.yml','Makefile','tools/verify_cline_platform.py'],check=True)
+          subprocess.run(['git','add','-f','docs/cline/patches.json'],check=True)
+          subprocess.run(['python3','tools/verify_cline_only.py'],check=True)
+          subprocess.run(['python3','tools/verify_cline_platform.py'],check=True)
+          subprocess.run(['git','diff','--cached','--check'],check=True)
+          assert git('write-tree')=='65c825f2cc62c293b1c6fd88b6a28b7e6337da6f'
+          names=subprocess.check_output(['git','ls-files','-z']).decode().split('\0')
+          assert len(names)==len({n.casefold() for n in names}), 'Windows path collision'
+          entries=[]
+          for name in filter(None,subprocess.check_output(['git','diff','--cached','--no-renames','--name-only','-z']).decode().split('\0')):
+              p=Path(name)
+              if not p.exists():
+                  assert name==old
+                  entries.append({'path':name,'mode':'100644','type':'blob','sha':None});continue
+              data=p.read_bytes();sha=hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+              req=urllib.request.Request('https://api.github.com/repos/1057300248/sub2api/git/blobs',data=json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode(),method='POST',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Content-Type':'application/json','Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'})
+              with urllib.request.urlopen(req,timeout=60) as response: result=json.load(response)
+              assert result['sha']==sha
+              entries.append({'path':name,'mode':git('ls-files','--stage','--',name).split()[0],'type':'blob','sha':sha})
+          report={'base_commit':git('rev-parse','HEAD'),'tree':git('write-tree'),'tree_elements':entries}
+          Path(os.environ['RUNNER_TEMP'],'cline-windows-objects.json').write_text(json.dumps(report,indent=2)+'\n')
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cline-windows-objects-${{ github.sha }}
+          path: ${{ runner.temp }}/cline-windows-objects.json
+          retention-days: 3
