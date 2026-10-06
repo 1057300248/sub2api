@@ -16,6 +16,7 @@ const (
 	Platform         = "cline"
 	BaseURL          = "https://api.cline.bot/api/v1"
 	CatalogURL       = BaseURL + "/ai/cline/recommended-models"
+	ModelCatalogURL  = BaseURL + "/ai/cline/models"
 	UsageURL         = BaseURL + "/users/me/plan/usage-limits"
 	ModePass         = "pass"
 	ModeFree         = "free"
@@ -92,14 +93,16 @@ func ValidateUpstreamModel(mode, id string) error {
 }
 
 type Model struct {
-	ID          string `json:"id"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name,omitempty"`
+	Description  string             `json:"description,omitempty"`
+	Capabilities *ModelCapabilities `json:"capabilities,omitempty"`
 }
 type Catalog struct {
-	Recommended []Model `json:"recommended"`
-	Pass        []Model `json:"clinePass"`
-	Free        []Model `json:"free"`
+	CapabilitiesStatus string  `json:"capabilities_status,omitempty"`
+	Recommended        []Model `json:"recommended"`
+	Pass               []Model `json:"clinePass"`
+	Free               []Model `json:"free"`
 }
 
 func ParseCatalog(body []byte) (*Catalog, error) {
@@ -109,6 +112,14 @@ func ParseCatalog(body []byte) (*Catalog, error) {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return nil, errors.New("invalid Cline catalog")
+	}
+	if success, ok := fields["success"]; ok && string(success) != "true" {
+		return nil, errors.New("invalid Cline catalog envelope")
+	}
+	if raw, ok := fields["data"]; ok {
+		if json.Unmarshal(raw, &fields) != nil || fields == nil {
+			return nil, errors.New("invalid Cline catalog envelope")
+		}
 	}
 	c := &Catalog{}
 	known := false
@@ -122,7 +133,8 @@ func ParseCatalog(body []byte) (*Catalog, error) {
 			return nil, fmt.Errorf("invalid Cline catalog bucket: %s", key)
 		}
 		seen := map[string]bool{}
-		for _, model := range *target {
+		for i, model := range *target {
+			(*target)[i].Capabilities = nil // recommendation buckets are not capability evidence
 			if !ValidModelID(model.ID) || seen[model.ID] {
 				return nil, errors.New("invalid or duplicate Cline model ID")
 			}

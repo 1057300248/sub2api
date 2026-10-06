@@ -84,6 +84,9 @@ func NormalizeClineCredentials(platform, accountType string, credentials map[str
 	if auth != cline.AuthAPIKey && auth != cline.AuthAccountToken {
 		return bad("Invalid Cline credential type")
 	}
+	if _, err := cline.BearerToken(auth, key); err != nil {
+		return bad("Invalid Cline API key or account token")
+	}
 	rawBase, ok := stringField("base_url")
 	if !ok {
 		return bad("Invalid Cline base URL")

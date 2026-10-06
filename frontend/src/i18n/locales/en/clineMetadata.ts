@@ -1,4 +1,13 @@
 export default {
+  capabilitiesUnknown: 'Capabilities unknown; no model-family inference.',
+  contextWindow: 'Context',
+  maxOutput: 'Max output',
+  images: 'Images',
+  tools: 'Tools',
+  reasoning: 'Reasoning',
+  supported: 'Supported',
+  unsupported: 'Not supported',
+
   automatic: "Automatic server refresh is enabled. Next planned check:",
   cooldownNotice: "Observed quota blocks remain active until checked. Every exhausted window must recover; the countdown alone does not enable inference.",
   inferenceSource: "Inference limit",

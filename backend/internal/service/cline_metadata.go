@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cline"
@@ -215,6 +214,7 @@ func (s *OpenAIGatewayService) refreshClineMetadata(ctx context.Context, account
 	var status int
 	var fetchErr error
 	var metadataRetryAt *time.Time
+	catalogRefreshed := false
 	fetch := func(endpoint string, auth bool) ([]byte, int, error) {
 		b, code, err := s.fetchClineMetadata(ctx, snapshot, endpoint, auth)
 		var retry *clineMetadataRetryError
@@ -230,6 +230,7 @@ func (s *OpenAIGatewayService) refreshClineMetadata(ctx context.Context, account
 		if fetchErr == nil && status == http.StatusOK {
 			if catalog, parseErr := cline.ParseCatalog(body); parseErr == nil {
 				state.Catalog, state.CatalogFetchedAt, state.CatalogStatus = catalog, &now, "ok"
+				catalogRefreshed = true
 			} else {
 				state.Error = "catalog_unavailable"
 			}
@@ -268,6 +269,19 @@ func (s *OpenAIGatewayService) refreshClineMetadata(ctx context.Context, account
 			}
 		}
 	}
+	if catalogRefreshed && metadataRetryAt == nil && state.CredentialStatus == "valid" {
+		state.Catalog.CapabilitiesStatus = "unavailable"
+		capCtx, capCancel := context.WithTimeout(ctx, 3*time.Second)
+		capBody, capStatus, capErr := s.fetchClineMetadata(capCtx, snapshot, cline.ModelCatalogURL, false)
+		capCancel()
+		if capErr == nil && capStatus == http.StatusOK {
+			_ = state.Catalog.ApplyModelCapabilities(capBody)
+		}
+		var retry *clineMetadataRetryError
+		if errors.As(capErr, &retry) {
+			metadataRetryAt = &retry.until
+		}
+	}
 	state.MetadataRetryAt = metadataRetryAt
 	if state.Mode == cline.ModePass {
 		if state.QuotaStatus == "ok" && len(state.Windows) == 3 && state.CredentialStatus == "valid" {
@@ -297,10 +311,10 @@ func (s *OpenAIGatewayService) refreshClineMetadata(ctx context.Context, account
 }
 
 func (s *OpenAIGatewayService) fetchClineMetadata(ctx context.Context, account *Account, endpoint string, authenticated bool) ([]byte, int, error) {
-	if endpoint != cline.CatalogURL && endpoint != cline.ProfileURL && endpoint != cline.UsageURL {
+	if endpoint != cline.CatalogURL && endpoint != cline.ModelCatalogURL && endpoint != cline.ProfileURL && endpoint != cline.UsageURL {
 		return nil, 0, ErrClineMetadataUnavailable
 	}
-	if authenticated != (endpoint != cline.CatalogURL) {
+	if authenticated != (endpoint == cline.ProfileURL || endpoint == cline.UsageURL) {
 		return nil, 0, ErrClineMetadataUnavailable
 	}
 	ctx = WithHTTPUpstreamPublicHostsOnly(WithHTTPUpstreamRedirectsDisabled(ctx))
@@ -310,8 +324,8 @@ func (s *OpenAIGatewayService) fetchClineMetadata(ctx context.Context, account *
 	}
 	req.Header.Set("Accept", "application/json")
 	if authenticated {
-		key := strings.TrimSpace(account.GetCredential("api_key"))
-		if key == "" || len(key) > 8192 || strings.ContainsAny(key, "\r\n\x00") {
+		key, err := cline.BearerToken(account.GetCredential("cline_auth_type"), account.GetCredential("api_key"))
+		if err != nil {
 			return nil, 0, ErrClineMetadataUnavailable
 		}
 		req.Header.Set("Authorization", "Bearer "+key)
@@ -337,8 +351,12 @@ func (s *OpenAIGatewayService) fetchClineMetadata(ctx context.Context, account *
 		}
 		return nil, resp.StatusCode, nil
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, cline.MaxBodyBytes+1))
-	if err != nil || len(body) > cline.MaxBodyBytes {
+	limit := cline.MaxBodyBytes
+	if endpoint == cline.ModelCatalogURL {
+		limit = cline.MaxModelCatalogBytes
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
+	if err != nil || len(body) > limit {
 		return nil, resp.StatusCode, ErrClineMetadataUnavailable
 	}
 	return body, resp.StatusCode, nil

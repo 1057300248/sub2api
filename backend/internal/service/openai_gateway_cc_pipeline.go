@@ -189,6 +189,11 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	userAgent string,
 	grokCacheIdentity string,
 ) (*http.Response, error) {
+	var contractErr error
+	body, bearerToken, contractErr = clineOutboundContract(account, body, stream, bearerToken)
+	if contractErr != nil {
+		return nil, contractErr
+	}
 	body, headerOverrides, headerErr := extractClineHeaderOverrides(account, body)
 	if headerErr != nil {
 		return nil, headerErr
@@ -357,6 +362,10 @@ func (s *OpenAIGatewayService) scanCCStream(
 
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			if errors.Is(err, apicompat.ErrClineReasoningDetails) {
+				st.Err = err
+				return st
+			}
 			logger.L().Warn(logPrefix+": failed to parse chat stream chunk",
 				zap.Error(err),
 				zap.String("request_id", requestID),
