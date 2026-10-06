@@ -1,0 +1,8 @@
+{
+  "Makefile": [
+    {
+      "old": "<<<<<<< ours\n\tsrc/components/admin/__tests__/HarvestGatewayBorrowPanel.spec.ts \\\n\tsrc/components/admin/__tests__/AstraGatewayRuntime.spec.ts \\\n\tsrc/components/admin/__tests__/AstraGatewayHistory.spec.ts \\\n=======\n\tsrc/components/account/__tests__/clineAccountForm.spec.ts \\\n\tsrc/components/account/__tests__/ClineMetadataPanel.spec.ts \\\n\t\tsrc/components/account/__tests__/ClineAccountModal.spec.ts \\\n>>>>>>> theirs\n",
+      "new": "\tsrc/components/admin/__tests__/HarvestGatewayBorrowPanel.spec.ts \\\n\tsrc/components/admin/__tests__/AstraGatewayRuntime.spec.ts \\\n\tsrc/components/admin/__tests__/AstraGatewayHistory.spec.ts \\\n\tsrc/components/account/__tests__/clineAccountForm.spec.ts \\\n\tsrc/components/account/__tests__/ClineMetadataPanel.spec.ts \\\n\tsrc/components/account/__tests__/ClineAccountModal.spec.ts \\\n"
+    }
+  ]
+}
