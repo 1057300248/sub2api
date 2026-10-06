@@ -19,6 +19,39 @@ spec.loader.exec_module(adapter)
 
 
 class AdapterTests(unittest.TestCase):
+    def test_codex_optional_reasoning_on_all_text_models(self):
+        for model in adapter.MODELS:
+            payload = {'model': model, 'input': 'hi', 'include': ['reasoning.encrypted_content'],
+                       'reasoning': {'effort': 'high', 'summary': 'auto'}}
+            self.assertEqual(adapter.parse_prompt(payload), ('[user]\nhi', False))
+
+            detailed_payload = {
+                'model': model,
+                'input': 'hi',
+                'reasoning': {'effort': 'medium', 'summary': 'detailed'},
+            }
+            self.assertEqual(
+                adapter.parse_prompt(detailed_payload),
+                ('[user]\nhi', False),
+            )
+
+        for fields in ({'include': ['web_search_call.action.sources']},
+                       {'reasoning': {'summary': 'unsupported-summary'}},
+                       {'input': [{'type': 'reasoning', 'encrypted_content': 'fixture'}]}):
+            with self.assertRaises(adapter.AdapterError):
+                adapter.parse_prompt({'model': adapter.MODEL, 'input': 'hi', **fields})
+
+    def test_client_tools_enabled_by_default_with_explicit_opt_out(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = adapter.State(directory)
+            with mock.patch.dict('os.environ', {}, clear=True):
+                self.assertIsNotNone(adapter.configure_client_tools(state))
+            with mock.patch.dict('os.environ', {'PRISM_ADAPTER_CLIENT_TOOLS_ENABLED': 'false'}):
+                self.assertIsNone(adapter.configure_client_tools(state))
+            with mock.patch.dict('os.environ', {'PRISM_ADAPTER_CLIENT_TOOLS_ENABLED': 'invalid'}):
+                with self.assertRaises(SystemExit):
+                    adapter.configure_client_tools(state)
+
     def test_four_models_and_efforts_are_preserved_without_aliases(self):
         for model in adapter.MODELS:
             for effort in adapter.EFFORTS:
@@ -59,6 +92,12 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(prompt, "[instructions]\nAnswer exactly.\n\n[user]\nhi")
         self.assertTrue(stream)
 
+    def test_prompt_budget_counts_utf8_bytes(self):
+        with mock.patch.object(adapter, 'MAX_PROMPT_BYTES', 20):
+            with self.assertRaises(adapter.AdapterError) as raised:
+                adapter.parse_prompt({'model': adapter.MODEL, 'input': '中' * 20})
+            self.assertEqual(raised.exception.code, 'invalid_request')
+
     def test_unsupported_features_fail_closed(self):
         for change in ({"model": "gpt-6-astra"}, {"tools": [{"type": "function", "name": "x"}]},
                        {"previous_response_id": "resp_1"}, {"reasoning": {"effort": "unsupported"}}):
@@ -80,6 +119,19 @@ class AdapterTests(unittest.TestCase):
                 state.begin("300")
             self.assertEqual(raised.exception.status, 409)
             state.finish("300")
+
+    def test_pending_journal_has_renewable_lease_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = adapter.State(directory)
+            state.begin('300')
+            journal = json.loads((state.pending / '300').read_text())
+            self.assertIn('lease_owner', journal)
+            self.assertGreater(journal['lease_expires'], journal['at'])
+            before = journal['lease_expires']
+            state.update('300', {'stage': 'polling'})
+            after = json.loads((state.pending / '300').read_text())['lease_expires']
+            self.assertGreaterEqual(after, before)
+            state.finish('300')
             state.begin("300")
             state.finish("300")
 

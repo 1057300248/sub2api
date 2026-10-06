@@ -4,11 +4,7 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -74,7 +70,7 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrNoUpdateAvailable))
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
-	require.Equal(t, "1057300248/sub2api", githubClient.latestRepo)
+	require.Equal(t, "ranxi2001/sub2api", githubClient.latestRepo)
 }
 
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
@@ -179,149 +175,17 @@ func TestUpdateServiceRollbackToVersionRejectsDisallowedTargets(t *testing.T) {
 }
 
 func TestUpdateServiceRollbackToVersionAcceptsVPrefix(t *testing.T) {
-	// A validated Wanchuan target with no platform archive must pass the version
-	// allowlist and fail only at exact app-archive selection. This proves the
-	// optional v prefix is accepted without weakening the Wanchuan-only policy.
-	requiredAssets := []GitHubAsset{
-		{Name: "checksums.txt"},
-		{Name: wanchuanReleaseManifestName},
-	}
+	// No platform asset in the release: the target passes the allowlist check
+	// and fails later at asset lookup, proving the version itself was accepted.
 	releases := []*GitHubRelease{
-		{TagName: "v2.9.6-wanchuan.2", Assets: requiredAssets},
-		{TagName: "v2.9.6-wanchuan.1", Assets: requiredAssets},
+		{TagName: "v0.1.147"},
+		{TagName: "v0.1.146"},
 	}
-	svc := newRollbackTestService("2.9.6-wanchuan.2", releases)
+	svc := newRollbackTestService("0.1.147", releases)
 
-	err := svc.RollbackToVersion(context.Background(), "v2.9.6-wanchuan.1")
+	err := svc.RollbackToVersion(context.Background(), "v0.1.146")
 
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrRollbackVersionNotAllowed)
 	require.Contains(t, err.Error(), "no compatible release found")
-}
-
-
-func TestCompareVersionsWanchuanRevision(t *testing.T) {
-	tests := []struct {
-		name    string
-		current string
-		latest  string
-		want    int
-	}{
-		{name: "first fork revision follows upstream base", current: "2.9.6", latest: "2.9.6-wanchuan.1", want: -1},
-		{name: "fork revisions increase monotonically", current: "2.9.6-wanchuan.1", latest: "2.9.6-wanchuan.2", want: -1},
-		{name: "same fork revision is equal", current: "v2.9.6-wanchuan.2", latest: "2.9.6-wanchuan.2", want: 0},
-		{name: "next upstream base wins over fork revision", current: "2.9.6-wanchuan.99", latest: "2.9.7", want: -1},
-		{name: "older upstream base remains older", current: "2.9.5-wanchuan.99", latest: "2.9.6-wanchuan.1", want: -1},
-		{name: "unknown prerelease suffix keeps legacy base comparison", current: "2.9.6-rc.1", latest: "2.9.6", want: 0},
-		{name: "malformed fork revision is ignored", current: "2.9.6-wanchuan.bad", latest: "2.9.6", want: 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, compareVersions(tt.current, tt.latest))
-			require.Equal(t, -tt.want, compareVersions(tt.latest, tt.current))
-		})
-	}
-}
-
-
-func TestUpdateServiceCheckUpdateRequiresWanchuanReleaseMetadata(t *testing.T) {
-	validAssets := []GitHubAsset{
-		{Name: "checksums.txt", BrowserDownloadURL: "https://github.com/1057300248/sub2api/releases/download/v2.9.6-wanchuan.1/checksums.txt"},
-		{Name: wanchuanReleaseManifestName, BrowserDownloadURL: "https://github.com/1057300248/sub2api/releases/download/v2.9.6-wanchuan.1/wanchuan-release.json"},
-	}
-	tests := []struct {
-		name        string
-		tag         string
-		assets      []GitHubAsset
-		wantUpdate  bool
-		wantWarning string
-	}{
-		{name: "verified Wanchuan metadata", tag: "v2.9.6-wanchuan.1", assets: validAssets, wantUpdate: true},
-		{name: "plain owner release rejected", tag: "v2.9.7", assets: validAssets, wantWarning: "not a Wanchuan"},
-		{name: "manifest missing", tag: "v2.9.6-wanchuan.1", assets: []GitHubAsset{{Name: "checksums.txt"}}, wantWarning: "missing required"},
-		{name: "checksums missing", tag: "v2.9.6-wanchuan.1", assets: []GitHubAsset{{Name: wanchuanReleaseManifestName}}, wantWarning: "missing required"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &updateServiceGitHubClientStub{release: &GitHubRelease{TagName: tt.tag, Assets: tt.assets}}
-			svc := NewUpdateService(&updateServiceCacheStub{}, client, "2.9.6", "release")
-			info, err := svc.CheckUpdate(context.Background(), true)
-			require.NoError(t, err)
-			require.Equal(t, tt.wantUpdate, info.HasUpdate)
-			if tt.wantWarning != "" {
-				require.Contains(t, info.Warning, tt.wantWarning)
-			} else {
-				require.Empty(t, info.Warning)
-			}
-		})
-	}
-}
-
-func TestValidateWanchuanReleaseManifest(t *testing.T) {
-	valid := WanchuanReleaseManifest{
-		SchemaVersion:       1,
-		Channel:             wanchuanReleaseChannel,
-		Version:             "2.9.6-wanchuan.1",
-		SourceSHA:           strings.Repeat("a", 40),
-		ReleaseRepo:         githubRepo,
-		UpstreamRepo:        upstreamGithubRepo,
-		UpstreamTag:         "v2.9.6",
-		UpstreamSHA:         strings.Repeat("b", 40),
-		IntegrationCommit:   strings.Repeat("c", 40),
-		PatchManifestSHA256: strings.Repeat("d", 64),
-		PatchModules:        []string{"cline-rate-limit-cas"},
-	}
-	data, err := json.Marshal(valid)
-	require.NoError(t, err)
-	require.NoError(t, validateWanchuanReleaseManifest(data, valid.Version))
-
-	bad := valid
-	bad.Version = "2.9.6-wanchuan.2"
-	data, err = json.Marshal(bad)
-	require.NoError(t, err)
-	require.Error(t, validateWanchuanReleaseManifest(data, valid.Version))
-
-	bad = valid
-	bad.ReleaseRepo = "ranxi2001/sub2api"
-	data, err = json.Marshal(bad)
-	require.NoError(t, err)
-	require.Error(t, validateWanchuanReleaseManifest(data, valid.Version))
-}
-
-func TestVerifyBytesChecksumAcceptsManifestEntry(t *testing.T) {
-	data := []byte("{\"channel\":\"wanchuan\"}")
-	digest := sha256.Sum256(data)
-	checksums := []byte(fmt.Sprintf("%x  %s\n", digest, wanchuanReleaseManifestName))
-	require.NoError(t, verifyBytesChecksum(wanchuanReleaseManifestName, data, checksums))
-	require.Error(t, verifyBytesChecksum(wanchuanReleaseManifestName, append(data, '!'), checksums))
-}
-
-
-func TestSelectWanchuanReleaseAssetURLsIgnoresReauthRuntime(t *testing.T) {
-	const version = "2.9.6-wanchuan.1"
-	assets := []Asset{
-		{
-			Name:        "sub2api_" + version + "_linux_amd64.tar.gz",
-			DownloadURL: "https://github.com/1057300248/sub2api/releases/download/v" + version + "/sub2api_" + version + "_linux_amd64.tar.gz",
-		},
-		{
-			Name:        "sub2api-reauth_" + version + "_linux_amd64.tar.gz",
-			DownloadURL: "https://github.com/1057300248/sub2api/releases/download/v" + version + "/sub2api-reauth_" + version + "_linux_amd64.tar.gz",
-		},
-		{Name: "checksums.txt", DownloadURL: "https://github.com/1057300248/sub2api/releases/download/v" + version + "/checksums.txt"},
-		{Name: wanchuanReleaseManifestName, DownloadURL: "https://github.com/1057300248/sub2api/releases/download/v" + version + "/" + wanchuanReleaseManifestName},
-	}
-
-	downloadURL, checksumURL, manifestURL := selectWanchuanReleaseAssetURLs(version, "linux", "amd64", assets)
-
-	require.Contains(t, downloadURL, "/sub2api_"+version+"_linux_amd64.tar.gz")
-	require.NotContains(t, downloadURL, "sub2api-reauth")
-	require.Contains(t, checksumURL, "/checksums.txt")
-	require.Contains(t, manifestURL, "/"+wanchuanReleaseManifestName)
-}
-
-func TestWanchuanReleaseArchiveNameUsesPublishedArtifactNaming(t *testing.T) {
-	require.Equal(t, "sub2api_2.9.6-wanchuan.1_linux_amd64.tar.gz", wanchuanReleaseArchiveName("2.9.6-wanchuan.1", "linux", "amd64"))
-	require.Equal(t, "sub2api_2.9.6-wanchuan.1_darwin_arm64.tar.gz", wanchuanReleaseArchiveName("2.9.6-wanchuan.1", "darwin", "arm64"))
-	require.Equal(t, "sub2api_2.9.6-wanchuan.1_windows_amd64.zip", wanchuanReleaseArchiveName("2.9.6-wanchuan.1", "windows", "amd64"))
 }

@@ -21,6 +21,7 @@ import (
 // RateLimitService 处理限流和过载状态管理
 type RateLimitService struct {
 	accountOps            *AccountOpsService
+	qualityTrigger        *quality5xxTrigger
 	accountRepo           AccountRepository
 	usageRepo             UsageLogRepository
 	cfg                   *config.Config
@@ -59,7 +60,8 @@ type SuccessfulTestRecoveryResult struct {
 
 // AccountRecoveryOptions 控制账号恢复时的附加行为。
 type AccountRecoveryOptions struct {
-	InvalidateToken bool
+	InvalidateToken          bool
+	preserveGrokScopedBlocks bool
 }
 
 type geminiUsageCacheEntry struct {
@@ -302,10 +304,13 @@ const (
 // CheckErrorPolicy 检查自定义错误码和临时不可调度规则。
 // 自定义错误码开启时覆盖后续所有逻辑（包括临时不可调度）。
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) ErrorPolicyResult {
-	if isClineScopedError(account, statusCode, responseBody) {
+	if clineProtectedError(account, statusCode, responseBody) {
 		return ErrorPolicyNone
 	}
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
+	if account.IsCline() && account.ShouldHandleErrorCode(statusCode) && s.tryTempUnschedulable(ctx, account, statusCode, responseBody) {
+		return ErrorPolicyTempUnscheduled
+	}
 	if account.IsCustomErrorCodesEnabled() {
 		if account.ShouldHandleErrorCode(statusCode) {
 			return ErrorPolicyMatched
@@ -352,10 +357,17 @@ func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Conte
 	}
 	ctx = s.observeAccountOps(ctx, account, statusCode, headers, responseBody)
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
+	// Anthropic's safeguard block is scoped to this conversation. It is not
+	// evidence that the account credentials or entitlement are invalid, so it
+	// must not reach custom error policies or account scheduling side effects.
+	if isAnthropicSafeguardPolicy403(account, statusCode, responseBody) {
+		slog.Info("anthropic_safeguard_policy_403_skips_account_penalty", "account_id", account.ID)
+		return false
+	}
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
 	s.maybeHandleOpenAITeamLinkedError(ctx, account, statusCode, responseBody)
-	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled()
+	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled() && !clineProtectedError(account, statusCode, responseBody)
 
 	// 池模式默认不标记本地账号状态；但管理员显式配置的临时不可调度规则优先。
 	// 401 保留现有认证错误语义，不在这里改变池模式的认证处理。
@@ -369,7 +381,7 @@ func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Conte
 
 	// apikey 类型账号：检查自定义错误码配置
 	// 如果启用且错误码不在列表中，则不处理（不停止调度、不标记限流/过载）
-	if !account.ShouldHandleErrorCode(statusCode) {
+	if !clineProtectedError(account, statusCode, responseBody) && !account.ShouldHandleErrorCode(statusCode) {
 		slog.Info("account_error_code_skipped", "account_id", account.ID, "status_code", statusCode)
 		return false
 	}
@@ -1129,6 +1141,18 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 func isCloudflareBotBlockResponse(body []byte) bool {
 	normalized := strings.ToLower(strings.TrimSpace(string(body)))
 	return strings.Contains(normalized, "error code: 1010")
+}
+
+// isAnthropicSafeguardPolicy403 identifies a request-level safety rejection.
+// Keep this deliberately narrow: other Anthropic 403 responses can still
+// indicate an account access or entitlement problem.
+func isAnthropicSafeguardPolicy403(account *Account, statusCode int, body []byte) bool {
+	if account == nil || account.Platform != PlatformAnthropic || statusCode != http.StatusForbidden {
+		return false
+	}
+	normalized := strings.ToLower(string(body))
+	return strings.Contains(normalized, "this request was blocked by safe guard policy") ||
+		strings.Contains(normalized, "this request was blocked by safeguard policy")
 }
 
 // handleAntigravity403 处理 Antigravity 平台的 403 错误
@@ -2153,14 +2177,20 @@ func (s *RateLimitService) samplePassiveUsageFromHeaders(ctx context.Context, ac
 
 // ClearRateLimit 清除账号的限流状态
 func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) error {
+	return s.clearRateLimit(ctx, accountID, false)
+}
+
+func (s *RateLimitService) clearRateLimit(ctx context.Context, accountID int64, preserveGrokScopedBlocks bool) error {
 	if err := s.accountRepo.ClearRateLimit(ctx, accountID); err != nil {
 		return err
 	}
 	if err := s.accountRepo.ClearAntigravityQuotaScopes(ctx, accountID); err != nil {
 		return err
 	}
-	if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
-		return err
+	if !preserveGrokScopedBlocks {
+		if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
+			return err
+		}
 	}
 	// 清除限流时一并清理临时不可调度状态，避免周限/窗口重置后仍被本地临时状态阻断。
 	if err := s.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
@@ -2172,6 +2202,9 @@ func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) 
 		}
 	}
 	s.ResetOpenAI403Counter(ctx, accountID)
+	if !preserveGrokScopedBlocks {
+		s.clearGrokProcessLocalBlocks(ctx, accountID)
+	}
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
 }
@@ -2205,8 +2238,10 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 		}
 	}
 
-	if hasRecoverableRuntimeState(account) {
-		if err := s.ClearRateLimit(ctx, accountID); err != nil {
+	hasScopedGrokState := account.IsGrok() && !options.preserveGrokScopedBlocks &&
+		(hasGrokModelQuotaBlockForAccount(account.ID) || hasGrokTeamModelRateLimitForAccount(account))
+	if hasRecoverableRuntimeState(account) || hasScopedGrokState {
+		if err := s.clearRateLimit(ctx, accountID, options.preserveGrokScopedBlocks && account.IsGrok()); err != nil {
 			return nil, err
 		}
 		result.ClearedRateLimit = true
@@ -2224,10 +2259,26 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 // RecoverAccountAfterSuccessfulTest 将一次成功测试视为正常请求，
 // 按需恢复 error / rate-limit / overload / temp-unsched / model-rate-limit 等运行时状态。
 func (s *RateLimitService) RecoverAccountAfterSuccessfulTest(ctx context.Context, accountID int64) (*SuccessfulTestRecoveryResult, error) {
-	return s.RecoverAccountState(ctx, accountID, AccountRecoveryOptions{})
+	// This callback does not identify the tested model. A successful text probe
+	// cannot establish that another model or the shared team quota recovered.
+	return s.RecoverAccountState(ctx, accountID, AccountRecoveryOptions{preserveGrokScopedBlocks: true})
 }
 
 func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID int64) error {
+	if repo, ok := s.accountRepo.(interface {
+		ClearClineTemporaryPause(context.Context, int64) (bool, error)
+	}); ok {
+		handled, err := repo.ClearClineTemporaryPause(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		if handled {
+			if s.tempUnschedCache != nil {
+				return s.tempUnschedCache.DeleteTempUnsched(ctx, accountID)
+			}
+			return nil
+		}
+	}
 	if err := s.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
 		return err
 	}
@@ -2240,8 +2291,27 @@ func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID
 	if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
 		slog.Warn("clear_model_rate_limits_on_temp_unsched_reset_failed", "account_id", accountID, "error", err)
 	}
+	s.clearGrokProcessLocalBlocks(ctx, accountID)
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
+}
+
+func (s *RateLimitService) clearGrokProcessLocalBlocks(ctx context.Context, accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	var account *Account
+	if s.accountRepo != nil {
+		loaded, err := s.accountRepo.GetByID(ctx, accountID)
+		if err == nil {
+			account = loaded
+		}
+	}
+	if account != nil && !account.IsGrok() {
+		return
+	}
+	clearGrokModelQuotaBlocksForAccount(accountID)
+	clearGrokTeamModelRateLimitsForAccount(account)
 }
 
 func hasRecoverableRuntimeState(account *Account) bool {
@@ -2539,7 +2609,7 @@ func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, acco
 	if s == nil || account == nil || s.accountRepo == nil {
 		return false
 	}
-	if !account.ShouldHandleErrorCode(statusCode) {
+	if !clineProtectedError(account, statusCode, responseBody) && !account.ShouldHandleErrorCode(statusCode) {
 		return false
 	}
 	var cooldown time.Duration
@@ -2675,6 +2745,9 @@ func matchTempUnschedulableRules(account *Account, statusCode int, responseBody 
 }
 
 func (s *RateLimitService) tryTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) bool {
+	if clineProtectedError(account, statusCode, responseBody) {
+		return false
+	}
 	if account == nil {
 		return false
 	}
@@ -2771,7 +2844,7 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 	// only this (account, model) pair. Authentication and model-unknown failures
 	// retain the legacy account-wide temporary-unschedulable behavior below.
 	modelKey := firstRequestedModel(requestedModel)
-	if modelKey != "" && statusCode != http.StatusUnauthorized {
+	if modelKey != "" && statusCode != http.StatusUnauthorized && !account.IsCline() {
 		if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, modelKey, until, reason); err != nil {
 			slog.Warn("temp_unsched_model_rate_limit_set_failed", "account_id", account.ID, "model", modelKey, "error", err)
 			// The rule matched, so fail over the current request even if persistence

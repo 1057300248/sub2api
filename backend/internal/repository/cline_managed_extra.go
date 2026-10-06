@@ -5,7 +5,7 @@ package repository
 // incoming map contains JSON null, forged state or stale model cooldowns.
 // placeholder is an internal SQL parameter identifier, never user input.
 func clineManagedExtraDeltaSQL(placeholder string) string {
-	return "(CASE WHEN platform = 'cline' THEN " + placeholder + "::jsonb - 'cline_state' - 'model_rate_limits' ELSE " + placeholder + "::jsonb END)"
+	return "(CASE WHEN platform = 'cline' THEN " + placeholder + "::jsonb - 'cline_state' - 'model_rate_limits' - 'quota_used' - 'quota_daily_used' - 'quota_weekly_used' - 'quota_daily_start' - 'quota_weekly_start' - 'quota_daily_reset_at' - 'quota_weekly_reset_at' ELSE " + placeholder + "::jsonb END)"
 }
 
 // Keep unrelated Extra updates byte-for-byte on their existing SQL path. The
@@ -14,7 +14,14 @@ func clineManagedExtraDeltaSQL(placeholder string) string {
 func clineExtraUpdateSQL(placeholder string, updates map[string]any) string {
 	_, state := updates["cline_state"]
 	_, limits := updates["model_rate_limits"]
-	if state || limits {
+	managedQuota := false
+	for key := range updates {
+		switch key {
+		case "quota_used", "quota_daily_used", "quota_weekly_used", "quota_daily_start", "quota_weekly_start", "quota_daily_reset_at", "quota_weekly_reset_at":
+			managedQuota = true
+		}
+	}
+	if state || limits || managedQuota {
 		return clineManagedExtraDeltaSQL(placeholder)
 	}
 	return placeholder + "::jsonb"

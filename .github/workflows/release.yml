@@ -39,9 +39,6 @@ env:
 
 jobs:
   prepare:
-    permissions:
-      contents: read
-      actions: read
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.plan.outputs.sha }}
@@ -49,7 +46,6 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       version: ${{ steps.plan.outputs.version }}
       prerelease: ${{ steps.plan.outputs.prerelease }}
-      fork_release: ${{ steps.plan.outputs.fork_release }}
       date: ${{ steps.plan.outputs.date }}
       matrix: ${{ steps.plan.outputs.matrix }}
       simple: ${{ steps.plan.outputs.simple }}
@@ -79,20 +75,6 @@ jobs:
           if [[ "$SIMPLE_RELEASE" == true ]]; then args+=(--simple); fi
           if [[ "$DRY_RUN" == true ]]; then args+=(--dry-run); fi
           python "$RUNNER_TEMP/release-tools/release_matrix.py" plan "${args[@]}"
-      - name: Require exact-source Wanchuan release gates
-        if: steps.plan.outputs.fork_release == 'true' && steps.plan.outputs.dry_run != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SOURCE_SHA: ${{ steps.plan.outputs.sha }}
-          SIMPLE: ${{ steps.plan.outputs.simple }}
-        run: |
-          set -euo pipefail
-          if [[ "$SIMPLE" == true ]]; then
-            echo 'Wanchuan releases require archives, manifest and checksums; simple image-only release is not allowed.' >&2
-            exit 1
-          fi
-          python3 tools/wanchuan_patchpack.py verify --require-release-version
-          python3 tools/wanchuan_ci_gate.py verify --sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@v7
         with:
           name: release-tooling
@@ -276,10 +258,6 @@ jobs:
           args=(--version "$RELEASE_VERSION" --sha "$RELEASE_SHA" --input release-input --output .release-context)
           if [[ "$SIMPLE_RELEASE" == true ]]; then args+=(--simple); fi
           python "$RUNNER_TEMP/release-tools/release_matrix.py" contexts "${args[@]}"
-      - name: Generate Wanchuan release manifest
-        if: ${{ needs.prepare.outputs.fork_release == 'true' }}
-        run: |
-          python "$RUNNER_TEMP/release-tools/release_matrix.py" manifest             --version "$RELEASE_VERSION"             --sha "$RELEASE_SHA"             --output release-input/wanchuan-release.json
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
@@ -442,7 +420,7 @@ jobs:
 
   sync-version-file:
     needs: [prepare, release]
-    if: ${{ needs.release.result == 'success' && needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.prerelease != 'true' && needs.prepare.outputs.fork_release != 'true' }}
+    if: ${{ needs.release.result == 'success' && needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.prerelease != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -16,6 +16,14 @@
           <dd v-if="resetAt(kind)" class="break-words text-xs text-gray-500">{{ t('clineMetadata.resets') }} {{ resetAt(kind) }}</dd>
         </div>
       </dl>
+      <p v-if="metadata.auto_refresh" data-testid="cline-auto-refresh" class="text-xs text-gray-500">{{ t('clineMetadata.automatic') }} {{ metadata.next_refresh_at || '—' }}</p>
+      <div v-if="metadata.cooldowns?.length" data-testid="cline-cooldowns" class="space-y-1 rounded-md bg-amber-50 p-2 text-sm dark:bg-dark-800">
+        <p>{{ t('clineMetadata.cooldownNotice') }}</p>
+        <p v-for="block in metadata.cooldowns" :key="`${block.type}:${block.source}`">
+          {{ windowLabel(block.type) }} · {{ t(block.source === 'inference' ? 'clineMetadata.inferenceSource' : 'clineMetadata.usageSource') }}:
+          <span>{{ cooldownText(block) }}</span>
+        </p>
+      </div>
       <p class="break-words text-xs text-gray-500">{{ t('clineMetadata.lastSuccess') }} {{ metadata.last_success_at || '—' }}</p>
       <p class="text-xs text-gray-500">{{ t(metadata.identity_verified ? 'clineMetadata.identityVerified' : 'clineMetadata.identityUnknown') }}</p>
       <p class="text-xs text-gray-500">{{ t('clineMetadata.costNotice') }}</p>
@@ -46,7 +54,11 @@ const metadata = ref<ClineMetadata | null>(null)
 const busy = ref(false)
 const error = ref(false)
 const clock = ref(Date.now())
-const timer = setInterval(() => { clock.value = Date.now() }, 1000)
+let lastReadAt = 0
+const timer = setInterval(() => {
+  clock.value = Date.now()
+  if (!busy.value && clock.value - lastReadAt >= 30000 && document.visibilityState !== 'hidden') void load(false)
+}, 1000)
 const windows = ['five_hour', 'weekly', 'monthly'] as const
 let sequence = 0
 let controller: AbortController | undefined
@@ -61,6 +73,7 @@ async function load(refresh: boolean) {
   controller = new AbortController()
   const signal = controller.signal
   busy.value = true
+  lastReadAt = Date.now()
   error.value = false
   try {
     const result = await (refresh ? refreshClineMetadata(id, signal) : getClineMetadata(id, signal))
@@ -80,6 +93,21 @@ function percent(kind: string): string {
 }
 function resetAt(kind: string): string {
   return metadata.value?.windows.find(w => w.type === kind)?.resets_at || ''
+}
+function windowLabel(kind: string): string {
+  return t(`clineMetadata.${windows.includes(kind as typeof windows[number]) ? kind : 'otherWindow'}`)
+}
+function cooldownText(block: NonNullable<ClineMetadata['cooldowns']>[number]): string {
+  const raw = block.reset_at || block.retry_at
+  const at = Date.parse(raw || '')
+  if (!Number.isFinite(at)) return t('clineMetadata.unknownReset')
+  if (at <= clock.value) return t('clineMetadata.pendingRecheck')
+  const seconds = Math.ceil((at - clock.value) / 1000)
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor(seconds % 86400 / 3600)
+  const minutes = Math.floor(seconds % 3600 / 60)
+  const remaining = `${days > 0 ? `${days}d ` : ''}${hours}h ${minutes}m ${seconds % 60}s`
+  return `${t(block.reset_at ? 'clineMetadata.remaining' : 'clineMetadata.retryOnly')} ${remaining} · ${raw}`
 }
 const models = computed(() => {
   const catalog = metadata.value?.catalog

@@ -8,10 +8,6 @@ if [[ ${SIMPLE_RELEASE:-false} != true && ${DOCKERHUB_USERNAME:-skip} != skip ]]
 fi
 arches=(amd64 arm64)
 if [[ ${SIMPLE_RELEASE:-false} == true ]]; then arches=(amd64); fi
-stable_release=true
-if [[ "$RELEASE_VERSION" == *-* && ! "$RELEASE_VERSION" =~ -wanchuan\.[1-9][0-9]*$ ]]; then
-  stable_release=false
-fi
 for arch in "${arches[@]}"; do
   args=(--platform "linux/$arch" --file ".release-context/$arch/Dockerfile"
     --label "org.opencontainers.image.version=$RELEASE_VERSION"
@@ -21,7 +17,7 @@ for arch in "${arches[@]}"; do
     args+=(--tag "$registry:$RELEASE_VERSION-$arch")
     if [[ ${SIMPLE_RELEASE:-false} == true ]]; then
       args+=(--tag "$registry:$RELEASE_VERSION")
-      if [[ $stable_release == true ]]; then args+=(--tag "$registry:latest"); fi
+      if [[ $RELEASE_VERSION != *-* ]]; then args+=(--tag "$registry:latest"); fi
     fi
   done
   if [[ ${DRY_RUN:-false} == true ]]; then
@@ -36,7 +32,7 @@ if [[ ${DRY_RUN:-false} != true && ${SIMPLE_RELEASE:-false} != true ]]; then
   minor=${RELEASE_VERSION#*.}; minor=${minor%%.*}
   for registry in "${registries[@]}"; do
     tags=(--tag "$registry:$RELEASE_VERSION")
-    if [[ $stable_release == true ]]; then
+    if [[ $RELEASE_VERSION != *-* ]]; then
       tags+=(--tag "$registry:latest" --tag "$registry:$major.$minor" --tag "$registry:$major")
     fi
     docker buildx imagetools create "${tags[@]}" \

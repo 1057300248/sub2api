@@ -35,6 +35,7 @@ func (l Limit) Until() time.Time {
 
 var durationText = regexp.MustCompile(`(?i)(?:try\s+again\s+in|the\s+limit\s+resets\s+in)\s+((?:[0-9]+(?:\.[0-9]+)?\s*[smhd]\s*)+)(?:[,.!"\n\r]|$)`)
 var durationPart = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*([smhd])`)
+var fiveHourWindow = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:5[ -]?(?:h|hr|hrs|hour|hours)|five[ -]hour)(?:[^a-z0-9]|$)`)
 var freeModel = regexp.MustCompile(`(?i)free\s+limit\s+reached\s+on\s+model\s+([^\s"<>]+)`)
 
 func errorMessage(body []byte) string {
@@ -140,8 +141,12 @@ func Classify(status int, h http.Header, body []byte, requestedModel string, now
 	case status == 429 && strings.Contains(lower, "clinepass limit"):
 		l.Kind = "pass_limit"
 		l.Window = "unknown"
+		windowLabel := lower
+		if at := durationText.FindStringIndex(lower); at != nil {
+			windowLabel = lower[:at[0]]
+		}
 		switch {
-		case strings.Contains(lower, "5-hour") || strings.Contains(lower, "five-hour"):
+		case fiveHourWindow.MatchString(windowLabel):
 			l.Window = "five_hour"
 		case strings.Contains(lower, "weekly"):
 			l.Window = "weekly"

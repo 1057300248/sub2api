@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import sync_playwright
 
-from model_selection import MODELS, EFFORTS, select_options
+from model_selection import MODELS, EFFORTS, CAPABILITIES, request_capabilities, select_options
 from tool_bridge import ToolBridge, has_tools, strict_json
 from tool_state import ToolState, digest
 from response_events import completed_events
@@ -33,6 +33,8 @@ START = "/api/llm/response_with_tools_start"
 STATUS = "/api/llm/response_with_tools_status"
 MAX_REQUEST_BYTES = 1 << 20
 MAX_PROMPT_CHARS = 32000
+MAX_PROMPT_BYTES = int(os.environ.get('PRISM_MAX_PROMPT_BYTES', '86000'))
+PENDING_LEASE_SECONDS = max(30, int(os.environ.get('PRISM_PENDING_LEASE_SECONDS', '900')))
 SESSION_ID = re.compile(r"^[0-9a-f]{64}$")
 MODEL = "gpt-5.6-sol"
 PROJECT_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f-]{27,}$")
@@ -51,18 +53,24 @@ class AdapterError(Exception):
 def parse_prompt(payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("model"), str) or payload["model"] not in MODELS:
         raise AdapterError(422, "unsupported_model", "Unsupported Prism model; choose " + ", ".join(MODELS))
+    unsupported = request_capabilities(payload) - CAPABILITIES[payload['model']]
+    if unsupported:
+        raise AdapterError(422, 'unsupported_capability', 'Requested Prism capabilities are unavailable: ' + ', '.join(sorted(unsupported)))
     if payload.get("tools") or payload.get("additional_tools") or payload.get("previous_response_id") or payload.get("conversation"):
         raise AdapterError(422, "unsupported_request", "Prism adapter does not yet support tools or server-side conversation state")
     if any(payload.get(key) is not None for key in ("max_output_tokens", "temperature", "top_p")) or payload.get("background") or payload.get("store"):
         raise AdapterError(422, "unsupported_request", "Generation limits, sampling, background and storage options are not supported")
-    if payload.get("tool_choice", "none") not in ("none", "auto") or payload.get("include") or payload.get("service_tier"):
+    # Codex requests optional reasoning fields even on text-only turns. Prism
+    # does not supply encrypted reasoning; accepting the request invents none.
+    if (payload.get("tool_choice", "none") not in ("none", "auto")
+            or payload.get("include") not in (None, [], ['reasoning.encrypted_content']) or payload.get("service_tier")):
         raise AdapterError(422, "unsupported_request", "Requested response options are not supported")
     text_options = payload.get("text") or {}
     if not isinstance(text_options, dict) or text_options.get("format", {"type": "text"}) != {"type": "text"}:
         raise AdapterError(422, "unsupported_request", "Only plain text output is supported")
     reasoning = payload.get("reasoning") or {}
     if (not isinstance(reasoning, dict) or not isinstance(reasoning.get("effort", "medium"), str)
-            or reasoning.get("effort", "medium") not in EFFORTS or reasoning.get("summary") not in (None, "none")):
+            or reasoning.get("effort", "medium") not in EFFORTS or reasoning.get("summary") not in (None, "none", "auto", "detailed")):
         raise AdapterError(422, "unsupported_reasoning", "Unsupported Prism reasoning effort")
     if not isinstance(payload.get("stream", False), bool):
         raise AdapterError(400, "invalid_request", "stream must be a boolean")
@@ -94,9 +102,54 @@ def parse_prompt(payload):
             raise AdapterError(400, "invalid_request", "message content must not be empty")
         parts.append("[" + role + "]\n" + text)
     prompt = "\n\n".join(parts)
-    if not prompt.strip() or len(prompt) > MAX_PROMPT_CHARS:
-        raise AdapterError(400, "invalid_request", "text input is empty or too long")
+    if not prompt.strip() or len(prompt.encode('utf-8')) > MAX_PROMPT_BYTES:
+        raise AdapterError(400, "invalid_request", "text input is empty or exceeds the UTF-8 byte budget")
     return prompt, payload.get("stream", False)
+
+
+def terminal_failure_reason(data):
+    # Values are official reason enums. Never expose arbitrary upstream text.
+    if not isinstance(data, dict):
+        return 'unknown'
+    response = data.get('response')
+    payload = response.get('payload') if isinstance(response, dict) else None
+    reason = payload.get('reason') if isinstance(payload, dict) else None
+    return reason if reason in ('sandbox_reconnecting', 'conversation_too_large',
+                                'project_edit_access_required') else 'unknown'
+
+
+def terminal_failure_diagnostics(data):
+    if not isinstance(data, dict):
+        return {}
+    response = data.get('response')
+    payload = response.get('payload') if isinstance(response, dict) else None
+    if not isinstance(payload, dict):
+        return {}
+    details = payload.get('diagnostics')
+    result = {}
+    text = ' '.join(str(payload.get(key, ''))[:4096].lower() for key in ('message', 'rootCause'))
+    hints = [label for label, words in (
+        ('rate_limit', ('rate limit', 'rate_limit', 'too many')),
+        ('quota', ('quota', 'usage limit')),
+        ('sandbox', ('sandbox', 'runtime')),
+        ('sync', ('synchron', 'sync_', 'sync ')),
+        ('timeout', ('timeout', 'timed out')),
+        ('connection', ('connect', 'network', 'fetch failed')),
+        ('context', ('context length', 'conversation too')),
+    ) if any(word in text for word in words)]
+    if hints:
+        result['upstream_hints'] = hints
+    if not isinstance(details, dict):
+        return result
+    if details.get('code') in ('server_error', 'sandbox_disconnected', 'timeout',
+                              'workspace_sync_timeout', 'workspace_sync_unavailable'):
+        result['upstream_code'] = details['code']
+    if details.get('operation') in ('start', 'check_status', 'stop', 'process'):
+        result['upstream_operation'] = details['operation']
+    status = details.get('httpStatus')
+    if type(status) is int and 400 <= status <= 599:
+        result['upstream_status'] = status
+    return result
 
 
 def terminal_text(data):
@@ -110,6 +163,13 @@ def terminal_text(data):
     if not isinstance(response, dict) or response.get("status") not in ("success", "failed", "error"):
         return None
     if response.get("status") in ("failed", "error"):
+        reason = terminal_failure_reason(data)
+        if reason == 'sandbox_reconnecting':
+            return AdapterError(503, 'sandbox_reconnecting', 'Prism project runtime is reconnecting')
+        if reason == 'project_edit_access_required':
+            return AdapterError(403, 'project_edit_access_required', 'Prism project edit access is required')
+        if reason == 'conversation_too_large':
+            return AdapterError(422, 'conversation_too_large', 'Prism conversation exceeds the upstream limit')
         return AdapterError(502, "prism_failed", "Prism turn failed")
     output = (response.get("payload") or {}).get("output") or []
     texts = [part.get("text", "") for item in output if isinstance(item, dict) and item.get("type") == "message"
@@ -179,7 +239,9 @@ class State:
         except FileExistsError:
             raise AdapterError(409, "pending_turn", "Previous Prism turn outcome is unknown; inspect it before a new request") from None
         with os.fdopen(fd, "w") as file:
-            json.dump({"stage": "submitting", "project_id": project_id, "at": int(time.time())}, file)
+            json.dump({"stage": "submitting", "project_id": project_id, "at": int(time.time()),
+                       "lease_owner": "%s:%s" % (os.uname().nodename if hasattr(os, 'uname') else 'host', os.getpid()),
+                       "lease_expires": int(time.time()) + PENDING_LEASE_SECONDS}, file)
             file.flush()
             os.fsync(file.fileno())
         self.sync_directory(self.pending)
@@ -192,6 +254,7 @@ class State:
         path = self.pending / account_id
         previous = json.loads(path.read_text())
         previous.update(data)
+        previous['lease_expires'] = int(time.time()) + PENDING_LEASE_SECONDS
         self.atomic_write(path, previous)
 
     def receipt(self, account_id, request_id, start_count, status_count, result, cache_hit=False, *, model=MODEL, effort="medium"):
@@ -200,6 +263,8 @@ class State:
                 "start_count": start_count, "status_count": status_count, "completed_at": int(time.time()),
                 "status": "failed" if isinstance(result, AdapterError) else "completed", "usage_source": "unavailable",
                 "session_cache_hit": cache_hit}
+        if isinstance(result, AdapterError):
+            data['error_code'] = result.code
         if isinstance(result, str):
             data["answer_sha256"] = hashlib.sha256(result.encode()).hexdigest()
             data["answer_chars"] = len(result)
@@ -708,6 +773,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(502, {"error": {"type": "prism_unavailable", "message": "Prism browser request failed; inspect pending state before retrying"}})
 
 
+def configure_client_tools(state):
+    enabled = os.environ.get('PRISM_ADAPTER_CLIENT_TOOLS_ENABLED', 'true')
+    if enabled not in ('true', 'false'):
+        raise SystemExit('PRISM_ADAPTER_CLIENT_TOOLS_ENABLED must be true or false')
+    if enabled == 'false':
+        return None
+    # Fail startup on an incomplete adapter upgrade, before accepting traffic.
+    try:
+        from jsonschema import Draft202012Validator
+        from lark import Lark
+        Draft202012Validator.check_schema({'type': 'object'})
+        Lark('start: "ok"').parse('ok')
+    except ImportError:
+        raise SystemExit('Install prism-adapter/requirements.txt before enabling client tools') from None
+    return ToolState(state.directory, AdapterError)
+
+
 def main():
     if os.geteuid() == 0:
         raise SystemExit("Prism adapter must run as a non-root user")
@@ -717,11 +799,7 @@ def main():
         raise SystemExit("adapter key, Chromium binary, and Chromium sandbox are required")
     Handler.api_key = key
     Handler.state = State(os.environ.get("PRISM_ADAPTER_STATE_DIR", "/var/lib/sub2api-prism"))
-    tools = os.environ.get('PRISM_ADAPTER_CLIENT_TOOLS_ENABLED', 'false')
-    if tools not in ('true','false'):
-        raise SystemExit('PRISM_ADAPTER_CLIENT_TOOLS_ENABLED must be true or false')
-    if tools == 'true':
-        Handler.tool_state = ToolState(Handler.state.directory, AdapterError)
+    Handler.tool_state = configure_client_tools(Handler.state)
     max_sessions = int(os.environ.get("PRISM_ADAPTER_MAX_SESSIONS", "1"))
     idle_seconds = int(os.environ.get("PRISM_ADAPTER_SESSION_TTL_SECONDS", "300"))
     if not 1 <= max_sessions <= 2 or not 30 <= idle_seconds <= 900:
@@ -748,7 +826,10 @@ def main():
             queued=queued, bootstrap=bootstrap, idle_seconds=idle_seconds), api)
     else:
         raise SystemExit("PRISM_ADAPTER_MODE must be browser or multiplex")
-    server = ThreadingHTTPServer(("127.0.0.1", 8319), Handler)
+    port = int(os.environ.get("PRISM_ADAPTER_PORT", "8319"))
+    if not 1024 <= port <= 65535:
+        raise SystemExit("PRISM_ADAPTER_PORT must be 1024..65535")
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
     try:
         server.serve_forever()

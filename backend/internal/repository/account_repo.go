@@ -699,6 +699,9 @@ func lockAndMergeAccountProbeExtra(
 	// Preserve server-owned Cline observations and scoped cooldowns under the
 	// same row lock, not from the stale account-edit snapshot.
 	extra = service.PreserveClineStateExtra(account.Platform, currentExtra, extra)
+	if err := service.ValidateClineLocalQuotaSettings(account.Platform, extra); err != nil {
+		return nil, err
+	}
 	// Omitted cost means an unrelated edit. Keep the value under the row lock,
 	// including a probe update committed after the edit form was loaded.
 	for _, key := range []string{service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey} {
@@ -2818,7 +2821,7 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(
 		ctx,
-		"UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) - 'model_rate_limits', updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+		"UPDATE accounts SET extra = CASE WHEN platform = 'cline' THEN extra ELSE COALESCE(extra, '{}'::jsonb) - 'model_rate_limits' END, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
 		id,
 	)
 	if err != nil {

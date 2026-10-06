@@ -30,7 +30,7 @@
 
       <div v-else class="space-y-4">
         <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-          {{ t('admin.accounts.recoverStateHint') }}
+          {{ t(account?.platform === 'cline' ? 'clineAccount.advanced.pauseHint' : 'admin.accounts.recoverStateHint') }}
         </div>
 
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
@@ -260,8 +260,10 @@ const handleReset = async () => {
   if (!props.account) return
   resetting.value = true
   try {
-    const updated = await adminAPI.accounts.recoverState(props.account.id)
-    appStore.showSuccess(t('admin.accounts.recoverStateSuccess'))
+    const updated = props.account.platform === 'cline'
+      ? (await adminAPI.accounts.resetTempUnschedulable(props.account.id), await adminAPI.accounts.getById(props.account.id))
+      : await adminAPI.accounts.recoverState(props.account.id)
+    appStore.showSuccess(t(props.account.platform === 'cline' ? 'clineAccount.advanced.pauseSuccess' : 'admin.accounts.recoverStateSuccess'))
     emit('reset', updated)
     handleClose()
   } catch (error: any) {

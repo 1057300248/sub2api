@@ -1,5 +1,6 @@
 <template>
-  <div ref="rootRef" v-if="showUsageWindows">
+  <div v-if="account.platform === 'cline'" ref="rootRef"><ClineAccountUsageCell :account="account" /></div>
+  <div ref="rootRef" v-else-if="showUsageWindows">
     <!-- Anthropic OAuth and Setup Token accounts: fetch real usage data -->
     <template
       v-if="
@@ -693,6 +694,7 @@ import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
 import GrokQuotaProbeCell from './GrokQuotaProbeCell.vue'
+import ClineAccountUsageCell from './ClineAccountUsageCell.vue'
 import CNProviderQuotaCell from './CNProviderQuotaCell.vue'
 import CNProviderBalanceCell from './CNProviderBalanceCell.vue'
 import OllamaCloudUsageCell from './OllamaCloudUsageCell.vue'

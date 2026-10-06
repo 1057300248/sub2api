@@ -210,6 +210,9 @@ func (a *Account) IsSchedulable() bool {
 		return false
 	}
 	now := time.Now()
+	if a.IsCline() && ClineQuotaAdmission(a, now) != nil {
+		return false
+	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
 		return false
 	}
@@ -301,6 +304,19 @@ func (a *Account) IsTypeSafe() bool {
 
 func (a *Account) IsGrokOAuth() bool {
 	return a.IsGrok() && a.Type == AccountTypeOAuth
+}
+
+const grokSkipForbiddenPauseExtraKey = "grok_skip_forbidden_pause"
+
+// SkipGrokForbiddenPause reports the deployed per-account opt-out for pausing
+// a Grok account after an unknown inference 403. A missing or non-boolean value
+// preserves the legacy pause. Explicit entitlement and suspension markers are
+// protected by the caller even when this returns true.
+func (a *Account) SkipGrokForbiddenPause() bool {
+	if a == nil || !a.IsGrok() {
+		return false
+	}
+	return a.getExtraBool(grokSkipForbiddenPauseExtraKey)
 }
 
 // IsKimi / IsZhipu / IsDeepseek 标识国产 OpenAI 兼容供应商账号。
@@ -917,6 +933,22 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 // （isDeepseekServableModel）——未知模型名透传上游只会得到 404/400，并误触发
 // per-(账号,模型) 30 分钟冷却；带 [1m] 上下文后缀的写法先归一化再比对。
 func (a *Account) IsModelSupported(requestedModel string) bool {
+	if blocked, _ := a.Extra["astra_model_disabled"].(bool); blocked {
+		if empty, _ := a.Extra["astra_model_empty_mapping"].(bool); empty {
+			return false
+		}
+		if strings.EqualFold(strings.TrimSpace(requestedModel), "gpt-6-astra") || strings.EqualFold(a.GetMappedModel(requestedModel), "gpt-6-astra") {
+			return false
+		}
+		if keys, ok := a.Extra["astra_model_blocked_keys"].([]any); ok {
+			for _, key := range keys {
+				if k, ok := key.(string); ok && (strings.EqualFold(k, requestedModel) || (strings.HasSuffix(k, "*") && strings.HasPrefix(requestedModel, strings.TrimSuffix(k, "*")))) {
+					return false
+				}
+			}
+		}
+	}
+
 	if a.IsCline() {
 		return a.IsClineModelSupported(requestedModel)
 	}
@@ -1361,6 +1393,9 @@ func (a *Account) GetCustomErrorCodes() []int {
 }
 
 func (a *Account) ShouldHandleErrorCode(statusCode int) bool {
+	if a.IsCline() && (statusCode == 401 || statusCode == 402 || statusCode == 403 || statusCode == 429) {
+		return true
+	}
 	if !a.IsCustomErrorCodesEnabled() {
 		return true
 	}

@@ -22,7 +22,7 @@ REQUIRED = {
     'backend/internal/service/cline_custom_parameters.go': ['mergeClineCustomRequestParameters(', 'jsonStructFieldNames(apicompat.ChatCompletionsRequest{})', 'validClineCustomParameterName('],
     'backend/internal/service/account.go': ['return a.IsClineModelSupported(requestedModel)', 'return a.GetClineBaseURL()'],
     'backend/internal/service/model_rate_limit.go': ['cline.RateLimitKeys(a.GetClineMode(), modelKey)', 'ClineRateLimitScope(a, scope)'],
-    'backend/internal/service/ratelimit_service.go': ['s.handleClineScopedError(', 'isClineScopedError('],
+    'backend/internal/service/ratelimit_service.go': ['s.handleClineScopedError(', 'clineProtectedError('],
     'backend/internal/service/openai_gateway_cc_pipeline.go': ['account.ValidateClineOutboundBody(body)', 's.prepareClineResponseGuard(ctx, account, body, stream)', 'guardResponse(resp)'],
     'backend/internal/service/cline_response_guard.go': ['prepareClineResponseGuard(', 'decoder.UseNumber()', 'context.WithTimeout(context.WithoutCancel(ctx)', 'cline.GuardSSEBody(', 'cline.GuardJSONBody(', 'handleClineScopedUpstreamError('],
     'backend/internal/service/cline_platform_ratelimit.go': ['handleClineScopedUpstreamError(', 'SetClineRateLimitIfLater('],
@@ -62,6 +62,28 @@ for name, anchors in {
 }.items():
     REQUIRED.setdefault(name, []).extend(anchors)
 
+# Visible entry and common-setting anchors must survive upstream transplants.
+# Actual rendered component/API assertions live in the required CI suites.
+for name, anchors in {
+    'frontend/src/components/account/CreateAccountModal.vue': ['data-testid="create-platform-cline"', '<ClineAccountModal', '@saved="emit(\'created\')"'],
+    'frontend/src/components/account/ClineAccountModal.vue': ['HeaderOverrideEditor', 'AccountGroupModelLimits', 'cline-proxy', 'cline-cost', 'cline-expiry'],
+    'frontend/src/components/account/clineAccountSettings.ts': ['proxy_fallback_origin_id', 'group_allowed_models', 'cost_multiplier', 'validateClineHeaderRows'],
+    'frontend/src/components/account/AccountUsageCell.vue': ['ClineAccountUsageCell'],
+    'backend/internal/service/cline_account_settings.go': ['mergeClineAccountCredentials', 'applyClineSchedulingSettings', 'validateClineAccountHeaderSettings'],
+    'backend/migrations/268_cline_header_settings_guard.sql': ['cline_guard_header_settings', 'cardinality(seen)', 'encoded_bytes>16384'],
+    'backend/internal/handler/dto/account_cline_view.go': ['ClineMetadataForAccount', 'view.Catalog = nil'],
+}.items():
+    REQUIRED.setdefault(name, []).extend(anchors)
+
+for name, anchors in {
+    'frontend/src/components/account/ClineAccountModal.vue': ['ClineAdvancedSettings', 'clineAdvancedPayload', 'operationRunning'],
+    'frontend/src/components/account/BulkEditAccountModal.vue': ['cline-bulk-advanced', 'clineAdvancedPayload'],
+    'backend/internal/service/cline_advanced_settings.go': ['ValidateClineLocalQuotaSettings', 'clineProtectedError', 'PreserveClineLocalQuotaRuntime', 'isClineScopedError('],
+    'backend/internal/repository/cline_advanced_operations.go': ['ResetClineLocalQuota', 'ClearClineTemporaryPause', 'INSERT INTO scheduler_outbox'],
+    'backend/migrations/269_cline_advanced_settings_guard.sql': ['cline_guard_advanced_settings', 'reset_changed', 'custom_error_codes'],
+}.items():
+    REQUIRED.setdefault(name, []).extend(anchors)
+
 errors=[]
 for name, anchors in REQUIRED.items():
     path=ROOT/name
@@ -77,7 +99,15 @@ if pipeline_path.is_file():
     guard=pipeline.find('guardResponse(resp)')
     if not (0 <= prepare < send < guard):
         errors.append('Cline request identity must be captured before transport and guarded after it')
-manifest=json.loads((ROOT/'.wanchuan/patches/manifest.json').read_text())
+manifest=json.loads((ROOT/'docs/cline/patches.json').read_text())
+# Account development is also performed on Windows. Case-only file pairs
+# would pass Linux tests but overwrite each other in a case-insensitive checkout.
+case_paths = {}
+for name in manifest['allowed_changed_files']:
+    folded = name.casefold()
+    if folded in case_paths and case_paths[folded] != name:
+        errors.append(f'case-insensitive path collision: {case_paths[folded]} / {name}')
+    case_paths[folded] = name
 modules={item['id']:item for item in manifest['modules']}
 for module in ('cline-platform','cline-rate-limit-cas'):
     if module not in modules or modules[module].get('review_on_upstream_touch') is not True:

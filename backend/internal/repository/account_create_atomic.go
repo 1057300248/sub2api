@@ -21,6 +21,9 @@ func (r *accountRepository) createAccountAtomic(ctx context.Context, account *se
 	if err := service.NormalizeClineCredentials(draft.Platform, draft.Type, draft.Credentials); err != nil {
 		return err
 	}
+	if err := service.ValidateClineLocalQuotaSettings(draft.Platform, draft.Extra); err != nil {
+		return err
+	}
 	client := clientFromContext(ctx, r.client)
 	tx, err := client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {

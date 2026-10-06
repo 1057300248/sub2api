@@ -78,7 +78,7 @@ func (a *Account) IsHeaderOverrideEligible() bool {
 		return false
 	}
 	switch a.Platform {
-	case PlatformAnthropic, PlatformOpenAI, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo:
+	case PlatformAnthropic, PlatformOpenAI, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformCline:
 		return a.Type == AccountTypeAPIKey
 	case PlatformGrok:
 		return a.Type == AccountTypeAPIKey || a.Type == AccountTypeOAuth
@@ -104,6 +104,9 @@ func (a *Account) IsHeaderOverrideEnabled() bool {
 func (a *Account) GetHeaderOverrides() map[string]string {
 	if !a.IsHeaderOverrideEnabled() {
 		return nil
+	}
+	if a.IsCline() {
+		return clineAccountHeaderDefaults(a)
 	}
 	rawMapping, rawIsAnyMap := a.Credentials[credKeyHeaderOverrides].(map[string]any)
 	if !rawIsAnyMap {

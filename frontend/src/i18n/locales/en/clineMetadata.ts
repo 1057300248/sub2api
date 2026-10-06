@@ -1,4 +1,14 @@
 export default {
+  automatic: "Automatic server refresh is enabled. Next planned check:",
+  cooldownNotice: "Observed quota blocks remain active until checked. Every exhausted window must recover; the countdown alone does not enable inference.",
+  inferenceSource: "Inference limit",
+  usageSource: "Quota observation",
+  otherWindow: "Unclassified quota / entitlement",
+  unknownReset: "Reset time unknown; awaiting a metadata check.",
+  pendingRecheck: "Reported boundary reached; awaiting confirmation.",
+  remaining: "Reported reset in",
+  retryOnly: "Retry check in (not a confirmed reset)",
+
   title: 'Catalog and quota observations',
   open: 'View Cline catalog and quota',
   refresh: 'Refresh from Cline',

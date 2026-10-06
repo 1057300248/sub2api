@@ -213,10 +213,10 @@ func (s *OpenAIGatewayService) openAICodexTicketConfig() config.OpenAICodexTicke
 		cfg.TargetLength = 292
 	}
 	if cfg.TTLSeconds <= 0 {
-		cfg.TTLSeconds = int(openAICodexCredentialTTL / time.Second)
+		cfg.TTLSeconds = 3600
 	}
 	if cfg.RefreshBeforeSeconds <= 0 {
-		cfg.RefreshBeforeSeconds = 60
+		cfg.RefreshBeforeSeconds = 600
 	}
 	if cfg.HarvestProbeIntervalSeconds < 30 {
 		cfg.HarvestProbeIntervalSeconds = 180
@@ -810,7 +810,7 @@ func (s *OpenAIGatewayService) openAICodexTicketOutboundModel(account *Account, 
 // outboundModel 必须是真正会发给上游的模型名（openAICodexTicketOutboundModel），
 // 不是客户端原始模型：注入侧读的是出站 body.model，两侧口径必须一致。
 func (s *OpenAIGatewayService) openAICodexTicketBlocksAccount(account *Account, outboundModel string) bool {
-	if accountHasPrismBrowser(account) {
+	if account.isPrismBrowserUpstreamModelEnabled(outboundModel) {
 		return false
 	}
 	if s == nil || !isOpenAICodexTicketAccount(account, outboundModel) || !s.openAICodexTicketEnabled() {
@@ -1300,11 +1300,9 @@ func (s *OpenAIGatewayService) refreshOpenAICodexTickets(ctx context.Context) {
 	}
 }
 
-// IsOpenAICodexTicketExtraKey identifies server-managed credential material.
-// The retired cookie jar stays private and write-protected during upgrades,
-// even though the new ticket-bound egress no longer reads or replays it.
+// IsOpenAICodexTicketExtraKey identifies server-managed ticket material.
 func IsOpenAICodexTicketExtraKey(key string) bool {
-	return strings.TrimSpace(key) == "codex_cookie_jar" || strings.HasPrefix(key, openAICodexTicketExtraKeyPrefix)
+	return strings.HasPrefix(key, openAICodexTicketExtraKeyPrefix)
 }
 
 // MergeOpenAICodexTicketExtra preserves only persisted tickets, never summaries or

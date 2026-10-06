@@ -1,5 +1,23 @@
 # Prism OAuth 文本适配器（P1 试验）
 
+账号编辑 → Prism → 勾选专属模型。`extra.openai_prism_browser_models` 按账号映射后的模型名匹配，只支持 `gpt-6.1-sol`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-6-luna`。未选模型继续使用原来的 Codex / Excel 路由；显式空数组表示不走 Prism。已开启 Prism 的旧账号缺少该字段时仅默认这四个模型，不再接管所有 OpenAI 模型。所选模型的 Prism 失败仍不自动切换协议或模型。
+
+Prism 请求由适配器独立排队与限流，不参与原生账号的自动并发升降档；账号页显示的并发档位不代表适配器容量。本变更不会提高线上适配器限额。
+
+## 从 pr269 适配器升级（Issue #280）
+
+`v2.9.7` / `bc83ff9c3` 的 Go 网关已包含 #278 工具请求头与终态验证，但只替换 Go 二进制不会更新独立运行的 `pr269-49b0f52` 适配器。该旧组合不能验收为支持 6.1 Sol 客户端工具。普通文本请求带 `include=["reasoning.encrypted_content"]` 或 `reasoning.summary=auto` 也需要本次适配器修复。
+
+推荐使用 #281 同一提交中的 Go 网关与完整 `prism-adapter/` 目录。上线顺序：
+
+1. 保留现有 Go 二进制、适配器目录及受限环境文件的回滚副本。全部构建在本机或 CI 完成。
+2. 准备完整适配器目录和 `requirements.txt` 固定 wheel；保留已有 OAuth 会话、pending journal、工具状态目录和服务账号权限，不复制或清空状态来绕过失败。
+3. 先替换适配器并重启。启动检查会验证 `jsonschema` / `lark`；旧配置若显式设有 `PRISM_ADAPTER_CLIENT_TOOLS_ENABLED=false`，需改为 true 才能验收工具路径。未设置时新默认值为 true。
+4. 替换本 PR 的 Go 网关二进制，在账号编辑页保存 Prism 模型范围。新版适配器与 v2.9.7 网关的过渡组合可以用于验证工具，但专属模型路由、错误响应和并发统计必须有本 PR 的 Go 修复。
+5. 使用受控测试 key 验证纯文本、带可选推理参数的文本、函数与自定义工具回传闭环、未选模型的原生路由及错误响应。真实账号权益与线上结果以本次验收为准；本仓库的离线测试不能替代此步骤。
+
+网关日志会保留已知适配器错误码（例如 `tools_disabled`、`unsupported_request`、`model_unavailable`），不记录适配器任意错误文本。`model_unavailable` 表示账号页面缺少所选模型，不应作为参数兼容问题重放，也不会静默改成其他模型。
+
 关联 [Issue #256](https://github.com/ranxi2001/sub2api/issues/256)。账号编辑页的 Prism 开关复用现有 OpenAI OAuth 凭据，通过回环适配服务访问 Prism 网页。管理员账号测试与 HTTP `/v1/responses` 共用后端凭据获取及适配器请求函数。
 
 文本请求接受 `gpt-6.1-sol`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-6-luna` 四个精确模型 ID，以及 `low`、`medium`、`high`、`xhigh` 思考强度（省略时为 `medium`）。能否调用仍取决于该 OAuth 账号在 Prism 页面中实际可选的模型和强度；不把静态支持列表当作账号权益证明。默认保持文本模式。`gpt-6.1-sol` 可通过下述服务端试用开关启用客户端工具桥；图片、`previous_response_id`、background、structured output、compact 和原生 WebSocket 仍不支持。
@@ -24,7 +42,7 @@
 
 ## 6.1 Sol 客户端工具桥（试用）
 
-同时升级 Go 网关和本目录适配器，安装固定版本的预构建依赖后，在适配器的受限环境文件设置 `PRISM_ADAPTER_CLIENT_TOOLS_ENABLED=true`。默认 false；其他三个模型暂只保留文本路径。无需更改用户的 Codex 工具定义、provider 或请求头。
+同时升级 Go 网关和本目录适配器，并安装 `requirements.txt` 固定版本的预构建依赖。客户端工具桥接默认启用；显式设置 `PRISM_ADAPTER_CLIENT_TOOLS_ENABLED=false` 可关闭。启动时检查工具验证依赖，缺失则停止启动，避免接收请求后才发现升级不完整。其他三个模型暂只保留文本路径。无需更改用户的 Codex 工具定义、provider 或请求头。
 
 - 支持 Responses `function`、`custom`、嵌套 namespace，顶层 `tools` / `additional_tools` 及 input 内的 `additional_tools`。
 - 支持 `tool_choice=auto/none/required`、指定 function/custom，以及 `parallel_tool_calls`。最多 96 个工具、每次最多 8 个调用、历史最多 64 个调用；`parallel_tool_calls=false` 时最多一个。
@@ -131,3 +149,28 @@ python3 prism-adapter/smoke_browser.py --chrome /absolute/path/to/chromium
 该脚本验证三次不同模型/强度的 start、同会话一次缓存命中、两个独立项目以及新聊天不重复提交历史。`smoke_multiplex.py` 按四模型与四档强度混合发送请求，同时核对实际 start、响应和回执参数。这些脚本验证浏览器机制，不能替代真实账号糖果测试或证明模型能力。
 
 项目会保留在账号的 Prism 工作区内，本版不自动批量删除项目。大规模使用前仍需项目回收、账号代理、动态模型目录、计费策略、真实 Codex 客户端和长时间工具会话的独立验收。默认保持总开关关闭；真实用户流量应等待这些边界完善。
+
+## Multiplex 内存与项目启动压力
+
+`PRISM_ADAPTER_ACCOUNT_MAX_INFLIGHT` 和 `PRISM_ADAPTER_MAX_INFLIGHT` 是准入上限，不保证部署内存或上游项目运行环境可以承载相同并发。准备页面关闭后会请求 Chromium 回收已分离的编辑器上下文；下一次准备若仍超过 750 MiB，则最多等待 30 秒恢复，仍不足时返回 `resource_pressure`，不会绕过保护提交。systemd 的硬内存上限仍由部署方保留。
+
+multiplex 日志记录 `prism_prepare_start/end`、`prism_poll_start/end`、完成和失败事件，包含本地请求标识、模型/强度、阶段、在途/排队/轮询数量和 cgroup 内存；不包含提示词、账号凭据、Cookie 或 turn-state。只有上游任务的执行区间确实重叠，才算实际并发。
+
+页面显示“项目运行环境的启动请求受到限流”或项目创建接口返回 429 时，会以 `project_runtime_rate_limited` 拒绝后续准备，并对该账号暂停新的启动至少 60 秒（当前进程内）。这是最短保护窗口，不代表上游冷却已经结束；页面给出的更晚时间应优先遵守。已有上游请求继续收尾，未知结局保留，不自动重放。仅调高并发配置不能解除上游限流。
+
+客户端应保留自己的稳定会话/线程标识。同一会话可以复用原项目并新建 chat tab，减少项目反复创建；不同 API Key、账号或会话仍独立。无会话标识的请求不能安全地共用项目，保持新建。工具回传继续遵守原有独立项目规则。
+
+本地 5 并发三轮 smoke（真实浏览器、模拟上游，不能代替生产验收）：
+
+```sh
+python prism-adapter/smoke_multiplex.py --chrome /path/to/chrome \
+  --concurrency 5 --model gpt-6.1-sol --effort xhigh --rounds 3
+```
+
+systemd 部署还需注意环境变量优先级：`EnvironmentFile` 中的值会覆盖 `Environment=`。若已有环境文件配置了并发，应更新对应文件，或在 drop-in 中追加最后读取的专用 `EnvironmentFile`；重启后必须核对进程实际环境，不能只看 drop-in 文本。Docker Compose 则在适配器服务的 `environment:` 下设置变量。
+
+### 项目环境重连与真实失败
+
+multiplex 识别官方 start 返回的明确 `completed / response.status=error / payload.reason=sandbox_reconnecting`。此时保持准备页面，让官方页面等待自己的 `ensureSandboxConnection` 后继续提交，而不是立刻关闭页面。仅允许同一输入、previousResponseId、conversationId、项目、模型和强度；sandbox 元数据由官方页面刷新。每轮最多 3 次 start 尝试，仍受请求总时限限制。未知结果、一般 HTTP/网络错误、其他终态失败都不能重新放行 start。
+
+日志记录重连次数；回执 `start_count` 如实包含这类明确环境重连尝试。`conversation_too_large`、`project_edit_access_required` 与 `sandbox_reconnecting` 分别报告，不再全部掩盖为 `prism_failed`；其他未知失败保持通用错误，且不输出上游任意报错文本。

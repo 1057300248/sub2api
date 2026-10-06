@@ -2,10 +2,11 @@
   <BaseDialog :show="show" :title="t(account ? 'clineAccount.edit' : 'clineAccount.create')" width="wide"
     :show-close-button="!saving" :close-on-escape="!saving" @close="close">
     <form id="cline-account-form" class="space-y-5" @submit.prevent="save">
+      <button v-if="showPlatformBack" type="button" class="btn btn-secondary" :disabled="saving || operationRunning" data-testid="cline-back-platform" @click="back">{{ t('clineAccount.choosePlatform') }}</button>
       <p class="rounded-lg bg-slate-100 p-3 text-sm text-slate-700 dark:bg-dark-700 dark:text-slate-200">{{ t('clineAccount.boundary') }}</p>
       <p v-if="draft.mode === 'free' || draft.mode === 'unknown'" role="status" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{{ t(draft.mode === 'free' ? 'clineAccount.freeNotice' : 'clineAccount.unknownNotice') }}</p>
       <div v-if="error" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ error }}</div>
-      <fieldset :disabled="saving" class="space-y-4">
+      <fieldset :disabled="saving || operationRunning" class="space-y-4">
         <div class="grid gap-4 sm:grid-cols-2">
           <label class="block text-sm">{{ t('clineAccount.name') }}<input v-model="draft.name" data-testid="cline-name" class="input mt-1 w-full" required maxlength="100" /></label>
           <label class="block text-sm">{{ t('clineAccount.mode') }}<select v-model="draft.mode" data-testid="cline-mode" class="input mt-1 w-full"><option value="pass">Cline Pass</option><option value="free">Cline Free</option><option value="payg">Cline PAYG</option><option value="unknown">{{ t('clineAccount.unknown') }}</option></select></label>
@@ -29,43 +30,75 @@
           <label class="block text-sm">{{ t('clineAccount.priority') }}<input v-model.number="draft.priority" type="number" min="0" max="10000" step="1" class="input mt-1 w-full" required /></label>
         </div>
         <div><h4 class="mb-2 text-sm font-medium">{{ t('clineAccount.groups') }}</h4><p v-if="!visibleGroups.length" class="text-sm text-gray-500">{{ t('clineAccount.noGroups') }}</p><div class="flex max-h-36 flex-wrap gap-3 overflow-auto"><label v-for="group in visibleGroups" :key="group.id" class="flex items-center gap-2 text-sm"><input v-model="draft.groupIDs" type="checkbox" :value="group.id" />{{ group.name }} <span v-if="group.missing" class="text-amber-600">{{ t('clineAccount.unavailableGroup') }}</span></label></div></div>
-        <label v-if="account" class="flex items-center gap-2 text-sm"><input v-model="draft.schedulable" type="checkbox" :disabled="draft.mode === 'free' || draft.mode === 'unknown'" />{{ t('clineAccount.schedulable') }}</label>
+        <label class="flex items-center gap-2 text-sm"><input v-model="draft.schedulable" data-testid="cline-schedulable" type="checkbox" :disabled="draft.mode === 'free' || draft.mode === 'unknown'" />{{ t('clineAccount.schedulable') }}</label>
+        <AccountGroupModelLimits v-if="account" v-model="draft.groupAllowedModels" :groups="groupsForLimits" platform="cline" :account-id="account.id" />
+        <details class="rounded-lg border border-gray-200 p-3 dark:border-dark-600" open>
+          <summary class="cursor-pointer font-medium">{{ t('clineAccount.commonSettings') }}</summary>
+          <div class="mt-3 grid gap-4 sm:grid-cols-2">
+            <label class="block text-sm">{{ t('clineAccount.proxy') }}<select :value="draft.proxyID ?? ''" data-testid="cline-proxy" @change="changeProxy" class="input mt-1 w-full"><option value="">{{ t('clineAccount.noProxy') }}</option><option v-for="proxy in visibleProxies" :key="proxy.id" :value="proxy.id" :disabled="proxy.unavailable && proxy.id !== draft.proxyID">{{ proxy.name }}{{ proxy.unavailable ? ' · ' + t('clineAccount.unavailableGroup') : '' }}</option></select></label>
+            <label class="block text-sm">{{ t('clineAccount.loadFactor') }}<input v-model.number="draft.loadFactor" data-testid="cline-load-factor" type="number" min="1" max="10000" step="1" class="input mt-1 w-full" :placeholder="t('clineAccount.inheritConcurrency')" /></label>
+            <label class="block text-sm">{{ t('clineAccount.rateMultiplier') }}<input v-model.number="draft.rateMultiplier" data-testid="cline-rate" type="number" min="0" step="any" required class="input mt-1 w-full" /></label>
+            <label class="block text-sm">{{ t('clineAccount.costMultiplier') }}<input v-model.number="draft.costMultiplier" data-testid="cline-cost" type="number" min="0" max="1000000" step="any" required class="input mt-1 w-full" /><span class="text-xs text-gray-500">{{ t('clineAccount.costHint') }}</span></label>
+            <label class="block text-sm">{{ t('clineAccount.groupRateMultiplier') }}<input v-model.number="draft.groupRateMultiplier" data-testid="cline-group-rate" type="number" min="0" step="any" required class="input mt-1 w-full" /></label>
+            <label class="block text-sm">{{ t('clineAccount.expiresAt') }}<input v-model="draft.expiresAt" data-testid="cline-expiry" type="datetime-local" step="1" class="input mt-1 w-full" /></label>
+            <label class="flex items-center gap-2 text-sm"><input v-model="draft.autoPauseOnExpired" data-testid="cline-auto-pause" type="checkbox" />{{ t('clineAccount.autoPauseOnExpired') }}</label>
+            <label v-if="account" class="block text-sm">{{ t('clineAccount.status') }}<select v-model="draft.status" data-testid="cline-status" class="input mt-1 w-full"><option value="active">{{ t('common.active') }}</option><option value="inactive">{{ t('common.inactive') }}</option><option value="error">{{ t('common.error') }}</option></select></label>
+          </div>
+          <p class="mt-2 text-xs text-gray-500">{{ t('clineAccount.settingsHint') }}</p>
+        </details>
+        <div class="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+          <label class="flex items-center gap-2 text-sm font-medium"><input v-model="draft.headerOverrideEnabled" data-testid="cline-headers-enabled" type="checkbox" />{{ t('clineAccount.headerDefaults') }}</label>
+          <p class="text-xs text-gray-500">{{ t('clineAccount.headersHint') }}</p>
+          <HeaderOverrideEditor v-if="draft.headerOverrideEnabled" :rows="draft.headerOverrideRows" @update:rows="draft.headerOverrideRows = $event" />
+        </div>
+        <ClineAdvancedSettings v-if="show" v-model="advanced" :account="account" :can-operate="canOperate" @busy="operationRunning = $event" @operated="emit('saved'); close()" />
         <label class="block text-sm">{{ t('clineAccount.notes') }}<textarea v-model="draft.notes" class="input mt-1 w-full" rows="2" /></label>
       </fieldset>
       <template v-if="account && show">
-        <button v-if="!showMetadata" type="button" class="btn btn-secondary" :disabled="saving" @click="showMetadata = true">{{ t('clineMetadata.open') }}</button>
-        <ClineMetadataPanel v-if="showMetadata" :account-id="account.id" :mode="draft.mode" @select="addCatalogModel" />
+        <button v-if="!showMetadata" type="button" class="btn btn-secondary" :disabled="saving || operationRunning" @click="showMetadata = true">{{ t('clineMetadata.open') }}</button>
+        <p v-if="showMetadata" class="text-xs text-gray-500">{{ t('clineAccount.savedMetadata') }}</p>
+        <ClineMetadataPanel v-if="showMetadata" :account-id="account.id" :mode="clineMode(account.credentials?.account_mode)" @select="addCatalogModel" />
       </template>
       <p class="text-xs text-gray-500">{{ t('clineAccount.noProbe') }}</p>
     </form>
-    <template #footer><button class="btn btn-secondary" :disabled="saving" @click="close">{{ t('clineAccount.cancel') }}</button><button form="cline-account-form" type="submit" data-testid="cline-save" class="btn btn-primary" :disabled="saving">{{ t(saving ? 'clineAccount.saving' : 'clineAccount.save') }}</button></template>
+    <template #footer><button class="btn btn-secondary" :disabled="saving || operationRunning" @click="close">{{ t('clineAccount.cancel') }}</button><button form="cline-account-form" type="submit" data-testid="cline-save" class="btn btn-primary" :disabled="saving || operationRunning">{{ t(saving ? 'clineAccount.saving' : 'clineAccount.save') }}</button></template>
   </BaseDialog>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { Account, AdminGroup, CreateAccountRequest } from '@/types'
+import type { Account, AdminGroup, CreateAccountRequest, Proxy } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ClineMetadataPanel from './ClineMetadataPanel.vue'
+import ClineAdvancedSettings from './ClineAdvancedSettings.vue'
+import { clineAdvancedDraft, clineAdvancedPayload, ClineAdvancedError } from './clineAdvancedSettings'
+import AccountGroupModelLimits from './AccountGroupModelLimits.vue'
+import HeaderOverrideEditor from './HeaderOverrideEditor.vue'
+import { ClineSettingsError } from './clineAccountSettings'
 import * as accountsAPI from '@/api/admin/accounts'
-import { buildClineAccountPayload, clineAccountDraft, ClineFormError } from './clineAccountForm'
+import { buildClineAccountPayload, clineAccountDraft, clineMode, ClineFormError } from './clineAccountForm'
 
-const props = withDefaults(defineProps<{ show: boolean; account?: Account | null; groups?: AdminGroup[]; allowComposite?: boolean }>(), { account: null, groups: () => [], allowComposite: true })
-const emit = defineEmits<{ close: []; saved: [] }>()
+const props = withDefaults(defineProps<{ show: boolean; account?: Account | null; groups?: AdminGroup[]; proxies?: Proxy[]; allowComposite?: boolean; initial?: { name: string; notes: string }; showPlatformBack?: boolean }>(), { account: null, groups: () => [], proxies: () => [], allowComposite: true, showPlatformBack: false })
+const emit = defineEmits<{ close: []; saved: []; back: [] }>()
 const { t } = useI18n()
 const draft = reactive(clineAccountDraft())
 const saving = ref(false)
+const operationRunning = ref(false)
 const showMetadata = ref(false)
 function addCatalogModel(id: string) {
-  if (saving.value || draft.models.some(row => row.publicID === id)) return
+  if (saving.value || operationRunning.value || draft.models.some(row => row.publicID === id)) return
   draft.models.push({ publicID: id, upstreamID: id })
 }
 const error = ref('')
+const advanced = ref(clineAdvancedDraft(props.account))
+const canOperate = computed(() => !!props.account && !saving.value && JSON.stringify(draft) === JSON.stringify(clineAccountDraft(props.account)) && JSON.stringify(advanced.value) === JSON.stringify(clineAdvancedDraft(props.account)))
 watch(() => [props.show, props.account] as const, ([show]) => {
   showMetadata.value = false
   if (!show) { draft.apiKey = ''; return }
   Object.assign(draft, clineAccountDraft(props.account))
+  advanced.value = clineAdvancedDraft(props.account)
+  if (!props.account && props.initial) { draft.name = props.initial.name; draft.notes = props.initial.notes }
   error.value = ''
 }, { immediate: true })
 const visibleGroups = computed(() => {
@@ -75,16 +108,37 @@ const visibleGroups = computed(() => {
   for (const id of props.account?.group_ids ?? []) if (!visible.has(id)) groups.push({ id, name: `#${id}`, missing: true })
   return groups
 })
+const groupsForLimits = computed(() => visibleGroups.value.filter(g => draft.groupIDs.includes(g.id)))
+const visibleProxies = computed(() => {
+  const options = props.proxies.filter(p => p.status === 'active' || p.id === draft.proxyID)
+    .map(p => ({ id: p.id, name: p.name, unavailable: p.status !== 'active' }))
+  if (draft.proxyID !== null && !options.some(p => p.id === draft.proxyID)) options.push({ id: draft.proxyID, name: `#${draft.proxyID}`, unavailable: true })
+  return options
+})
+function changeProxy(event: Event) {
+  // Read the native select value explicitly; null-bound options can otherwise
+  // produce an undefined model when clearing a saved proxy.
+  const value = (event.target as HTMLSelectElement).value
+  draft.proxyID = value === '' ? null : Number(value)
+}
+function back() {
+  if (saving.value || operationRunning.value) return
+  draft.apiKey = ''
+  emit('back')
+}
 function close() {
-  if (saving.value) return
+  if (saving.value || operationRunning.value) return
   draft.apiKey = ''
   emit('close')
 }
 async function save() {
-  if (saving.value) return
+  if (saving.value || operationRunning.value) return
   error.value = ''
   try {
     const payload = buildClineAccountPayload(draft, props.account)
+    const settings = clineAdvancedPayload(advanced.value, props.account)
+    Object.assign(payload.credentials!, settings.credentials)
+    if (Object.keys(settings.extra).length) payload.extra = { ...payload.extra, ...settings.extra }
     saving.value = true
     if (props.account) await accountsAPI.update(props.account.id, payload)
     else await accountsAPI.create(payload as CreateAccountRequest)
@@ -93,7 +147,7 @@ async function save() {
     emit('close')
   } catch (err) {
     // Axios errors can contain the submitted secret. Never log/stringify them.
-    error.value = err instanceof ClineFormError ? t(`clineAccount.errors.${err.issue}`) : t('clineAccount.saveFailed')
+    error.value = err instanceof ClineAdvancedError ? t(`clineAccount.advanced.errors.${err.issue}`) : err instanceof ClineFormError || err instanceof ClineSettingsError ? t(`clineAccount.errors.${err.issue}`) : t('clineAccount.saveFailed')
   } finally { saving.value = false }
 }
 </script>
