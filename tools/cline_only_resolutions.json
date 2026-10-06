@@ -4,5 +4,17 @@
       "old": "<<<<<<< ours\n\tsrc/components/admin/__tests__/HarvestGatewayBorrowPanel.spec.ts \\\n\tsrc/components/admin/__tests__/AstraGatewayRuntime.spec.ts \\\n\tsrc/components/admin/__tests__/AstraGatewayHistory.spec.ts \\\n=======\n\tsrc/components/account/__tests__/clineAccountForm.spec.ts \\\n\tsrc/components/account/__tests__/ClineMetadataPanel.spec.ts \\\n\t\tsrc/components/account/__tests__/ClineAccountModal.spec.ts \\\n>>>>>>> theirs\n",
       "new": "\tsrc/components/admin/__tests__/HarvestGatewayBorrowPanel.spec.ts \\\n\tsrc/components/admin/__tests__/AstraGatewayRuntime.spec.ts \\\n\tsrc/components/admin/__tests__/AstraGatewayHistory.spec.ts \\\n\tsrc/components/account/__tests__/clineAccountForm.spec.ts \\\n\tsrc/components/account/__tests__/ClineMetadataPanel.spec.ts \\\n\tsrc/components/account/__tests__/ClineAccountModal.spec.ts \\\n"
     }
+  ],
+  "backend/internal/service/account.go": [
+    {
+      "old": "<<<<<<< ours\n\tif blocked, _ := a.Extra[\"astra_model_disabled\"].(bool); blocked {\n\t\tif empty, _ := a.Extra[\"astra_model_empty_mapping\"].(bool); empty {\n\t\t\treturn false\n\t\t}\n\t\tif strings.EqualFold(strings.TrimSpace(requestedModel), \"gpt-6-astra\") || strings.EqualFold(a.GetMappedModel(requestedModel), \"gpt-6-astra\") {\n\t\t\treturn false\n\t\t}\n\t\tif keys, ok := a.Extra[\"astra_model_blocked_keys\"].([]any); ok {\n\t\t\tfor _, key := range keys {\n\t\t\t\tif k, ok := key.(string); ok && (strings.EqualFold(k, requestedModel) || (strings.HasSuffix(k, \"*\") && strings.HasPrefix(requestedModel, strings.TrimSuffix(k, \"*\")))) {\n\t\t\t\t\treturn false\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\n=======\n\tif a.IsCline() {\n\t\treturn a.IsClineModelSupported(requestedModel)\n\t}\n>>>>>>> theirs\n",
+      "new": "\tif blocked, _ := a.Extra[\"astra_model_disabled\"].(bool); blocked {\n\t\tif empty, _ := a.Extra[\"astra_model_empty_mapping\"].(bool); empty {\n\t\t\treturn false\n\t\t}\n\t\tif strings.EqualFold(strings.TrimSpace(requestedModel), \"gpt-6-astra\") || strings.EqualFold(a.GetMappedModel(requestedModel), \"gpt-6-astra\") {\n\t\t\treturn false\n\t\t}\n\t\tif keys, ok := a.Extra[\"astra_model_blocked_keys\"].([]any); ok {\n\t\t\tfor _, key := range keys {\n\t\t\t\tif k, ok := key.(string); ok && (strings.EqualFold(k, requestedModel) || (strings.HasSuffix(k, \"*\") && strings.HasPrefix(requestedModel, strings.TrimSuffix(k, \"*\")))) {\n\t\t\t\t\treturn false\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\n\tif a.IsCline() {\n\t\treturn a.IsClineModelSupported(requestedModel)\n\t}\n"
+    }
+  ],
+  "backend/internal/service/openai_gateway_cc_pipeline.go": [
+    {
+      "old": "<<<<<<< ours\n\t\t!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),\n\t).WithGrokForbiddenPolicy(account)\n=======\n\t\t!wrappedClineLimit && !shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),\n\t)\n>>>>>>> theirs\n",
+      "new": "\t\t!wrappedClineLimit && !shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),\n\t).WithGrokForbiddenPolicy(account)\n"
+    }
   ]
 }
