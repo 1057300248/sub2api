@@ -1,4 +1,4 @@
-name: Prepare pinned Cline v2.9.11 review sources
+name: Materialize pinned Cline v2.9.11 review
 on:
   push:
     branches: [codex/cline-v2911-prepare-20261007]
@@ -6,52 +6,44 @@ on:
 permissions:
   contents: write
 jobs:
-  sources:
+  reviewed-patch:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: 0d923dc088c665cdbf268ad524160f0a55f0cb84
+          ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Materialize reviewed merge without changing old review or production refs
+      - name: Verify patch and fast-forward only the isolated review branch
         shell: bash
         env:
-          GIT_AUTHOR_DATE: '2026-10-06T18:36:13Z'
-          GIT_COMMITTER_DATE: '2026-10-06T18:36:13Z'
+          GIT_AUTHOR_DATE: '2026-10-06T19:00:20Z'
+          GIT_COMMITTER_DATE: '2026-10-06T19:00:20Z'
         run: |
           set -euo pipefail
+          target=codex/sub2-v2911-cline-complete-20261007
+          parent=304f3008dabe431324cbc0d84b692207431e5126
+          expected=e829f30f411b772ab59a89ba21396401f6120cf4
+          test "$(git ls-remote --heads origin "refs/heads/$target" | cut -f1)" = "$parent"
+          python3 - <<'PY'
+          import base64, hashlib, lzma, os, pathlib, subprocess
+          source = '4d018009b6208d6594d3639fa9ec71801614b353'
+          text = ''.join(subprocess.check_output(['git','show',f'{source}:tools/cline-v2911-review-part{i}.b64'],text=True).strip() for i in (1,2,3))
+          data = base64.b64decode(text,validate=True)
+          assert hashlib.sha256(data).hexdigest() == '53c2257b3af8472568cb90d9761bcbf425221fcc75502ccfeb6c32237f32a000'
+          patch = lzma.decompress(data)
+          assert len(patch) == 114209
+          pathlib.Path(os.environ['RUNNER_TEMP'],'cline-reviewed.patch').write_bytes(patch)
+          PY
+          git switch --detach "$parent"
+          git apply --index "$RUNNER_TEMP/cline-reviewed.patch"
+          git diff --cached --check
+          python3 tools/verify_cline_only.py
+          python3 tools/verify_cline_platform.py
+          test "$(git write-tree)" = 22f7aed7ff2cc50de585fd36487709ea4d4fbcb4
           git config user.name 'Wanchuan Review'
           git config user.email '48192596+1057300248@users.noreply.github.com'
-          target=codex/sub2-v2911-cline-complete-20261007
-          test -z "$(git ls-remote --heads origin "refs/heads/$target")"
-          git fetch --no-tags https://github.com/ranxi2001/sub2api.git e6addfe4aff745c859f9bb50817bc468e0e1f4f7
-          git merge-base --is-ancestor ab7cb27ceed6390441277784cc5560694d95fd73 FETCH_HEAD
-          git switch -c "$target"
-          git merge --no-commit --no-ff e6addfe4aff745c859f9bb50817bc468e0e1f4f7 || true
-          python3 - <<'PY'
-          import pathlib, re, subprocess
-          expected = {'backend/internal/repository/account_repo.go', 'backend/internal/service/admin_service.go', 'frontend/package.json', 'frontend/pnpm-lock.yaml'}
-          paths = set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
-          assert paths == expected, paths
-          for path in sorted(paths):
-              p = pathlib.Path(path)
-              s = p.read_text()
-              def resolve(m):
-                  if path == 'backend/internal/service/admin_service.go':
-                      return m.group(1) + '\n' + m.group(2) + '\n'
-                  return m.group(1) + '\n'
-              s, count = re.subn(r'<<<<<<< HEAD\n(.*?)\n=======\n(.*?)\n>>>>>>> [^\n]*\n', resolve, s, flags=re.S)
-              assert count == 1, (path,count)
-              p.write_text(s)
-              if path.endswith('.go'):
-                  subprocess.run(['gofmt','-w',path],check=True)
-              subprocess.run(['git','add','--',path],check=True)
-          PY
-          git diff --cached --check
-          echo "Resolved tree: $(git write-tree)"
-          test "$(git write-tree)" = 9bf417c5ac9d27ba139ec26df77fc6188c25a5ae
-          git commit -m 'merge: pin upstream v2.9.11 while preserving Cline atomic creation and frontend security'
-          test "$(git rev-parse HEAD)" = 304f3008dabe431324cbc0d84b692207431e5126
+          git commit -m 'fix(cline): complete v2.9.11 auth quota and protocol review contracts'
+          test "$(git rev-parse HEAD)" = "$expected"
           git push origin "HEAD:refs/heads/$target"
           git log -1 --format='%H %T %s'
