@@ -518,11 +518,11 @@ func isOpenAIChatUsageOnlyStreamChunk(payload string) bool {
 	if strings.TrimSpace(payload) == "" {
 		return false
 	}
-	if !gjson.Get(payload, "usage").Exists() || !gjson.Get(payload, "choices").Exists() {
+	if !gjson.Get(payload, "usage").Exists() {
 		return false
 	}
 	choices := gjson.Get(payload, "choices")
-	return choices.IsArray() && len(choices.Array()) == 0
+	return choices.Exists() && choices.IsArray() && len(choices.Array()) == 0
 }
 
 // extractCCStreamUsage 从单个 CC 流式 chunk 的 payload 中提取 usage 字段。
@@ -533,7 +533,6 @@ func extractCCStreamUsage(payload string) *OpenAIUsage {
 	if !usageResult.Exists() || !usageResult.IsObject() {
 		return nil
 	}
-
 	u, ok := openAIUsageFromGJSON(usageResult)
 	if !ok {
 		return nil
