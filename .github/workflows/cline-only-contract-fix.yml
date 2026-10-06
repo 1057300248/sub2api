@@ -53,7 +53,8 @@ jobs:
           step = '      - name: Cline quota API contracts\n        working-directory: backend\n        run: python3 -c "$CLINE_TEST_DRIVER" api-contract 1 unit \'^TestAPIContracts$\' no ./internal/server\n'
           p.write_text(text.replace(anchor, step+anchor, 1))
           PY
-          git add backend/internal/server/api_contract_test.go backend/internal/service/openai_gateway_chat_completions_raw.go docs/cline/patches.json .github/workflows/cline-only.yml
+          git add backend/internal/server/api_contract_test.go backend/internal/service/openai_gateway_chat_completions_raw.go .github/workflows/cline-only.yml
+          git add -f docs/cline/patches.json
           git diff --cached --check
           python3 tools/verify_cline_only.py
           python3 tools/verify_cline_platform.py
