@@ -70,6 +70,7 @@ for name, anchors in {
     'frontend/src/components/account/clineAccountSettings.ts': ['proxy_fallback_origin_id', 'group_allowed_models', 'cost_multiplier', 'validateClineHeaderRows'],
     'frontend/src/components/account/AccountUsageCell.vue': ['ClineAccountUsageCell'],
     'backend/internal/service/cline_account_settings.go': ['mergeClineAccountCredentials', 'applyClineSchedulingSettings', 'validateClineAccountHeaderSettings'],
+    'backend/migrations/268_cline_header_settings_guard.sql': ['cline_guard_header_settings', 'cardinality(seen)', 'encoded_bytes>16384'],
     'backend/internal/handler/dto/account_cline_view.go': ['ClineMetadataForAccount', 'view.Catalog = nil'],
 }.items():
     REQUIRED.setdefault(name, []).extend(anchors)

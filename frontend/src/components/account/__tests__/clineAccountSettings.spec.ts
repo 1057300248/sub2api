@@ -36,9 +36,11 @@ describe('Cline account settings parity', () => {
   })
   it('round-trips local dates at second resolution and never normalizes invalid dates into another day', () => {
     const d = clineAccountDraft(account)
-    d.expiresAt = '2031-05-04T02:03:04'
-    expect(clineAccountSettingsPayload(d, d.groupIDs, account).expires_at).toBe(new Date(d.expiresAt).getTime()/1000)
-    for (const invalid of ['2031-02-30T02:03', '2031-13-01T02:03', 'not-date', '2031-05-04T25:03']) {
+    for (const value of ['2031-05-04T02:03', '2031-05-04T02:03:04', '2031-05-04T02:03:04.0', '2031-05-04T02:03:04.00', '2031-05-04T02:03:04.000']) {
+      d.expiresAt = value
+      expect(clineAccountSettingsPayload(d, d.groupIDs, account).expires_at).toBe(new Date(value).getTime()/1000)
+    }
+    for (const invalid of ['2031-02-30T02:03', '2031-13-01T02:03', 'not-date', '2031-05-04T25:03', '2031-05-04T02:03:04.123', '2031-05-04T02:03Z']) {
       expect(() => clineAccountSettingsPayload({ ...d, expiresAt: invalid }, d.groupIDs, account)).toThrow(ClineSettingsError)
     }
   })

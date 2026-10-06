@@ -35,7 +35,7 @@
         <details class="rounded-lg border border-gray-200 p-3 dark:border-dark-600" open>
           <summary class="cursor-pointer font-medium">{{ t('clineAccount.commonSettings') }}</summary>
           <div class="mt-3 grid gap-4 sm:grid-cols-2">
-            <label class="block text-sm">{{ t('clineAccount.proxy') }}<select v-model="draft.proxyID" data-testid="cline-proxy" class="input mt-1 w-full"><option :value="null">{{ t('clineAccount.noProxy') }}</option><option v-for="proxy in visibleProxies" :key="proxy.id" :value="proxy.id" :disabled="proxy.unavailable && proxy.id !== draft.proxyID">{{ proxy.name }}{{ proxy.unavailable ? ' · ' + t('clineAccount.unavailableGroup') : '' }}</option></select></label>
+            <label class="block text-sm">{{ t('clineAccount.proxy') }}<select :value="draft.proxyID ?? ''" data-testid="cline-proxy" @change="changeProxy" class="input mt-1 w-full"><option value="">{{ t('clineAccount.noProxy') }}</option><option v-for="proxy in visibleProxies" :key="proxy.id" :value="proxy.id" :disabled="proxy.unavailable && proxy.id !== draft.proxyID">{{ proxy.name }}{{ proxy.unavailable ? ' · ' + t('clineAccount.unavailableGroup') : '' }}</option></select></label>
             <label class="block text-sm">{{ t('clineAccount.loadFactor') }}<input v-model.number="draft.loadFactor" data-testid="cline-load-factor" type="number" min="1" max="10000" step="1" class="input mt-1 w-full" :placeholder="t('clineAccount.inheritConcurrency')" /></label>
             <label class="block text-sm">{{ t('clineAccount.rateMultiplier') }}<input v-model.number="draft.rateMultiplier" data-testid="cline-rate" type="number" min="0" step="any" required class="input mt-1 w-full" /></label>
             <label class="block text-sm">{{ t('clineAccount.costMultiplier') }}<input v-model.number="draft.costMultiplier" data-testid="cline-cost" type="number" min="0" max="1000000" step="any" required class="input mt-1 w-full" /><span class="text-xs text-gray-500">{{ t('clineAccount.costHint') }}</span></label>
@@ -108,6 +108,12 @@ const visibleProxies = computed(() => {
   if (draft.proxyID !== null && !options.some(p => p.id === draft.proxyID)) options.push({ id: draft.proxyID, name: `#${draft.proxyID}`, unavailable: true })
   return options
 })
+function changeProxy(event: Event) {
+  // Read the native select value explicitly; null-bound options can otherwise
+  // produce an undefined model when clearing a saved proxy.
+  const value = (event.target as HTMLSelectElement).value
+  draft.proxyID = value === '' ? null : Number(value)
+}
 function back() {
   if (saving.value) return
   draft.apiKey = ''

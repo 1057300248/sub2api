@@ -99,11 +99,14 @@ export function clineAccountSettingsPayload(settings: ClineAccountSettings, grou
   if (settings.expiresAt !== before.expiresAt) {
     if (!settings.expiresAt) out.expires_at = 0
     else {
-      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(settings.expiresAt)) throw new ClineSettingsError('expiresAt')
-      const date = new Date(settings.expiresAt)
+      // Native datetime-local controls may emit zero fractional seconds.
+      // Accept that representation while keeping the API at whole seconds.
+      const input = settings.expiresAt.replace(/\.0{1,3}$/, '')
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(input)) throw new ClineSettingsError('expiresAt')
+      const date = new Date(input)
       if (!Number.isFinite(date.getTime())) throw new ClineSettingsError('expiresAt')
       const normalized = localDateTime(date.toISOString())
-      if (normalized.slice(0, settings.expiresAt.length) !== settings.expiresAt) throw new ClineSettingsError('expiresAt')
+      if (normalized.slice(0, input.length) !== input) throw new ClineSettingsError('expiresAt')
       out.expires_at = Math.floor(date.getTime() / 1000)
     }
   }

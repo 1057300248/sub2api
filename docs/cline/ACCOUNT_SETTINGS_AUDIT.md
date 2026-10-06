@@ -41,6 +41,15 @@ A quota refresh requires a supported official metadata endpoint and authorized
 credentials. Unknown or expired saved observations never prove recovery. UI
 multipliers are administrator inputs, not evidence of the provider's actual cost.
 
+## Additive database guard
+
+Migration `268_cline_header_settings_guard.sql` extends native Cline header
+validation to raw SQL and mixed bulk updates. Invalid disabled defaults are also
+rejected. A failing row rolls back the entire statement; non-Cline rows keep
+upstream behavior. The old credential migration checksum is unchanged and the
+new migration does not rewrite historical account data. Runtime validation
+continues to fail closed for historical malformed values.
+
 ## Required verification
 
 The Cline workflow now includes the normal create modal, dedicated modal, bulk

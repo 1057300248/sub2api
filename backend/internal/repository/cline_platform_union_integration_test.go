@@ -50,7 +50,7 @@ func TestClinePostgresPlatformUnionUpgrade(t *testing.T) {
 			require.True(t, strings.HasPrefix(version, "18.6"), version)
 			oldFS := fstest.MapFS{}
 			for _, file := range files {
-				if file == "267_cline_typesafe_platform_union.sql" {
+				if file == "267_cline_typesafe_platform_union.sql" || file == "268_cline_header_settings_guard.sql" {
 					continue
 				}
 				clineMigration := strings.HasPrefix(file, "263_cline_") || strings.HasPrefix(file, "264_cline_") || strings.HasPrefix(file, "265_cline_") || strings.HasPrefix(file, "266_cline_")
