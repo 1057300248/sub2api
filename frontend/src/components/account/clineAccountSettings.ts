@@ -56,7 +56,7 @@ export function validateClineHeaderRows(rows: HeaderOverrideRow[]): boolean {
     const lower = name.toLowerCase()
     if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || bytes(name) > 128 ||
         !(['user-agent', 'accept-language', 'x-request-id', 'x-client-name', 'x-client-version'].includes(lower) || lower.startsWith('x-metadata-')) ||
-        seen.has(lower) || bytes(value) > 2048 || /[\x00-\x1f\x7f]/.test(value)) return false
+        seen.has(lower) || bytes(value) > 2048 || [...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return false
     seen.add(lower)
     total += bytes(name) + bytes(value)
   }
@@ -74,7 +74,7 @@ function checkedLimits(groupIDs: number[], limits: GroupAllowedModels): GroupAll
   for (const id of [...groupIDs].sort((a, b) => a - b)) {
     if (!(id in limits)) continue
     const models = limits[id]
-    if (!models.length || models.some(m => !m.trim() || /[\s*\\\x00]/.test(m.trim()) || new TextEncoder().encode(m.trim()).length > 256)) throw new ClineSettingsError('groupModels')
+    if (!models.length || models.some(m => !m.trim() || (/[\s*\\]/.test(m.trim()) || m.includes('\0')) || new TextEncoder().encode(m.trim()).length > 256)) throw new ClineSettingsError('groupModels')
     out[id] = [...new Set(models.map(m => m.trim()))].sort()
   }
   return out

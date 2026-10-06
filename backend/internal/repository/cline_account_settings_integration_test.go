@@ -35,7 +35,7 @@ func TestClinePostgresAccountSettingsRoundTripAndHeaderGuards(t *testing.T) {
 	a.RateMultiplier, a.GroupRateMultiplier, a.LoadFactor, a.ExpiresAt = &zero, &groupRate, &load, &expires
 	a.Schedulable = false
 	a.AutoPauseOnExpired = false
-	a.Status = service.StatusInactive
+	a.Status = "inactive"
 	a.Extra[service.AccountCostMultiplierExtraKey] = 0.2
 	a.Credentials["header_override_enabled"] = true
 	a.Credentials["header_overrides"] = map[string]any{"User-Agent": "saved/1"}
@@ -44,7 +44,7 @@ func TestClinePostgresAccountSettingsRoundTripAndHeaderGuards(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, got.Schedulable)
 	require.False(t, got.AutoPauseOnExpired)
-	require.Equal(t, service.StatusInactive, got.Status)
+	require.Equal(t, "inactive", got.Status)
 	require.Zero(t, *got.RateMultiplier)
 	require.Equal(t, 2.5, *got.GroupRateMultiplier)
 	require.Equal(t, 0.2, got.CostMultiplier())

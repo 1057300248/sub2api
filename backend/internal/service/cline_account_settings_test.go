@@ -69,12 +69,12 @@ func TestClineAccountSettingsUpdatePreservesUneditedConfiguration(t *testing.T) 
 	empty := ""
 	clear := int64(0)
 	clearLoad := 0
-	input := &UpdateAccountInput{Credentials: map[string]any{"header_override_enabled": true, "header_overrides": map[string]any{"User-Agent": "fixture/2"}}, Extra: map[string]any{AccountCostMultiplierExtraKey: 0.2}, Notes: &empty, RateMultiplier: &zero, GroupRateMultiplier: &two, Schedulable: &no, Status: StatusInactive, ProxyID: &clear, LoadFactor: &clearLoad, ExpiresAt: &clear, AutoPauseOnExpired: &no}
+	input := &UpdateAccountInput{Credentials: map[string]any{"header_override_enabled": true, "header_overrides": map[string]any{"User-Agent": "fixture/2"}}, Extra: map[string]any{AccountCostMultiplierExtraKey: 0.2}, Notes: &empty, RateMultiplier: &zero, GroupRateMultiplier: &two, Schedulable: &no, Status: "inactive", ProxyID: &clear, LoadFactor: &clearLoad, ExpiresAt: &clear, AutoPauseOnExpired: &no}
 	updated, err := svc.UpdateAccount(context.Background(), a.ID, input)
 	require.NoError(t, err)
 	require.Equal(t, 1, r.writes)
 	require.False(t, updated.Schedulable)
-	require.Equal(t, StatusInactive, updated.Status)
+	require.Equal(t, "inactive", updated.Status)
 	require.Equal(t, 0.0, *updated.RateMultiplier)
 	require.Equal(t, 2.5, *updated.GroupRateMultiplier)
 	require.Equal(t, 0.2, updated.CostMultiplier())
