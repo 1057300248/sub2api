@@ -105,12 +105,14 @@ type clineHTTPFixtureUpstream struct {
 	calls          atomic.Int32
 	requestContext context.Context
 	lastBody       []byte
+	lastHeaders    http.Header
 	closed         atomic.Int32
 }
 
 func (u *clineHTTPFixtureUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	u.calls.Add(1)
 	u.requestContext = req.Context()
+	u.lastHeaders = req.Header.Clone()
 	requestBody, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, err
@@ -273,7 +275,7 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, se
 	concurrency := service.NewConcurrencyService(slots)
 	rateLimits := service.NewRateLimitService(accounts, nil, cfg, nil, nil)
 	rateLimits.SetSettingService(settings)
-	gateway := service.NewOpenAIGatewayService(accounts, nil, repository.NewUsageLogRepository(client, db), ledger, users, subs, nil, nil, cfg, nil, concurrency, service.NewBillingService(cfg, pricing), rateLimits, cache, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, settings, nil)
+	gateway := service.NewOpenAIGatewayService(accounts, nil, repository.NewUsageLogRepository(client, db), ledger, users, subs, nil, nil, cfg, nil, concurrency, service.NewBillingService(cfg, pricing), rateLimits, cache, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, settings, nil, service.WithClineMetadataWorker(false))
 	h := NewOpenAIGatewayHandler(gateway, concurrency, cache, service.NewAPIKeyService(keys, users, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 	var reason, committedBody string
 	rec := httptest.NewRecorder()
@@ -315,7 +317,7 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, se
 	if strings.HasPrefix(scenario, "parameters_") {
 		// Literal wire JSON representing NewAPI's post-override output enters
 		// the actual HTTP handler, not a direct service call or sjson helper.
-		payload = strings.TrimSuffix(payload, "}") + `,"providerOptions":{"gateway":{"only":["deepseek"]}},"vendor":{"zero":0,"disabled":false,"nested":{"keep":["a",2]}}}`
+		payload = strings.TrimSuffix(payload, "}") + `,"providerOptions":{"gateway":{"only":["deepseek"]}},"vendor":{"zero":0,"disabled":false,"nested":{"keep":["a",2]}},"header_overrides":{"User-Agent":"cline-handler-fixture/2","X-Request-ID":"header-fixture"}}`
 	}
 	req := httptest.NewRequest("POST", path, strings.NewReader(payload)).WithContext(parent)
 	req.Header.Set("Content-Type", "application/json")
@@ -353,6 +355,10 @@ func exerciseClineHTTPHandler(t *testing.T, client *dbent.Client, db *sql.DB, se
 		require.JSONEq(t, `{"gateway":{"only":["deepseek"]}}`, string(sent["providerOptions"]))
 		require.JSONEq(t, `{"zero":0,"disabled":false,"nested":{"keep":["a",2]}}`, string(sent["vendor"]))
 		require.JSONEq(t, `"cline-pass/model"`, string(sent["model"]))
+		require.NotContains(t, sent, "header_overrides")
+		require.Equal(t, "cline-handler-fixture/2", upstream.lastHeaders.Get("User-Agent"))
+		require.Equal(t, "header-fixture", upstream.lastHeaders.Get("X-Request-ID"))
+		require.Equal(t, "Bearer synthetic-cline-key", upstream.lastHeaders.Get("Authorization"))
 		require.Contains(t, sent, "messages")
 		require.NotContains(t, sent, "input")
 		if compaction {

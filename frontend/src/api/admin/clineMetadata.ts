@@ -2,6 +2,10 @@ import { apiClient } from '../client'
 
 export interface ClineCatalogModel { id: string; name?: string; description?: string }
 export interface ClineMetadata {
+  auto_refresh?: boolean
+  next_refresh_at?: string
+  recovery_status?: string
+  cooldowns?: { type: string; source: string; reset_at?: string; retry_at?: string; status: string }[] | null
   mode: string
   auth_type: string
   quota_status: string

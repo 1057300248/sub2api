@@ -1,4 +1,14 @@
 export default {
+  automatic: "服务端自动刷新已启用。下次计划检查：",
+  cooldownNotice: "已确认的额度阻塞会保留至复查。所有耗尽窗口都恢复后才放行；倒计时结束本身不会自动放行。",
+  inferenceSource: "推理限流",
+  usageSource: "额度查询",
+  otherWindow: "未分类额度／订阅权益",
+  unknownReset: "重置时间未知，等待查询确认。",
+  pendingRecheck: "已到报告时间，等待复查确认。",
+  remaining: "距离上游重置",
+  retryOnly: "距离再次检查（并非确认的重置时间）",
+
   title: '模型目录与额度观测',
   open: '查看 Cline 模型与额度',
   refresh: '从 Cline 刷新',

@@ -108,3 +108,54 @@ describe('Cline metadata safety', () => {
   })
   it('keeps translation keys aligned', () => { expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort()) })
 })
+
+
+describe('Cline automatic quota view', () => {
+  it('polls only local state and stops on unmount', async () => {
+    vi.useFakeTimers()
+    const wrapper = setup()
+    try {
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(31000)
+      await flushPromises()
+      expect(getClineMetadata).toHaveBeenCalledTimes(2)
+      expect(refreshClineMetadata).not.toHaveBeenCalled()
+      wrapper.unmount()
+      await vi.advanceTimersByTimeAsync(61000)
+      expect(getClineMetadata).toHaveBeenCalledTimes(2)
+    } finally { wrapper.unmount(); vi.useRealTimers() }
+  })
+  it('retains an expired block as pending recheck, not recovered', async () => {
+    vi.useFakeTimers()
+    const data = fixture()
+    data.auto_refresh = true
+    data.next_refresh_at = new Date(Date.now() + 30000).toISOString()
+    data.cooldowns = [{type: 'weekly', source: 'usage', reset_at: new Date(Date.now() + 2000).toISOString(), status: 'cooling'}]
+    vi.mocked(getClineMetadata).mockResolvedValue(data)
+    const wrapper = setup()
+    try {
+      await flushPromises()
+      expect(wrapper.get('[data-testid="cline-cooldowns"]').text()).toContain(en.remaining)
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(wrapper.get('[data-testid="cline-cooldowns"]').text()).toContain(en.pendingRecheck)
+      expect(wrapper.get('[data-testid="cline-auto-refresh"]').text()).toContain(en.automatic)
+      expect(refreshClineMetadata).not.toHaveBeenCalled()
+    } finally { wrapper.unmount(); vi.useRealTimers() }
+  })
+  it('does not label a retry probe as the monthly reset', async () => {
+    const data = fixture()
+    data.cooldowns = [
+      {type: 'monthly', source: 'usage', status: 'pending_recheck'},
+      {type: 'unknown', source: 'inference', status: 'cooling', retry_at: new Date(Date.now()+60000).toISOString()}
+    ]
+    vi.mocked(getClineMetadata).mockResolvedValue(data)
+    const wrapper = setup()
+    try {
+      await flushPromises()
+      const text = wrapper.get('[data-testid="cline-cooldowns"]').text()
+      expect(text).toContain(en.unknownReset)
+      expect(text).toContain(en.retryOnly)
+      expect(text).not.toContain(en.remaining)
+    } finally { wrapper.unmount() }
+  })
+})

@@ -21,6 +21,9 @@ func mergeClineCustomRequestParameters(account *Account, sourceBody, outboundBod
 	if account == nil || (!account.IsCline() && !isLegacyClineAccount(account)) {
 		return outboundBody, nil
 	}
+	if _, _, err := extractClineHeaderOverrides(account, sourceBody); err != nil {
+		return nil, err
+	}
 	var source map[string]json.RawMessage
 	if err := json.Unmarshal(sourceBody, &source); err != nil || source == nil {
 		return nil, fmt.Errorf("parse Cline custom request parameters: invalid JSON object")

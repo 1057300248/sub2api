@@ -494,6 +494,7 @@ type OpenAIGatewayService struct {
 	billingCacheService    *BillingCacheService
 	userGroupRateResolver  *userGroupRateResolver
 	httpUpstream           HTTPUpstream
+	clineMetadataWorker    clineMetadataWorker
 	pluginManager          *PluginManager
 	deferredService        *DeferredService
 	openAITokenProvider    *OpenAITokenProvider
@@ -655,6 +656,7 @@ func NewOpenAIGatewayService(
 	}
 	svc.logOpenAIWSModeBootstrap()
 	svc.StartOpenAICodexTicketHarvester()
+	svc.StartClineMetadataWorker()
 	return svc
 }
 
@@ -767,6 +769,7 @@ func (s *OpenAIGatewayService) billingDeps() *billingDeps {
 // CloseOpenAIWSPool 关闭 OpenAI WebSocket 连接池的后台 worker 和空闲连接。
 // 应在应用优雅关闭时调用。
 func (s *OpenAIGatewayService) CloseOpenAIWSPool() {
+	s.StopClineMetadataWorker()
 	if s != nil && s.stopAstraSetup != nil {
 		s.stopAstraSetup()
 	}

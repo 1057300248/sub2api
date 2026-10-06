@@ -210,6 +210,9 @@ func (a *Account) IsSchedulable() bool {
 		return false
 	}
 	now := time.Now()
+	if a.IsCline() && ClineQuotaAdmission(a, now) != nil {
+		return false
+	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
 		return false
 	}

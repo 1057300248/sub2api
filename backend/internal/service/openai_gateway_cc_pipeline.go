@@ -189,6 +189,10 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	userAgent string,
 	grokCacheIdentity string,
 ) (*http.Response, error) {
+	body, headerOverrides, headerErr := extractClineHeaderOverrides(account, body)
+	if headerErr != nil {
+		return nil, headerErr
+	}
 	if err := account.ValidateClineOutboundBody(body); err != nil {
 		return nil, err
 	}
@@ -261,6 +265,9 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	// 账号级请求头覆写：放在所有内置默认头（含 Grok CLI 身份头）之后应用，
 	// 使配置值获得除共享传输层强制头之外的最高优先级。
 	account.ApplyHeaderOverrides(upstreamReq.Header)
+	for name, values := range headerOverrides {
+		upstreamReq.Header[name] = append([]string(nil), values...)
+	}
 	applyOpenCodeSessionHeader(c, account, targetURL, upstreamReq.Header, body)
 
 	proxyURL := ""

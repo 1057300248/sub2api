@@ -49,5 +49,8 @@ func (s *RateLimitService) handleClineScopedUpstreamError(ctx context.Context, a
 			s.runtimeBlocker.BlockAccountScheduling(account, time.Now().Add(5*time.Minute), "cline_state_persist_failed")
 		}
 	}
+	if wake, ok := s.runtimeBlocker.(interface{ RequestClineMetadataRefresh() }); ok {
+		wake.RequestClineMetadataRefresh()
+	}
 	return true
 }

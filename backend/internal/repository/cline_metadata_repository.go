@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cline"
@@ -83,11 +84,8 @@ func (r *accountRepository) CheckClineAdmission(ctx context.Context, account *se
 	if current.GetModelRateLimitRemainingTime(upstreamModel) > 0 {
 		return service.ErrClineObservedCooldown
 	}
-	view := service.ClineMetadataForAccount(current, now)
-	for _, window := range view.Windows {
-		if window.PercentUsed != nil && *window.PercentUsed >= 100 {
-			return service.ErrClineObservedCooldown
-		}
+	if err := service.ClineQuotaAdmission(current, now); err != nil {
+		return err
 	}
 	state := current.GetClineState()
 	if state == nil || !cline.ValidSubjectHash(state.Identity) {
@@ -96,23 +94,23 @@ func (r *accountRepository) CheckClineAdmission(ctx context.Context, account *se
 		}
 		return nil
 	}
-	rows, err = client.QueryContext(ctx, `SELECT MAX(reset_at) FROM cline_shared_limits WHERE subject_hash=$1 AND account_mode=$2 AND scope=ANY($3) AND reset_at>NOW()`, state.Identity, current.GetClineMode(), pq.Array(cline.RateLimitKeys(current.GetClineMode(), upstreamModel)))
+	rows, err = client.QueryContext(ctx, `SELECT scope,reset_at FROM cline_shared_limits WHERE subject_hash=$1 AND account_mode=$2 AND scope=ANY($3)`, state.Identity, current.GetClineMode(), pq.Array(cline.RateLimitKeys(current.GetClineMode(), upstreamModel)))
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
+	for rows.Next() {
+		var scope string
+		var until time.Time
+		if err := rows.Scan(&scope, &until); err != nil {
 			return err
 		}
-		return service.ErrClineAdmissionUnavailable
-	}
-	var sharedUntil sql.NullTime
-	if err := rows.Scan(&sharedUntil); err != nil {
-		return err
-	}
-	if sharedUntil.Valid && sharedUntil.Time.After(now) {
-		return service.ErrClineObservedCooldown
+		if until.After(now) {
+			return service.ErrClineObservedCooldown
+		}
+		if current.GetClineMode() == cline.ModePass && strings.HasPrefix(scope, cline.ScopePass) && cline.IsOfficialBase(current.GetClineBaseURL()) && !service.ClinePassWindowRecovered(state, scope, until, now) {
+			return service.ErrClineMetadataRequired
+		}
 	}
 	return rows.Err()
 }

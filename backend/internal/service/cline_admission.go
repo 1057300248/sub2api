@@ -39,6 +39,9 @@ func (s *OpenAIGatewayService) checkClineAdmission(ctx context.Context, account 
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	err := repo.CheckClineAdmission(ctx, account, payload.Model)
+	if errors.Is(err, ErrClineMetadataRequired) || errors.Is(err, ErrClineObservedCooldown) {
+		s.RequestClineMetadataRefresh()
+	}
 	if err == nil || errors.Is(err, ErrClineObservedCooldown) || errors.Is(err, ErrClineMetadataChanged) || errors.Is(err, ErrClineMetadataRequired) {
 		return err
 	}
