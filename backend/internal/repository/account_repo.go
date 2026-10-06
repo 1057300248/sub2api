@@ -202,6 +202,12 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
 	}
 
+	if p := account.InitialQualityPlan; p != nil {
+		_, err := client.ExecContext(ctx, `INSERT INTO scheduled_test_plans (account_id, model_id, cron_expression, enabled, max_results, auto_recover, next_run_at, pelican_config, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,false,$6,$7,NOW(),NOW())`, created.ID, p.ModelID, p.CronExpression, p.Enabled, p.MaxResults, p.NextRunAt, marshalPelicanConfig(p.PelicanConfig))
+		if err != nil {
+			return err
+		}
+	}
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt

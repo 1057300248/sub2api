@@ -417,6 +417,7 @@ type UpdateGroupInput struct {
 
 type CreateAccountInput struct {
 	Schedulable         *bool // Optional Cline operator setting; other platform contracts are unchanged.
+	InitialQualityPlan  *ScheduledTestPlan `json:"-"`
 	Name                string
 	Notes               *string
 	Platform            string
