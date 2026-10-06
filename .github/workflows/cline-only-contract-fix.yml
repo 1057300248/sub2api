@@ -35,7 +35,6 @@ jobs:
           assert name not in manifest['allowed_changed_files']
           manifest['allowed_changed_files'] = sorted(manifest['allowed_changed_files'] + [name])
           p.write_text(json.dumps(manifest, indent=2) + '\n')
-          # These generic usage helpers never needed a Cline-specific change.
           p = root/'backend/internal/service/openai_gateway_chat_completions_raw.go'
           upstream = subprocess.check_output(['git', 'show', manifest['upstream_commit']+':'+str(p.relative_to(root))], text=True)
           text = p.read_text()
@@ -46,22 +45,17 @@ jobs:
               assert len(old) == len(new) == 1, (name, len(old), len(new))
               text = text.replace(old[0], new[0], 1)
           p.write_text(text)
-          p = root/'.github/workflows/cline-only.yml'
-          text = p.read_text()
-          anchor = '      - name: Cline SSE, JSON and policy race tests\n'
-          assert text.count(anchor) == 1
-          step = '      - name: Cline quota API contracts\n        working-directory: backend\n        run: python3 -c "$CLINE_TEST_DRIVER" api-contract 1 unit \'^TestAPIContracts$\' no ./internal/server\n'
-          p.write_text(text.replace(anchor, step+anchor, 1))
           PY
-          git add backend/internal/server/api_contract_test.go backend/internal/service/openai_gateway_chat_completions_raw.go .github/workflows/cline-only.yml
+          git add backend/internal/server/api_contract_test.go backend/internal/service/openai_gateway_chat_completions_raw.go
           git add -f docs/cline/patches.json
           git diff --cached --check
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
           python3 tools/verify_cline_only.py
           python3 tools/verify_cline_platform.py
           git diff --cached --stat
-          git diff --cached -- backend/internal/server/api_contract_test.go backend/internal/service/openai_gateway_chat_completions_raw.go .github/workflows/cline-only.yml
+          git diff --cached -- backend/internal/server/api_contract_test.go backend/internal/service/openai_gateway_chat_completions_raw.go
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix(cline): retain quota API contracts and restore upstream generic usage helpers'
+          echo "CLINE_CONTRACT_FIX_HEAD=$(git rev-parse HEAD)"
           candidate='codex/sub2-v2910-cline-fixup-20261006'
           test -z "$(git ls-remote --heads origin "refs/heads/$candidate")"
           git push origin "HEAD:refs/heads/$candidate"
-          echo "CLINE_CONTRACT_FIX_HEAD=$(git rev-parse HEAD)"
