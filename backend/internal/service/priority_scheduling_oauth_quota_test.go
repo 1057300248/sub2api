@@ -274,18 +274,19 @@ func TestPriorityOAuthQuotaScopeAndPartitions(t *testing.T) {
 		require.False(t, scheduler.applyPriorityScheduling(other, &plan))
 		require.Zero(t, plan.candidates[0].priorityOAuthSpare)
 	}
-	// With protocol balancing off, native OAuth cannot suppress a BPS API pool.
+	// With protocol balancing off, BPS OAuth cannot suppress a native API pool.
 	cfg.BalanceProtocols = false
 	gateway = priorityGateway(cfg, &priorityReaderStub{})
 	scheduler.service = gateway
-	api.account.Extra["openai_excel_bps"] = true
+	oauth.account.Extra["openai_excel_bps"] = true
 	applyPriorityCandidate(cfg, &oauth, signal, time.Now())
 	applyPriorityCandidate(cfg, &api, signal, time.Now())
 	plan := openAIAccountLoadPlan{priorityScheduling: true, topK: 2, candidates: []openAIAccountCandidateScore{api, oauth}}
 	order := scheduler.buildOpenAISelectionOrder(req, plan)
-	require.Equal(t, int64(2), order[0].account.ID)
-	require.False(t, order[0].priorityAPIStandby, "native quota cannot affect the strict BPS pool")
-	delete(api.account.Extra, "openai_excel_bps")
+	require.Equal(t, int64(1), order[0].account.ID)
+	require.Equal(t, int64(2), order[1].account.ID)
+	require.False(t, order[1].priorityAPIStandby, "BPS quota cannot suppress the native pool")
+	delete(oauth.account.Extra, "openai_excel_bps")
 	api.account.Extra["openai_compact_supported"] = true
 	req.RequireCompact = true
 	order = scheduler.buildOpenAISelectionOrder(req, plan)
