@@ -1,0 +1,73 @@
+name: Prepare reviewed Cline quota and header sources
+on:
+  push:
+    branches: [codex/sub2-v2910-cline-only-20261006]
+permissions:
+  contents: read
+jobs:
+  prepare-source-objects:
+    if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/sub2-v2910-cline-only-20261006'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply pinned reviewed source patch and remove temporary delivery files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = '6c8142c71c8b17603a5720adbfb49aa0e8ee454b'
+          python3 - <<'PY'
+          import base64, hashlib, lzma, subprocess
+          from pathlib import Path
+          parts = [Path('.cline-quota-apply') / ('%02d.b64' % i) for i in range(4)]
+          patch = lzma.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts), validate=True), memlimit=128*1024*1024)
+          assert len(patch) == 108514
+          assert hashlib.sha256(patch).hexdigest() == 'b4ccdddd01c015f294d29007209a30485e2012a62b1175da3dbd4e179c9d3de9'
+          subprocess.run(['git', 'apply', '--check', '--index', '-'], input=patch, check=True)
+          subprocess.run(['git', 'apply', '--index', '-'], input=patch, check=True)
+          PY
+          git rm -r -- .cline-quota-apply .github/workflows/cline-quota-apply.yml
+          python3 tools/verify_cline_only.py
+          python3 tools/verify_cline_platform.py
+          git diff --cached --check
+          git diff --cached --stat
+      - name: Store source blobs only; do not move any branch or create a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, subprocess, urllib.request
+          from pathlib import Path
+          def git(*args):
+              return subprocess.check_output(['git', *args]).decode().strip()
+          assert git('rev-parse', 'HEAD') == os.environ['GITHUB_SHA']
+          paths = subprocess.check_output(['git', 'diff', '--cached', '--name-only', '-z']).decode().split('\0')
+          entries = []
+          for name in filter(None, paths):
+              path = Path(name)
+              if not path.exists():
+                  assert name.startswith('.cline-quota-apply/') or name == '.github/workflows/cline-quota-apply.yml'
+                  entries.append({'path': name, 'mode': '100644', 'type': 'blob', 'sha': None})
+                  continue
+              data = path.read_bytes()
+              expected = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+              request = urllib.request.Request('https://api.github.com/repos/1057300248/sub2api/git/blobs', data=json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode(), method='POST', headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  blob = json.load(response)
+              assert blob['sha'] == expected
+              entries.append({'path':name,'mode':'100644','type':'blob','sha':expected})
+          report = {'parent':git('rev-parse','HEAD'),'base_tree':git('rev-parse','HEAD^{tree}'),'expected_tree':git('write-tree'),'patch_sha256':'b4ccdddd01c015f294d29007209a30485e2012a62b1175da3dbd4e179c9d3de9','tree_elements':entries}
+          Path(os.environ['RUNNER_TEMP'],'cline-quota-git-objects.json').write_text(json.dumps(report,indent=2)+'\n')
+          print('SOURCE_BLOBS_STORED', len(entries), 'EXPECTED_TREE', report['expected_tree'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cline-quota-git-objects-${{ github.sha }}
+          path: ${{ runner.temp }}/cline-quota-git-objects.json
+          retention-days: 3
