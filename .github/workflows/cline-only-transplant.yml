@@ -1,0 +1,34 @@
+name: Cline-only v2.9.10 transplant
+on:
+  push:
+    branches: [codex/sub2-v2910-cline-build-20261006]
+    paths:
+      - tools/cline_only_upgrade.py
+      - .github/workflows/cline-only-transplant.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: cline-only-v2910-transplant
+  cancel-in-progress: false
+jobs:
+  transplant:
+    if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/sub2-v2910-cline-build-20261006'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Fetch exact source objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin 116ab640aca8331ea74e12ce8773c2fc85463d54
+          test "$(git rev-parse ab7cb27ceed6390441277784cc5560694d95fd73^{commit})" = ab7cb27ceed6390441277784cc5560694d95fd73
+          git merge-base --is-ancestor bc83ff9c367883e5b7d0140e6bb42e2e7cc5239c 116ab640aca8331ea74e12ce8773c2fc85463d54
+      - name: Prepare audited Cline-only tree and push isolated target
+        id: prepare
+        run: python3 tools/cline_only_upgrade.py
