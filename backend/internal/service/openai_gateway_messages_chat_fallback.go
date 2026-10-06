@@ -82,6 +82,11 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("marshal chat completions request: %w", err)
 	}
+	chatBody, err = mergeClineCustomRequestParameters(account, body, chatBody, apicompat.AnthropicRequest{})
+	if err != nil {
+		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
+	}
 	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(chatBody, upstreamModel); normalized {
 		chatBody = normalizedBody
 	}
@@ -200,6 +205,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	// 与 responses 兄弟不同：客户端断开后仍继续做事件转换（喂 anthropicState），
 	// 仅跳过写出，保证 finalize 阶段的 usage 汇总不受断开影响。
 	emitChunk := func(chunk *apicompat.ChatCompletionsChunk) {
+		clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
 		// CC chunk → Anthropic events (direct, single state machine)
 		anthropicEvents := apicompat.ChatCompletionsChunkToAnthropicEvents(chunk, anthropicState)
 		if clientDisconnected {
@@ -213,6 +219,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 			writeStreamHeaders()
 			if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 				clientDisconnected = true
+				beginClineBodyDrain(resp.Body)
 				break
 			}
 		}
@@ -223,6 +230,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 
 	scan := s.scanCCStream(c, resp, "openai messages chat fallback", requestID, startTime, emitChunk)
 	usage := scan.Usage
+	clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
 
 	if scan.Err != nil {
 		// Broken upstream read: skip finalization so no synthetic message_stop
@@ -256,6 +264,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 			writeStreamHeaders()
 			if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 				clientDisconnected = true
+				beginClineBodyDrain(resp.Body)
 				break
 			}
 		}

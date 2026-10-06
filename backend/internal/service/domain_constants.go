@@ -137,6 +137,7 @@ var AllowedQuotaPlatforms = []string{
 	PlatformDeepseek,
 	PlatformMiniMax,
 	PlatformOpenCodeGo,
+	PlatformCline,
 	PlatformTypeSafe,
 }
 

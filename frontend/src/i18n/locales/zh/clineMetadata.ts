@@ -1,0 +1,22 @@
+export default {
+  title: '模型目录与额度观测',
+  open: '查看 Cline 模型与额度',
+  refresh: '从 Cline 刷新',
+  loading: '读取中…',
+  savedCredential: '使用已保存的账户凭据，不使用表单中未保存的内容。打开面板只读取本地状态；刷新仅执行元数据 GET，不发送推理请求。',
+  requestFailed: '未能刷新元数据。保留的数据是历史观测，不会据此推断零用量或订阅状态。',
+  unknownNotice: '缺失、过期或无法查询的额度窗口显示为未知，不是零用量。',
+  passOnly: '这些订阅窗口仅适用于 Pass。本面板不会授予 Free API 权限，也不会推断 PAYG 余额。',
+  five_hour: '五小时用量',
+  weekly: '每周用量',
+  monthly: '每月用量',
+  resets: '上游报告重置时间：',
+  lastSuccess: '最近一次成功查询额度：',
+  identityVerified: '已近期核验上游当前账户身份。同一已核验账户的不同 Key 共用已观测到的冷却限制。',
+  identityUnknown: '当前账户身份尚未核验或观测已过期，不代表账户没有额度限制。',
+  costNotice: '订阅模型的参考 Token 价格不是 Pass 的额外收费。既有下游计费保持不变，不根据此元数据推算上游增量成本。',
+  catalog: '当前所选模式的模型建议',
+  catalogNotice: '添加模型需要明确点击，不代表已获授权。保存仍会校验完整白名单；刷新不会改写白名单。',
+  staleCatalog: '当前目录为最后一次有效缓存，不保证模型此刻可用。',
+  add: '明确添加'
+}

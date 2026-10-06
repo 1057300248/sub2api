@@ -63,6 +63,15 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
 
+	// Cline raw Chat must enforce the same core-field boundary as protocol
+	// lowering, before field reads, mapping or any upstream side effect.
+	var normalizeErr error
+	body, normalizeErr = normalizeClineRawChatBody(account, body)
+	if normalizeErr != nil {
+		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", normalizeErr.Error())
+		return nil, normalizeErr
+	}
+
 	// 1. Parse minimal fields needed for routing/billing
 	originalModel := gjson.GetBytes(body, "model").String()
 	if originalModel == "" {
@@ -326,6 +335,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	var terminal openAIRawStreamTerminalState
 
 	writeLine := func(line string) {
+		clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
 		if clientDisconnected {
 			return
 		}
@@ -338,6 +348,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			for _, pending := range pendingLines {
 				if _, werr := c.Writer.WriteString(pending + "\n"); werr != nil {
 					clientDisconnected = true
+					beginClineBodyDrain(resp.Body)
 					logger.L().Debug("openai chat_completions raw: client disconnected, continuing to drain upstream for billing",
 						zap.Error(werr),
 						zap.String("request_id", requestID),
@@ -350,6 +361,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 		if _, werr := c.Writer.WriteString(line + "\n"); werr != nil {
 			clientDisconnected = true
+			beginClineBodyDrain(resp.Body)
 			logger.L().Debug("openai chat_completions raw: client disconnected, continuing to drain upstream for billing",
 				zap.Error(werr),
 				zap.String("request_id", requestID),
@@ -407,10 +419,11 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
+			ClientDisconnect:              clineBodyDisconnectResult(resp.Body, clientDisconnected),
 		}
 	}
 
-	scanErr := scanner.Err()
+	scanErr := clineBodyReadError(resp.Body, scanner.Err())
 	if scanErr != nil && !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
 		logger.L().Warn("openai chat_completions raw: stream read error",
 			zap.Error(scanErr),
@@ -423,11 +436,25 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	clientAborted := clientDisconnected ||
 		errors.Is(scanErr, context.Canceled) ||
 		errors.Is(scanErr, context.DeadlineExceeded)
+	if account.IsCline() {
+		clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
+		clientAborted = clientDisconnected
+		// Never turn a caller deadline into success, failover, or a lost usage
+		// result. The handler classifies caller deadlines independently.
+		if scanErr != nil && (clientAborted || errors.Is(scanErr, context.DeadlineExceeded)) {
+			return resultWithUsage(), scanErr
+		}
+	}
+
+	// A Cline error remains a failure even after a usage or finish chunk.
+	// The generic terminal detector treats usage as a terminal signal, but
+	// Cline's body guard can report a later explicit generation failure.
+	clineReadFailed := account.IsCline() && scanErr != nil
 
 	// 上游在任何终止信号之前结束：连接被 reset（scanErr != nil）或干净 EOF。
 	// 两者都不能再记成功——此前统一返回 nil error，把上游截断伪装成
 	// `HTTP 200 + usage 0/0`，客户端收到半截回答且 Ops 侧完全无感。
-	if !clientAborted && terminal.IsTruncated(clientOutputStarted) {
+	if !clientAborted && (clineReadFailed || terminal.IsTruncated(clientOutputStarted)) {
 		cause := scanErr
 		if cause == nil {
 			cause = ErrOpenAIUpstreamStreamTruncated
@@ -459,6 +486,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			for _, pending := range pendingLines {
 				if _, werr := c.Writer.WriteString(pending + "\n"); werr != nil {
 					clientDisconnected = true
+					beginClineBodyDrain(resp.Body)
 					logger.L().Debug("openai chat_completions raw: client disconnected during final flush",
 						zap.Error(werr),
 						zap.String("request_id", requestID),
@@ -490,11 +518,11 @@ func isOpenAIChatUsageOnlyStreamChunk(payload string) bool {
 	if strings.TrimSpace(payload) == "" {
 		return false
 	}
-	if !gjson.Get(payload, "usage").Exists() {
+	if !gjson.Get(payload, "usage").Exists() || !gjson.Get(payload, "choices").Exists() {
 		return false
 	}
 	choices := gjson.Get(payload, "choices")
-	return choices.Exists() && choices.IsArray() && len(choices.Array()) == 0
+	return choices.IsArray() && len(choices.Array()) == 0
 }
 
 // extractCCStreamUsage 从单个 CC 流式 chunk 的 payload 中提取 usage 字段。
@@ -505,6 +533,7 @@ func extractCCStreamUsage(payload string) *OpenAIUsage {
 	if !usageResult.Exists() || !usageResult.IsObject() {
 		return nil
 	}
+
 	u, ok := openAIUsageFromGJSON(usageResult)
 	if !ok {
 		return nil

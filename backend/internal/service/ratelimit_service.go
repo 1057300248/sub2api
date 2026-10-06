@@ -304,6 +304,9 @@ const (
 // CheckErrorPolicy 检查自定义错误码和临时不可调度规则。
 // 自定义错误码开启时覆盖后续所有逻辑（包括临时不可调度）。
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) ErrorPolicyResult {
+	if isClineScopedError(account, statusCode, responseBody) {
+		return ErrorPolicyNone
+	}
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
 	if account.IsCustomErrorCodesEnabled() {
 		if account.ShouldHandleErrorCode(statusCode) {
@@ -343,6 +346,12 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 // handleUpstreamErrorAfterStreakReset keeps account policy handling shared with
 // the OpenAI gateway, which resets the streak before its early-return policies.
 func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
+	if s.handleLegacyClineWrappedRateLimit(ctx, account, statusCode, headers, responseBody) {
+		return false
+	}
+	if s.handleClineScopedError(ctx, account, statusCode, headers, responseBody, firstRequestedModel(requestedModel)) {
+		return false
+	}
 	ctx = s.observeAccountOps(ctx, account, statusCode, headers, responseBody)
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
 	// Anthropic's safeguard block is scoped to this conversation. It is not
@@ -1239,6 +1248,18 @@ func (s *RateLimitService) handle429Cooldown(ctx context.Context, account *Accou
 		s.handleOllamaCloudUsage429(ctx, account, headers)
 		return
 	}
+	// Cline exposes its free/pass reset window only in the human-readable body
+	// ("Try again in 1h25m"), so handle it before provider-specific fallbacks.
+	if resetAt, ok := parseClineRateLimitResetAt(account, responseBody, time.Now()); ok {
+		s.notifyAccountSchedulingBlocked(account, resetAt, "cline_429")
+		if err := setClineRateLimited(ctx, s.accountRepo, account.ID, resetAt); err != nil {
+			slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
+			return
+		}
+		slog.Info("cline_account_rate_limited", "account_id", account.ID, "reset_at", resetAt, "reset_in", time.Until(resetAt).Truncate(time.Second))
+		return
+	}
+
 	// 国产供应商（kimi/zhipu/deepseek）的 429 走专用可恢复路径：余额不足 → 临时停调，
 	// Coding Plan 窗口耗尽 → 冷却到快照重置点。未命中则继续默认 429 逻辑。
 	if account.IsCNProvider() || account.IsOpenCodeGo() {

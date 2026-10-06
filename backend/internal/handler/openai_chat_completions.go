@@ -337,6 +337,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				}
 			})
 		}
+		if finishClineForward(c, account, result, err, submitChatUsage, func() {
+			h.handleStreamingAwareError(c, http.StatusGatewayTimeout, "request_timeout", "Request deadline exceeded", streamStarted || c.Writer.Written())
+		}) {
+			return
+		}
 		if err != nil {
 			if service.IsOpenAITurnAdmissionError(err) {
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "admission_unavailable", "Account eligibility changed; please retry with complete context", streamStarted)

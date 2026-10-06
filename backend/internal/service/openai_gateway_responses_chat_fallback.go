@@ -30,6 +30,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	body []byte,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	customParameterSource := body
 
 	// DeepSeek 原生 /responses 不认识 compaction_trigger：remote compaction v2 会得到
 	// reasoning+message 而非 compaction item，Codex 判 fatal。这里改写成普通总结回合
@@ -111,6 +112,11 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	chatBody, err := json.Marshal(chatReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal chat completions fallback request: %w", err)
+	}
+	chatBody, err = mergeClineCustomRequestParameters(account, customParameterSource, chatBody, apicompat.ResponsesRequest{})
+	if err != nil {
+		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
 	}
 	chatBody, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, chatBody)
 	if err != nil {
@@ -283,6 +289,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	clientDisconnected := false
 
 	writeEvents := func(events []apicompat.ResponsesStreamEvent) {
+		clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
 		// Cache the original completed reasoning items before this write boundary;
 		// clients can return the opaque item ID for DeepSeek tool-history replay.
 		if suppressSummary {
@@ -303,6 +310,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			}
 			if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 				clientDisconnected = true
+				beginClineBodyDrain(resp.Body)
 				logger.L().Debug("openai responses chat fallback: client disconnected, continuing to drain upstream for billing",
 					zap.Error(err),
 					zap.String("request_id", requestID),
@@ -319,6 +327,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		writeEvents(events)
 	})
 
+	clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
 	if scan.Err != nil {
 		return &OpenAIForwardResult{
 			RequestID:                   requestID,
@@ -333,6 +342,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			Stream:                      true,
 			Duration:                    time.Since(startTime),
 			FirstTokenMs:                scan.FirstTokenMs,
+			ClientDisconnect:            clineBodyDisconnectResult(resp.Body, clientDisconnected),
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
 	if err := state.ValidateToolCallArguments(); err != nil {
@@ -349,6 +359,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			Stream:                      true,
 			Duration:                    time.Since(startTime),
 			FirstTokenMs:                scan.FirstTokenMs,
+			ClientDisconnect:            clineBodyDisconnectResult(resp.Body, clientDisconnected),
 		}, fmt.Errorf("invalid tool call arguments from upstream: %w", err)
 	}
 
@@ -364,6 +375,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		writeStreamHeaders()
 		if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err != nil {
 			clientDisconnected = true
+			beginClineBodyDrain(resp.Body)
 		}
 		if !clientDisconnected {
 			c.Writer.Flush()
@@ -386,6 +398,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		Stream:                      true,
 		Duration:                    time.Since(startTime),
 		FirstTokenMs:                scan.FirstTokenMs,
+		ClientDisconnect:            clineBodyDisconnectResult(resp.Body, clientDisconnected),
 	}, nil
 }
 
