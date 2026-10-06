@@ -69,6 +69,21 @@ env:
         print(''.join(tail), flush=True)
         raise SystemExit('Cline tests failed, skipped, missing or incomplete')
 jobs:
+  cline-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Archive exact tracked source for reproducible validation
+        run: git archive --format=tar.gz --output="$RUNNER_TEMP/cline-source.tar.gz" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cline-source-${{ github.sha }}
+          path: ${{ runner.temp }}/cline-source.tar.gz
+          retention-days: 1
   cline-backend:
     runs-on: ubuntu-latest
     timeout-minutes: 35
