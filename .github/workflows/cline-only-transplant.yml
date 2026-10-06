@@ -4,6 +4,7 @@ on:
     branches: [codex/sub2-v2910-cline-build-20261006]
     paths:
       - tools/cline_only_upgrade.py
+      - tools/cline_only_resolutions.json
       - .github/workflows/cline-only-transplant.yml
   workflow_dispatch:
 permissions:
