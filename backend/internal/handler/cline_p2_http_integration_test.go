@@ -195,7 +195,7 @@ func exerciseClineP2HTTP(t *testing.T, client *dbent.Client, db *sql.DB, setting
 	limits := service.NewRateLimitService(accounts, nil, cfg, nil, nil)
 	limits.SetSettingService(settings)
 	upstream := &clineP2Upstream{keepOpen: done}
-	gateway := service.NewOpenAIGatewayService(accounts, nil, repository.NewUsageLogRepository(client, db), ledger, users, subs, nil, nil, cfg, nil, concurrency, service.NewBillingService(cfg, pricing), limits, cache, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, settings, nil)
+	gateway := service.NewOpenAIGatewayService(accounts, nil, repository.NewUsageLogRepository(client, db), ledger, users, subs, nil, nil, cfg, nil, concurrency, service.NewBillingService(cfg, pricing), limits, cache, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, settings, nil, service.WithClineMetadataWorker(false))
 	h := NewOpenAIGatewayHandler(gateway, concurrency, cache, service.NewAPIKeyService(keys, users, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 	router := gin.New()
 	var reason string
