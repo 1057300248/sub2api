@@ -6,6 +6,12 @@
 - A pristine upstream tree is used; shared-file patches are applied with Git three-way merging.
 - Both upstream and previous Cline history are recorded as ancestors, while the resulting tree explicitly retires non-Cline overlays.
 
+The branch also carries three explicitly bounded maintenance files required to keep the
+candidate releasable: the platform-options test includes the retained `cline` value, and
+the frontend dependency manifest/lock file pin Vue `3.5.43` and `source-map-js` `1.2.2`.
+These are security/test maintenance only; the Cline boundary checker allows these exact
+paths and continues to reject every other unrelated path.
+
 ## Retained Cline contracts
 
 Independent Cline accounts and legacy official-host OpenAI/DeepSeek compatibility;

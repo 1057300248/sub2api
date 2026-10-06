@@ -15,6 +15,11 @@
       "review_on_upstream_touch": true
     }
   ],
+  "maintenance_changed_files": [
+    "frontend/package.json",
+    "frontend/pnpm-lock.yaml",
+    "frontend/src/constants/__tests__/platforms.spec.ts"
+  ],
   "allowed_changed_files": [
     ".github/workflows/cline-only.yml",
     "Makefile",
@@ -145,6 +150,8 @@
     "backend/migrations/typesafe_platform_migration_test.go",
     "docs/cline/UPGRADE_2.9.10.md",
     "docs/cline/patches.json",
+    "frontend/package.json",
+    "frontend/pnpm-lock.yaml",
     "frontend/src/api/admin/clineMetadata.ts",
     "frontend/src/components/account/ClineAccountModal.vue",
     "frontend/src/components/account/ClineMetadataPanel.vue",
@@ -154,6 +161,7 @@
     "frontend/src/components/account/clineAccountForm.ts",
     "frontend/src/components/common/PlatformIcon.vue",
     "frontend/src/components/keys/UseKeyModal.vue",
+    "frontend/src/constants/__tests__/platforms.spec.ts",
     "frontend/src/constants/platforms.ts",
     "frontend/src/i18n/locales/en/admin/accounts.ts",
     "frontend/src/i18n/locales/en/admin/overview.ts",
