@@ -129,6 +129,11 @@ func (s *adminServiceImpl) ApplyOAuthAutoConfig(ctx context.Context, input *Crea
 	// Imported/user-supplied markers must not fabricate automatic-configuration history.
 	input.Extra = maps.Clone(input.Extra)
 	delete(input.Extra, "auto_config_initial_revision")
+	// Global initialization is an administrator policy. Observers explicitly
+	// choose their own groups and must not inherit global groups or field overrides.
+	if _, observer := ObserverGroupIDs(ctx); observer {
+		return ValidateObserverGroupBindings(ctx, input.GroupIDs)
+	}
 	if input.Type != AccountTypeOAuth || s.settingService == nil {
 		return nil
 	}
