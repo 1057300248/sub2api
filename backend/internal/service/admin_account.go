@@ -454,6 +454,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Schedulable: true,
 	}
 	applyClineSchedulingSettings(account, input.Schedulable)
+	if err := ValidateClineLocalQuotaSettings(account.Platform, account.Extra); err != nil {
+		return nil, err
+	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
 			return nil, ErrUpstreamBillingProbeAccountInvalid
@@ -645,6 +648,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if account.IsCline() && input.Extra != nil {
 		copyInput := *input
 		copyInput.Extra = mergeClineAccountExtra(account, input.Extra)
+		if err := ValidateClineLocalQuotaSettings(account.Platform, copyInput.Extra); err != nil {
+			return nil, err
+		}
 		input = &copyInput
 	}
 	var normalizedExtra map[string]any
@@ -716,6 +722,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		// 敏感子键采用"incoming 没提供就保留"的合并语义：前端响应已脱敏，
 		// 全对象 PUT 编辑时不会再带回 token，避免覆盖时清空已有凭证。
 		account.Credentials = mergeClineAccountCredentials(account, input.Credentials)
+		if err := validateClineErrorSettings(account.Platform, account.Credentials); err != nil {
+			return nil, err
+		}
 		if err := validateClineAccountHeaderSettings(account.Platform, account.Credentials); err != nil {
 			return nil, err
 		}
@@ -1131,7 +1140,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || HasClineQuotaConfig(input.Extra) || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1254,6 +1263,12 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	for _, target := range cachedTargets {
 		if target != nil && target.IsCline() {
+			if err := validateClineErrorSettings(target.Platform, mergeClineAccountCredentials(target, input.Credentials)); err != nil {
+				return nil, err
+			}
+			if err := ValidateClineLocalQuotaSettings(target.Platform, mergeClineAccountExtra(target, input.Extra)); err != nil {
+				return nil, err
+			}
 			if err := validateClineAccountHeaderSettings(target.Platform, input.Credentials); err != nil {
 				return nil, err
 			}
@@ -1844,6 +1859,15 @@ func (s *adminServiceImpl) ResetAccountQuota(ctx context.Context, id int64) erro
 	if account.IsCredentialShadow() {
 		return infraerrors.New(http.StatusBadRequest, "SPARK_SHADOW_NO_QUOTA_RESET",
 			"cannot reset quota for a spark shadow account; manage it on the parent account")
+	}
+	if account.IsCline() {
+		repo, ok := s.accountRepo.(interface {
+			ResetClineLocalQuota(context.Context, int64) error
+		})
+		if !ok {
+			return ErrClineAdmissionUnavailable
+		}
+		return repo.ResetClineLocalQuota(ctx, id)
 	}
 	return s.accountRepo.ResetQuotaUsedAndClearRateLimitCooldown(ctx, id)
 }

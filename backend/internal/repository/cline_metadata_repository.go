@@ -87,6 +87,12 @@ func (r *accountRepository) CheckClineAdmission(ctx context.Context, account *se
 	if err := service.ClineQuotaAdmission(current, now); err != nil {
 		return err
 	}
+	if err := service.ValidateClineLocalQuotaSettings(current.Platform, current.Extra); err != nil {
+		return service.ErrClineAdmissionUnavailable
+	}
+	if current.IsQuotaExceeded() {
+		return service.ErrClineLocalQuotaExceeded
+	}
 	state := current.GetClineState()
 	if state == nil || !cline.ValidSubjectHash(state.Identity) {
 		if cline.IsOfficialBase(current.GetClineBaseURL()) {

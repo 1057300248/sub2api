@@ -56,7 +56,7 @@ func migrationDB(t *testing.T) (*sql.DB, Spec) {
  CREATE TABLE scheduler_outbox(id BIGSERIAL,event_type TEXT,account_id BIGINT);
  CREATE TABLE usage_logs(id BIGINT PRIMARY KEY,account_id BIGINT,cost NUMERIC);`)
 	require.NoError(t, err)
-	for _, name := range []string{"265_cline_credential_write_guard.sql", "266_cline_offline_migration_journal.sql", "268_cline_header_settings_guard.sql"} {
+	for _, name := range []string{"265_cline_credential_write_guard.sql", "266_cline_offline_migration_journal.sql", "268_cline_header_settings_guard.sql", "269_cline_advanced_settings_guard.sql"} {
 		body, err := os.ReadFile("../../migrations/" + name)
 		require.NoError(t, err)
 		_, err = db.ExecContext(ctx, string(body))

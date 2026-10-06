@@ -1417,3 +1417,19 @@ describe('Cline bulk header settings', () => {
     w.unmount()
   })
 })
+
+it('offers Cline-only advanced bulk edits with explicit removal and no runtime counters', async () => {
+  vi.mocked(adminAPI.accounts.bulkUpdate).mockClear()
+  const w = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+  await w.get('[data-testid=cline-bulk-advanced-enabled]').setValue(true)
+  await w.get('[data-testid=cline-bulk-clear-limits]').setValue(true)
+  await w.get('[data-testid=cline-bulk-disable-notify]').setValue(true)
+  await w.get('[data-testid=cline-bulk-disable-policies]').setValue(true)
+  await w.get('#bulk-edit-account-form').trigger('submit.prevent'); await flushPromises()
+  expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { credentials: { custom_error_codes_enabled: false, temp_unschedulable_enabled: false }, extra: { quota_limit: null, quota_daily_limit: null, quota_weekly_limit: null, quota_notify_total_enabled: false, quota_notify_daily_enabled: false, quota_notify_weekly_enabled: false } })
+  w.unmount()
+})
+it('does not expose Cline-specific advanced bulk settings for mixed platforms', () => {
+  const w = mountModal({ selectedPlatforms: ['cline', 'openai'], selectedTypes: ['apikey'] })
+  expect(w.find('[data-testid=cline-bulk-advanced]').exists()).toBe(false); w.unmount()
+})

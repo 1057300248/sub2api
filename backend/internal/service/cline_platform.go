@@ -46,6 +46,9 @@ func NormalizeClineCredentials(platform, accountType string, credentials map[str
 	if credentials == nil {
 		return bad("Cline credentials are required")
 	}
+	if err := validateClineErrorSettings(platform, credentials); err != nil {
+		return err
+	}
 	if err := validateClineAccountHeaderSettings(platform, credentials); err != nil {
 		return err
 	}
@@ -198,5 +201,5 @@ func PreserveClineStateExtra(platform string, existing, incoming map[string]any)
 			out[key] = state
 		}
 	}
-	return out
+	return PreserveClineLocalQuotaRuntime(platform, existing, out)
 }

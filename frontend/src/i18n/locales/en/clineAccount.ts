@@ -1,4 +1,50 @@
 export default {
+  "advanced": {
+  "title": "Advanced settings (optional)",
+  "localHint": "These amounts are local metered-use limits, not a Cline Pass invoice or provider remaining allowance. Blank or zero means unlimited. Official five-hour, weekly and monthly limits remain independent.",
+  "notifications": "Local remaining-quota notifications",
+  "notificationGate": "Delivery requires global account-quota notifications and configured administrator email. These settings do not change the global switch.",
+  "total": "Total notification",
+  "daily": "Daily notification",
+  "weekly": "Weekly notification",
+  "threshold": "Remaining-quota alert threshold",
+  "thresholdType": "Threshold type",
+  "globalThreshold": "Blank or zero disables delivery",
+  "defaultThresholdType": "Default amount",
+  "protectedHint": "Authentication, subscription, model access and Pass rate limits always use built-in safeguards. Custom rules cannot shorten official cooldowns, bypass quota or enable immediate same-account retries.",
+  "customErrors": "Custom error-code handling scope",
+  "customErrorsHint": "Only changes generic handling of other errors. Disabled uses built-in behavior. Enter comma-separated HTTP codes 400–599. Protected errors including 401/402/403/429 are always handled.",
+  "rulesHint": "Rules match in order by status and any keyword. Pause for 1–10080 minutes; at most 32 rules. Disabling preserves rules and does not clear an existing cooldown.",
+  "moveUp": "Move up",
+  "moveDown": "Move down",
+  "addRule": "Add temporary-pause rule",
+  "operationsHint": "These actions are separate. Save or discard pending edits first. Other blocking reasons remain in force. Local reset does not perform inference.",
+  "operationFailed": "Operation did not complete. Reload account state before retrying.",
+  "pauseHint": "Only local temporary pause is cleared. Official cooldowns, local budget, authentication and administrator-disabled state remain.",
+  "pauseSuccess": "Local temporary pause cleared; other restrictions are unchanged.",
+  "action": {
+    "quota": "Reset local used quota",
+    "pause": "Clear local temporary pause",
+    "recheck": "Recheck Pass quota"
+  },
+  "confirm": {
+    "quota": "Reset this account’s local total/daily/weekly counters? Official Pass quotas, cooldowns, other blocks and historical logs remain unchanged.",
+    "pause": "Clear local temporary pause? Official Pass cooldowns and local usage remain, and disabled accounts will not be enabled.",
+    "recheck": "Read Cline metadata again? This queries quota only, performs no model inference and does not promise recovery."
+  },
+  "bulkTitle": "Bulk Cline advanced settings",
+  "bulkHint": "Only edited fields are updated. Blank fields do not clear saved configuration; use the explicit actions below for removal or disabling. Usage counters and Pass cooldowns are not reset.",
+  "bulkClearLimits": "Explicitly remove all selected accounts’ local monetary limits (preserve usage)",
+  "bulkDisableNotify": "Explicitly disable local quota notifications for selected accounts",
+  "bulkDisablePolicies": "Explicitly disable custom-error and temporary-pause rules (preserve rules and existing cooldowns)",
+  "errors": {
+    "quota": "Local limits must be finite nonnegative numbers up to 1000000000000; zero means unlimited.",
+    "reset": "Enter a valid reset mode, hour 0–23, weekday 0–6 and timezone.",
+    "notify": "Enter a nonnegative amount or percentage 0–100. Blank or zero disables delivery.",
+    "errorCodes": "Enter distinct HTTP codes 400–599, at most 64. Enabled policy cannot be empty.",
+    "rules": "Rules require HTTP 400–599, 1–10080 minutes, 1–20 nonempty keywords and no control characters. At most 32 rules."
+  }
+},
   "testNotice": "Only clicking Test sends a small text inference (at most 64 output tokens), consuming account quota. Image, native Responses, BPS and paid fallback probes are unavailable.",
   "testUnavailable": "Select a saved explicit model allowed by Pass/PAYG. Free, unknown modes and empty whitelists cannot send inference probes.",
   "savedUsage": "Saved Pass quota observation",

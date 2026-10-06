@@ -186,3 +186,14 @@ describe('Cline common settings DOM and save', () => {
     expect(w.get('[role="alert"]').text()).toBe('clineAccount.errors.groupModels')
   })
 })
+
+it('saves Cline advanced deltas without replaying local used counters or Pass state', async () => {
+  const a = { ...account, extra: { quota_limit: 10, quota_used: 9, cline_state: { marker: 'runtime-only' }, cost_multiplier: 0.2 } } as Account
+  const w = render(a)
+  const child = w.findComponent({ name: 'ClineAdvancedSettings' })
+  child.vm.$emit('update:modelValue', { ...child.props('modelValue'), totalLimit: 20 })
+  await flushPromises(); await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.update).toHaveBeenCalledTimes(1)
+  expect(api.update.mock.calls[0][1].extra).toEqual({ quota_limit: 20 })
+  expect(JSON.stringify(api.update.mock.calls[0][1])).not.toContain('runtime-only')
+})

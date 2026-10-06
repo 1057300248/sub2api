@@ -63,3 +63,10 @@ quota projection. All synthetic transports/credentials are local fixtures.
 Read CI artifacts for the final commit; this document is not a passing test log.
 A deployed site will only gain the entry after deploying this branch's matching
 frontend and backend; this task does not perform that deployment.
+
+## Advanced settings completion
+
+The native editor and Cline-only bulk editor now include local quota/reset/notification
+settings and custom-error/temporary-pause policies. See `ADVANCED_SETTINGS.md` for
+field ownership, independent operations, database guard 269 and required tests.
+Provider-specific capability exclusions above remain intentional.

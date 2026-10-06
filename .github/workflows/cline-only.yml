@@ -48,9 +48,9 @@ env:
     if suite == 'policy':
         required = {'TestClineWrappedRateLimitClassification', 'TestClineJSONEnvelopePreservesCompletionAndUsage', 'TestClineSSEFailurePreventsSuccessfulTerminal', 'TestClineTerminalFailurePreservesOnlyValidatedUsage'}
     if suite == 'service':
-        required = {'TestClineCustomParametersProtectAllProtocolFieldsAndCaseAliases', 'TestClineLegacyThreeProtocolParametersSurviveLowering', 'TestClineWrappedLimitPreservesAuditAndStopsSameAccountRetry', 'TestClineThreeProtocolHTTPForwarding', 'TestClineSuccessfulResponseSurvivesLateDeadline', 'TestClineGroupAndCompositeRequestBindings', 'TestClineThreeProtocolRequestHeaderOverrides', 'TestClineQuotaExhaustionSurvivesStalenessErrorsAndExpiry', 'TestClineMetadataWorkerBoundedConcurrencyAndModeIsolation', 'TestClineMetadataRetryAfterDoesNotBecomeInferenceCooldown', 'TestClineAccountSettingsCreateScheduling', 'TestClineAccountSettingsUpdatePreservesUneditedConfiguration', 'TestClineAccountHeaderSettingsValidationAndIsolation', 'TestClineBulkHeaderSettingsRejectBeforeAnyWrite', 'TestClineAccountSettingsHTTPBinding', 'TestClineAccountListUsesSafeCredentialBoundQuotaProjection'}
+        required = {'TestClineCustomParametersProtectAllProtocolFieldsAndCaseAliases', 'TestClineLegacyThreeProtocolParametersSurviveLowering', 'TestClineWrappedLimitPreservesAuditAndStopsSameAccountRetry', 'TestClineThreeProtocolHTTPForwarding', 'TestClineSuccessfulResponseSurvivesLateDeadline', 'TestClineGroupAndCompositeRequestBindings', 'TestClineThreeProtocolRequestHeaderOverrides', 'TestClineQuotaExhaustionSurvivesStalenessErrorsAndExpiry', 'TestClineMetadataWorkerBoundedConcurrencyAndModeIsolation', 'TestClineMetadataRetryAfterDoesNotBecomeInferenceCooldown', 'TestClineAccountSettingsCreateScheduling', 'TestClineAccountSettingsUpdatePreservesUneditedConfiguration', 'TestClineAccountHeaderSettingsValidationAndIsolation', 'TestClineBulkHeaderSettingsRejectBeforeAnyWrite', 'TestClineAccountSettingsHTTPBinding', 'TestClineAccountListUsesSafeCredentialBoundQuotaProjection', 'TestClineAdvancedQuotaValidationAndDelta', 'TestClineAdvancedProtectedErrorsAndTemporaryRules', 'TestClineAdvancedInvalidRulesAndFalsePreservation', 'TestClineAdvancedRuntimeOwnershipAndNotificationThreshold', 'TestClineAdvancedResetsUseIsolatedOperations'}
     if suite == 'postgres':
-        required = {'TestClinePostgresPlatformUnionUpgrade', 'TestClinePostgresCreateOutboxFailureIsAtomic', 'TestClinePostgresCreateReusesOuterTransaction', 'TestClinePostgresMaximumFreeScopeUsesUnfingerprintedColumn', 'TestClinePostgresIdentitySwitchDoesNotReattributeOldLimits', 'TestClinePostgresSharedSubjectLimitsAndRestart', 'TestClinePostgresRefreshLeaseAndObservationOrdering', 'TestClinePostgresOutboxFailureRollsBackState', 'TestClinePostgresDirectAndBulkCredentialGuards', 'TestClinePostgresAdmissionRejectsStaleCredentials', 'TestClinePostgresConcurrentScopedCAS', 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits', 'TestClinePostgresCreationCannotImportManagedState', 'TestClinePostgresMigrationAndQuotaSchema', 'TestClinePostgresMetadataQuotaSharedRecoveryAndStaleObservations', 'TestClinePostgresExpiredQuotaRequiresConfirmedWindow', 'TestClinePostgresHealthyMetadataCannotShortenInferenceCooldown', 'TestClinePostgresAutomaticMetadataCandidatesIncludeCoolingNotDisabled', 'TestClinePostgresAccountSettingsRoundTripAndHeaderGuards', 'TestClinePostgresHeaderGuardDatabaseContract'}
+        required = {'TestClinePostgresPlatformUnionUpgrade', 'TestClinePostgresCreateOutboxFailureIsAtomic', 'TestClinePostgresCreateReusesOuterTransaction', 'TestClinePostgresMaximumFreeScopeUsesUnfingerprintedColumn', 'TestClinePostgresIdentitySwitchDoesNotReattributeOldLimits', 'TestClinePostgresSharedSubjectLimitsAndRestart', 'TestClinePostgresRefreshLeaseAndObservationOrdering', 'TestClinePostgresOutboxFailureRollsBackState', 'TestClinePostgresDirectAndBulkCredentialGuards', 'TestClinePostgresAdmissionRejectsStaleCredentials', 'TestClinePostgresConcurrentScopedCAS', 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits', 'TestClinePostgresCreationCannotImportManagedState', 'TestClinePostgresMigrationAndQuotaSchema', 'TestClinePostgresMetadataQuotaSharedRecoveryAndStaleObservations', 'TestClinePostgresExpiredQuotaRequiresConfirmedWindow', 'TestClinePostgresHealthyMetadataCannotShortenInferenceCooldown', 'TestClinePostgresAutomaticMetadataCandidatesIncludeCoolingNotDisabled', 'TestClinePostgresAccountSettingsRoundTripAndHeaderGuards', 'TestClinePostgresHeaderGuardDatabaseContract', 'TestClinePostgresAdvancedSettingsGuardsAndBulkAtomicity', 'TestClinePostgresLocalQuotaCountersCannotBeReplayed', 'TestClinePostgresAdvancedOperationsPreservePassAndOtherBlocks', 'TestClinePostgresLocalQuotaFinalAdmissionAndResetRollback'}
     if suite == 'handler':
         prefix = 'TestClineHTTPHandlersDurableBillingAndTermination'
         scenarios = ('complete', 'cancel_then_usage', 'writer_stall', 'deadline', 'deadline_headers', 'success_late_deadline', 'success_late_deadline_json', 'parameters_stream', 'parameters_json', 'parameters_legacy_openai_stream', 'parameters_legacy_openai_json', 'parameters_legacy_deepseek_stream', 'parameters_legacy_deepseek_json')
@@ -202,7 +202,7 @@ jobs:
       - name: Cline frontend regression tests
         working-directory: frontend
         run: |
-          pnpm exec vitest run src/components/account/__tests__/ClineAccountModal.spec.ts src/components/account/__tests__/ClineMetadataPanel.spec.ts src/components/account/__tests__/clineAccountForm.spec.ts src/components/account/__tests__/clineAccountSettings.spec.ts src/components/account/__tests__/ClineAccountUsageCell.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/BulkEditAccountModal.spec.ts src/components/account/__tests__/AccountTestModal.spec.ts src/components/account/__tests__/AccountUsageCell.spec.ts src/views/admin/__tests__/AccountsView.lite.spec.ts --reporter=json --outputFile="$RUNNER_TEMP/cline-frontend-tests.json"
+          pnpm exec vitest run src/components/account/__tests__/ClineAccountModal.spec.ts src/components/account/__tests__/ClineMetadataPanel.spec.ts src/components/account/__tests__/clineAccountForm.spec.ts src/components/account/__tests__/clineAdvancedSettings.spec.ts src/components/account/__tests__/ClineAdvancedSettings.spec.ts src/components/account/__tests__/clineAccountSettings.spec.ts src/components/account/__tests__/ClineAccountUsageCell.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/BulkEditAccountModal.spec.ts src/components/account/__tests__/AccountTestModal.spec.ts src/components/account/__tests__/AccountUsageCell.spec.ts src/views/admin/__tests__/AccountsView.lite.spec.ts --reporter=json --outputFile="$RUNNER_TEMP/cline-frontend-tests.json"
           python3 - <<'PY'
           import json, os
           from pathlib import Path
@@ -211,6 +211,19 @@ jobs:
           assert result['numPassedTests'] == result['numTotalTests'] and result.get('numPendingTests', 0) == 0
           print('CLINE_FRONTEND_PASSED', result['numPassedTests'])
           PY
+      - name: Full frontend regression and lint
+        working-directory: frontend
+        run: |
+          pnpm run lint:check
+          pnpm exec vitest run --reporter=json --outputFile="$RUNNER_TEMP/cline-full-frontend-tests.json"
+          python3 - <<'PYFULL'
+          import json, os
+          from pathlib import Path
+          r = json.loads((Path(os.environ['RUNNER_TEMP'])/'cline-full-frontend-tests.json').read_text())
+          assert r['success'] and r['numTotalTests'] > 0 and r['numPassedTests'] == r['numTotalTests']
+          assert not r.get('numPendingTests') and not r.get('numTodoTests')
+          print('FULL_FRONTEND_PASSED', r['numPassedTests'])
+          PYFULL
       - name: Upstream and Cline critical frontend tests
         run: make test-frontend-critical
       - name: Frontend typecheck and production build
@@ -223,5 +236,7 @@ jobs:
         if: always()
         with:
           name: cline-frontend-${{ github.sha }}
-          path: ${{ runner.temp }}/cline-frontend-tests.json
+          path: |
+            ${{ runner.temp }}/cline-frontend-tests.json
+            ${{ runner.temp }}/cline-full-frontend-tests.json
           retention-days: 14

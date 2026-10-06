@@ -109,7 +109,11 @@ func mergeClineAccountExtra(account *Account, incoming map[string]any) map[strin
 		out[key] = value
 	}
 	for key, value := range incoming {
-		out[key] = value
+		if value == nil && IsClineQuotaConfigKey(key) {
+			delete(out, key)
+		} else {
+			out[key] = value
+		}
 	}
 	return out
 }

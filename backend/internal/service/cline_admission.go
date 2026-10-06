@@ -42,7 +42,7 @@ func (s *OpenAIGatewayService) checkClineAdmission(ctx context.Context, account 
 	if errors.Is(err, ErrClineMetadataRequired) || errors.Is(err, ErrClineObservedCooldown) {
 		s.RequestClineMetadataRefresh()
 	}
-	if err == nil || errors.Is(err, ErrClineObservedCooldown) || errors.Is(err, ErrClineMetadataChanged) || errors.Is(err, ErrClineMetadataRequired) {
+	if err == nil || errors.Is(err, ErrClineLocalQuotaExceeded) || errors.Is(err, ErrClineObservedCooldown) || errors.Is(err, ErrClineMetadataChanged) || errors.Is(err, ErrClineMetadataRequired) {
 		return err
 	}
 	// Database diagnostics may contain JSON credentials. Expose/log only the

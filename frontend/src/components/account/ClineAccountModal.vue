@@ -2,11 +2,11 @@
   <BaseDialog :show="show" :title="t(account ? 'clineAccount.edit' : 'clineAccount.create')" width="wide"
     :show-close-button="!saving" :close-on-escape="!saving" @close="close">
     <form id="cline-account-form" class="space-y-5" @submit.prevent="save">
-      <button v-if="showPlatformBack" type="button" class="btn btn-secondary" :disabled="saving" data-testid="cline-back-platform" @click="back">{{ t('clineAccount.choosePlatform') }}</button>
+      <button v-if="showPlatformBack" type="button" class="btn btn-secondary" :disabled="saving || operationRunning" data-testid="cline-back-platform" @click="back">{{ t('clineAccount.choosePlatform') }}</button>
       <p class="rounded-lg bg-slate-100 p-3 text-sm text-slate-700 dark:bg-dark-700 dark:text-slate-200">{{ t('clineAccount.boundary') }}</p>
       <p v-if="draft.mode === 'free' || draft.mode === 'unknown'" role="status" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{{ t(draft.mode === 'free' ? 'clineAccount.freeNotice' : 'clineAccount.unknownNotice') }}</p>
       <div v-if="error" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ error }}</div>
-      <fieldset :disabled="saving" class="space-y-4">
+      <fieldset :disabled="saving || operationRunning" class="space-y-4">
         <div class="grid gap-4 sm:grid-cols-2">
           <label class="block text-sm">{{ t('clineAccount.name') }}<input v-model="draft.name" data-testid="cline-name" class="input mt-1 w-full" required maxlength="100" /></label>
           <label class="block text-sm">{{ t('clineAccount.mode') }}<select v-model="draft.mode" data-testid="cline-mode" class="input mt-1 w-full"><option value="pass">Cline Pass</option><option value="free">Cline Free</option><option value="payg">Cline PAYG</option><option value="unknown">{{ t('clineAccount.unknown') }}</option></select></label>
@@ -51,16 +51,17 @@
           <p class="text-xs text-gray-500">{{ t('clineAccount.headersHint') }}</p>
           <HeaderOverrideEditor v-if="draft.headerOverrideEnabled" :rows="draft.headerOverrideRows" @update:rows="draft.headerOverrideRows = $event" />
         </div>
+        <ClineAdvancedSettings v-if="show" v-model="advanced" :account="account" :can-operate="canOperate" @busy="operationRunning = $event" @operated="emit('saved'); close()" />
         <label class="block text-sm">{{ t('clineAccount.notes') }}<textarea v-model="draft.notes" class="input mt-1 w-full" rows="2" /></label>
       </fieldset>
       <template v-if="account && show">
-        <button v-if="!showMetadata" type="button" class="btn btn-secondary" :disabled="saving" @click="showMetadata = true">{{ t('clineMetadata.open') }}</button>
+        <button v-if="!showMetadata" type="button" class="btn btn-secondary" :disabled="saving || operationRunning" @click="showMetadata = true">{{ t('clineMetadata.open') }}</button>
         <p v-if="showMetadata" class="text-xs text-gray-500">{{ t('clineAccount.savedMetadata') }}</p>
         <ClineMetadataPanel v-if="showMetadata" :account-id="account.id" :mode="clineMode(account.credentials?.account_mode)" @select="addCatalogModel" />
       </template>
       <p class="text-xs text-gray-500">{{ t('clineAccount.noProbe') }}</p>
     </form>
-    <template #footer><button class="btn btn-secondary" :disabled="saving" @click="close">{{ t('clineAccount.cancel') }}</button><button form="cline-account-form" type="submit" data-testid="cline-save" class="btn btn-primary" :disabled="saving">{{ t(saving ? 'clineAccount.saving' : 'clineAccount.save') }}</button></template>
+    <template #footer><button class="btn btn-secondary" :disabled="saving || operationRunning" @click="close">{{ t('clineAccount.cancel') }}</button><button form="cline-account-form" type="submit" data-testid="cline-save" class="btn btn-primary" :disabled="saving || operationRunning">{{ t(saving ? 'clineAccount.saving' : 'clineAccount.save') }}</button></template>
   </BaseDialog>
 </template>
 
@@ -70,6 +71,8 @@ import { useI18n } from 'vue-i18n'
 import type { Account, AdminGroup, CreateAccountRequest, Proxy } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ClineMetadataPanel from './ClineMetadataPanel.vue'
+import ClineAdvancedSettings from './ClineAdvancedSettings.vue'
+import { clineAdvancedDraft, clineAdvancedPayload, ClineAdvancedError } from './clineAdvancedSettings'
 import AccountGroupModelLimits from './AccountGroupModelLimits.vue'
 import HeaderOverrideEditor from './HeaderOverrideEditor.vue'
 import { ClineSettingsError } from './clineAccountSettings'
@@ -81,16 +84,20 @@ const emit = defineEmits<{ close: []; saved: []; back: [] }>()
 const { t } = useI18n()
 const draft = reactive(clineAccountDraft())
 const saving = ref(false)
+const operationRunning = ref(false)
 const showMetadata = ref(false)
 function addCatalogModel(id: string) {
-  if (saving.value || draft.models.some(row => row.publicID === id)) return
+  if (saving.value || operationRunning.value || draft.models.some(row => row.publicID === id)) return
   draft.models.push({ publicID: id, upstreamID: id })
 }
 const error = ref('')
+const advanced = ref(clineAdvancedDraft(props.account))
+const canOperate = computed(() => !!props.account && !saving.value && JSON.stringify(draft) === JSON.stringify(clineAccountDraft(props.account)) && JSON.stringify(advanced.value) === JSON.stringify(clineAdvancedDraft(props.account)))
 watch(() => [props.show, props.account] as const, ([show]) => {
   showMetadata.value = false
   if (!show) { draft.apiKey = ''; return }
   Object.assign(draft, clineAccountDraft(props.account))
+  advanced.value = clineAdvancedDraft(props.account)
   if (!props.account && props.initial) { draft.name = props.initial.name; draft.notes = props.initial.notes }
   error.value = ''
 }, { immediate: true })
@@ -115,20 +122,23 @@ function changeProxy(event: Event) {
   draft.proxyID = value === '' ? null : Number(value)
 }
 function back() {
-  if (saving.value) return
+  if (saving.value || operationRunning.value) return
   draft.apiKey = ''
   emit('back')
 }
 function close() {
-  if (saving.value) return
+  if (saving.value || operationRunning.value) return
   draft.apiKey = ''
   emit('close')
 }
 async function save() {
-  if (saving.value) return
+  if (saving.value || operationRunning.value) return
   error.value = ''
   try {
     const payload = buildClineAccountPayload(draft, props.account)
+    const settings = clineAdvancedPayload(advanced.value, props.account)
+    Object.assign(payload.credentials!, settings.credentials)
+    if (Object.keys(settings.extra).length) payload.extra = { ...payload.extra, ...settings.extra }
     saving.value = true
     if (props.account) await accountsAPI.update(props.account.id, payload)
     else await accountsAPI.create(payload as CreateAccountRequest)
@@ -137,7 +147,7 @@ async function save() {
     emit('close')
   } catch (err) {
     // Axios errors can contain the submitted secret. Never log/stringify them.
-    error.value = err instanceof ClineFormError || err instanceof ClineSettingsError ? t(`clineAccount.errors.${err.issue}`) : t('clineAccount.saveFailed')
+    error.value = err instanceof ClineAdvancedError ? t(`clineAccount.advanced.errors.${err.issue}`) : err instanceof ClineFormError || err instanceof ClineSettingsError ? t(`clineAccount.errors.${err.issue}`) : t('clineAccount.saveFailed')
   } finally { saving.value = false }
 }
 </script>

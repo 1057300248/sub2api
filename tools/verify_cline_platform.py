@@ -22,7 +22,7 @@ REQUIRED = {
     'backend/internal/service/cline_custom_parameters.go': ['mergeClineCustomRequestParameters(', 'jsonStructFieldNames(apicompat.ChatCompletionsRequest{})', 'validClineCustomParameterName('],
     'backend/internal/service/account.go': ['return a.IsClineModelSupported(requestedModel)', 'return a.GetClineBaseURL()'],
     'backend/internal/service/model_rate_limit.go': ['cline.RateLimitKeys(a.GetClineMode(), modelKey)', 'ClineRateLimitScope(a, scope)'],
-    'backend/internal/service/ratelimit_service.go': ['s.handleClineScopedError(', 'isClineScopedError('],
+    'backend/internal/service/ratelimit_service.go': ['s.handleClineScopedError(', 'clineProtectedError('],
     'backend/internal/service/openai_gateway_cc_pipeline.go': ['account.ValidateClineOutboundBody(body)', 's.prepareClineResponseGuard(ctx, account, body, stream)', 'guardResponse(resp)'],
     'backend/internal/service/cline_response_guard.go': ['prepareClineResponseGuard(', 'decoder.UseNumber()', 'context.WithTimeout(context.WithoutCancel(ctx)', 'cline.GuardSSEBody(', 'cline.GuardJSONBody(', 'handleClineScopedUpstreamError('],
     'backend/internal/service/cline_platform_ratelimit.go': ['handleClineScopedUpstreamError(', 'SetClineRateLimitIfLater('],
@@ -72,6 +72,15 @@ for name, anchors in {
     'backend/internal/service/cline_account_settings.go': ['mergeClineAccountCredentials', 'applyClineSchedulingSettings', 'validateClineAccountHeaderSettings'],
     'backend/migrations/268_cline_header_settings_guard.sql': ['cline_guard_header_settings', 'cardinality(seen)', 'encoded_bytes>16384'],
     'backend/internal/handler/dto/account_cline_view.go': ['ClineMetadataForAccount', 'view.Catalog = nil'],
+}.items():
+    REQUIRED.setdefault(name, []).extend(anchors)
+
+for name, anchors in {
+    'frontend/src/components/account/ClineAccountModal.vue': ['ClineAdvancedSettings', 'clineAdvancedPayload', 'operationRunning'],
+    'frontend/src/components/account/BulkEditAccountModal.vue': ['cline-bulk-advanced', 'clineAdvancedPayload'],
+    'backend/internal/service/cline_advanced_settings.go': ['ValidateClineLocalQuotaSettings', 'clineProtectedError', 'PreserveClineLocalQuotaRuntime', 'isClineScopedError('],
+    'backend/internal/repository/cline_advanced_operations.go': ['ResetClineLocalQuota', 'ClearClineTemporaryPause', 'INSERT INTO scheduler_outbox'],
+    'backend/migrations/269_cline_advanced_settings_guard.sql': ['cline_guard_advanced_settings', 'reset_changed', 'custom_error_codes'],
 }.items():
     REQUIRED.setdefault(name, []).extend(anchors)
 

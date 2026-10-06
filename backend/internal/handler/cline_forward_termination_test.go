@@ -74,6 +74,7 @@ func TestClineLocalPolicyErrorsAreNeutralAndProtocolCorrect(t *testing.T) {
 		}{
 			{service.ErrClineHeaderOverrides, http.StatusBadRequest},
 			{service.ErrClineObservedCooldown, http.StatusTooManyRequests},
+			{service.ErrClineLocalQuotaExceeded, http.StatusTooManyRequests},
 			{service.ErrClineMetadataRequired, http.StatusServiceUnavailable},
 			{service.ErrClineAdmissionUnavailable, http.StatusServiceUnavailable},
 		} {

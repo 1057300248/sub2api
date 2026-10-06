@@ -19,6 +19,8 @@ func finishClineForward(c *gin.Context, account *service.Account, result *servic
 	switch {
 	case errors.Is(err, service.ErrClineHeaderOverrides):
 		status, message = http.StatusBadRequest, service.ErrClineHeaderOverrides.Error()
+	case account.IsCline() && errors.Is(err, service.ErrClineLocalQuotaExceeded):
+		status, message = http.StatusTooManyRequests, service.ErrClineLocalQuotaExceeded.Error()
 	case account.IsCline() && errors.Is(err, service.ErrClineObservedCooldown):
 		status, message = http.StatusTooManyRequests, "Cline quota is cooling or awaiting an automatic recheck"
 	case account.IsCline() && (errors.Is(err, service.ErrClineMetadataRequired) || errors.Is(err, service.ErrClineMetadataChanged) || errors.Is(err, service.ErrClineAdmissionUnavailable)):

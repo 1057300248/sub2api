@@ -1393,6 +1393,9 @@ func (a *Account) GetCustomErrorCodes() []int {
 }
 
 func (a *Account) ShouldHandleErrorCode(statusCode int) bool {
+	if a.IsCline() && (statusCode == 401 || statusCode == 402 || statusCode == 403 || statusCode == 429) {
+		return true
+	}
 	if !a.IsCustomErrorCodesEnabled() {
 		return true
 	}

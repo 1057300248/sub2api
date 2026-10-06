@@ -5,6 +5,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/__tests__/AstraGatewayRuntime.spec.ts \
 	src/components/admin/__tests__/AstraGatewayHistory.spec.ts \
 	src/components/account/__tests__/clineAccountForm.spec.ts \
+	src/components/account/__tests__/clineAdvancedSettings.spec.ts \
+	src/components/account/__tests__/ClineAdvancedSettings.spec.ts \
 	src/components/account/__tests__/ClineMetadataPanel.spec.ts \
 	src/components/account/__tests__/ClineAccountModal.spec.ts \
 	src/components/account/__tests__/clineAccountSettings.spec.ts \
