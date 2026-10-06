@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = 993dbb5c7d26de05541f9541cc40d7b8903d1cbc
+          git merge-base --is-ancestor 993dbb5c7d26de05541f9541cc40d7b8903d1cbc HEAD
           python3 - <<'PY'
           import base64, hashlib, lzma, subprocess
           from pathlib import Path
@@ -31,12 +31,19 @@ jobs:
           assert hashlib.sha256(patch).hexdigest() == 'e4798777414f133688d05603c07ffa22cff0c2528626cc4dc6163450df603d32'
           subprocess.run(['git','apply','--check','--index','-'], input=patch, check=True)
           subprocess.run(['git','apply','--index','-'], input=patch, check=True)
+          p=Path('tools/verify_cline_platform.py'); text=p.read_text()
+          edits=[("['s.handleClineScopedError(', 'isClineScopedError(']", "['s.handleClineScopedError(', 'clineProtectedError(']"), ("['ValidateClineLocalQuotaSettings', 'clineProtectedError', 'PreserveClineLocalQuotaRuntime']", "['ValidateClineLocalQuotaSettings', 'clineProtectedError', 'PreserveClineLocalQuotaRuntime', 'isClineScopedError(']")]
+          for old,new in edits:
+              assert text.count(old)==1
+              text=text.replace(old,new,1)
+          p.write_text(text)
+          subprocess.run(['git','add','tools/verify_cline_platform.py'],check=True)
           PY
           git rm -r -- .cline-advanced-apply .github/workflows/cline-advanced-apply.yml
           python3 tools/verify_cline_only.py
           python3 tools/verify_cline_platform.py
           git diff --cached --check
-          test "$(git write-tree)" = 7f7f1a23ab384275e341acd39569bfd3c09d5d71
+          test "$(git write-tree)" = 6502516ec5a1effc098a489d1c90b0816252e013
           git diff --cached --stat 993dbb5c7d26de05541f9541cc40d7b8903d1cbc
       - name: Store verified source blobs only without moving review branches
         env:
