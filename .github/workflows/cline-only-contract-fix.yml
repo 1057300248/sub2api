@@ -1,0 +1,66 @@
+name: Prepare Cline-only contract fix
+on:
+  push:
+    branches: [codex/sub2-v2910-cline-build-20261006]
+    paths: [.github/workflows/cline-only-contract-fix.yml]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    if: github.repository == '1057300248/sub2api'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply exact Cline contract delta to the pinned final tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin a8726b5a0baab2b533d5bfe68cbb9a3efd380b7f
+          work="$RUNNER_TEMP/cline-contract"
+          git worktree add --detach "$work" a8726b5a0baab2b533d5bfe68cbb9a3efd380b7f
+          git diff --binary --full-index bc83ff9c367883e5b7d0140e6bb42e2e7cc5239c 116ab640aca8331ea74e12ce8773c2fc85463d54 -- backend/internal/server/api_contract_test.go > "$RUNNER_TEMP/cline-contract.patch"
+          cat "$RUNNER_TEMP/cline-contract.patch"
+          cd "$work"
+          git apply --3way --index "$RUNNER_TEMP/cline-contract.patch"
+          python3 - <<'PY'
+          import json, re, subprocess
+          from pathlib import Path
+          root = Path.cwd()
+          p = root/'docs/cline/patches.json'
+          manifest = json.loads(p.read_text())
+          name = 'backend/internal/server/api_contract_test.go'
+          assert name not in manifest['allowed_changed_files']
+          manifest['allowed_changed_files'] = sorted(manifest['allowed_changed_files'] + [name])
+          p.write_text(json.dumps(manifest, indent=2) + '\n')
+          # These generic usage helpers never needed a Cline-specific change.
+          p = root/'backend/internal/service/openai_gateway_chat_completions_raw.go'
+          upstream = subprocess.check_output(['git', 'show', manifest['upstream_commit']+':'+str(p.relative_to(root))], text=True)
+          text = p.read_text()
+          for name in ('isOpenAIChatUsageOnlyStreamChunk', 'extractCCStreamUsage'):
+              pattern = r'(?ms)^func ' + name + r'\([^\n]*\n.*?^}\n'
+              old = re.findall(pattern, text)
+              new = re.findall(pattern, upstream)
+              assert len(old) == len(new) == 1, (name, len(old), len(new))
+              text = text.replace(old[0], new[0], 1)
+          p.write_text(text)
+          p = root/'.github/workflows/cline-only.yml'
+          text = p.read_text()
+          anchor = '      - name: Cline SSE, JSON and policy race tests\n'
+          assert text.count(anchor) == 1
+          step = '      - name: Cline quota API contracts\n        working-directory: backend\n        run: python3 -c "$CLINE_TEST_DRIVER" api-contract 1 unit \'^TestAPIContracts$\' no ./internal/server\n'
+          p.write_text(text.replace(anchor, step+anchor, 1))
+          PY
+          git add backend/internal/server/api_contract_test.go backend/internal/service/openai_gateway_chat_completions_raw.go docs/cline/patches.json .github/workflows/cline-only.yml
+          git diff --cached --check
+          python3 tools/verify_cline_only.py
+          python3 tools/verify_cline_platform.py
+          git diff --cached --stat
+          git diff --cached -- backend/internal/server/api_contract_test.go backend/internal/service/openai_gateway_chat_completions_raw.go .github/workflows/cline-only.yml
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix(cline): retain quota API contracts and restore upstream generic usage helpers'
+          candidate='codex/sub2-v2910-cline-fixup-20261006'
+          test -z "$(git ls-remote --heads origin "refs/heads/$candidate")"
+          git push origin "HEAD:refs/heads/$candidate"
+          echo "CLINE_CONTRACT_FIX_HEAD=$(git rev-parse HEAD)"
