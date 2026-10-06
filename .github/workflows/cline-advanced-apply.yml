@@ -1,0 +1,77 @@
+name: Prepare Cline advanced settings sources
+on:
+  push:
+    branches: [codex/cline-advanced-prep-20261006]
+permissions:
+  contents: read
+jobs:
+  prepare-advanced:
+    if: github.repository == '1057300248/sub2api' && github.ref == 'refs/heads/codex/cline-advanced-prep-20261006'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply pinned source delta and remove temporary delivery files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = 993dbb5c7d26de05541f9541cc40d7b8903d1cbc
+          python3 - <<'PY'
+          import base64, hashlib, lzma, subprocess
+          from pathlib import Path
+          encoded = ''.join((Path('.cline-advanced-apply')/('%02d.b64'%i)).read_text().strip() for i in range(6))
+          patch = lzma.decompress(base64.b64decode(encoded, validate=True), memlimit=128*1024*1024)
+          assert len(patch) == 131861
+          assert hashlib.sha256(patch).hexdigest() == 'e4798777414f133688d05603c07ffa22cff0c2528626cc4dc6163450df603d32'
+          subprocess.run(['git','apply','--check','--index','-'], input=patch, check=True)
+          subprocess.run(['git','apply','--index','-'], input=patch, check=True)
+          PY
+          git rm -r -- .cline-advanced-apply .github/workflows/cline-advanced-apply.yml
+          python3 tools/verify_cline_only.py
+          python3 tools/verify_cline_platform.py
+          git diff --cached --check
+          test "$(git write-tree)" = 7f7f1a23ab384275e341acd39569bfd3c09d5d71
+          git diff --cached --stat 993dbb5c7d26de05541f9541cc40d7b8903d1cbc
+      - name: Store verified source blobs only without moving review branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, subprocess, time, urllib.request, urllib.error
+          from pathlib import Path
+          def git(*args): return subprocess.check_output(['git',*args]).decode().strip()
+          assert git('rev-parse','HEAD') == os.environ['GITHUB_SHA']
+          paths = subprocess.check_output(['git','diff','--cached','--name-only','-z','993dbb5c7d26de05541f9541cc40d7b8903d1cbc']).decode().split('\0')
+          entries=[]
+          for name in filter(None, paths):
+              path=Path(name)
+              assert path.is_file() and not name.startswith('.cline-advanced-apply/')
+              data=path.read_bytes()
+              expected=hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+              payload=json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode()
+              for attempt in range(4):
+                  try:
+                      request=urllib.request.Request('https://api.github.com/repos/1057300248/sub2api/git/blobs',data=payload,method='POST',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+                      with urllib.request.urlopen(request,timeout=60) as response: blob=json.load(response)
+                      break
+                  except urllib.error.HTTPError as error:
+                      if error.code not in (429,500,502,503,504) or attempt==3: raise
+                      time.sleep(min(10,2**attempt))
+              assert blob['sha']==expected
+              mode=git('ls-files','--stage','--',name).split()[0]
+              entries.append({'path':name,'mode':mode,'type':'blob','sha':expected})
+          report={'base_commit':'993dbb5c7d26de05541f9541cc40d7b8903d1cbc','base_tree':'f92fe9b09ec2cb25876733c3b4ac1e63fad07883','expected_tree':git('write-tree'),'tree_elements':entries}
+          Path(os.environ['RUNNER_TEMP'],'cline-advanced-objects.json').write_text(json.dumps(report,indent=2)+'\n')
+          print('VERIFIED_SOURCE_BLOBS',len(entries),'TREE',report['expected_tree'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cline-advanced-objects-${{ github.sha }}
+          path: ${{ runner.temp }}/cline-advanced-objects.json
+          retention-days: 3
