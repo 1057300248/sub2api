@@ -14,9 +14,10 @@ func clineAccountUsageView(a *service.Account, extra map[string]any) (*service.C
 	}
 	view := service.ClineMetadataForAccount(a, time.Now().UTC())
 	view.Catalog = nil // Use the explicit metadata endpoint for model discovery.
+	view.Models = nil  // No per-row catalog duplication in account lists.
 	clean := make(map[string]any, len(extra))
 	for k, v := range extra {
-		if k != service.ClineStateExtraKey && k != "model_rate_limits" {
+		if k != service.ClineStateExtraKey && k != service.ClineRouteExtraKey && k != "model_rate_limits" {
 			clean[k] = v
 		}
 	}

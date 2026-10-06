@@ -42,7 +42,7 @@ REQUIRED = {
     'backend/internal/server/routes/gateway.go': ['service.PlatformCline'],
     'backend/internal/repository/cline_scheduler_credentials.go': ['filterSchedulerAccountCredentials(', 'cline_auth_type'],
     'backend/internal/repository/scheduler_cache.go': ['filterSchedulerAccountCredentials(&account)'],
-    'backend/internal/repository/cline_managed_extra.go': ['clineManagedExtraDeltaSQL(', "'cline_state' - 'model_rate_limits'"],
+    'backend/internal/repository/cline_managed_extra.go': ['clineManagedExtraDeltaSQL(', "'cline_state' - 'cline_route' - 'model_rate_limits'"],
     'backend/internal/repository/cline_postgres_integration_test.go': ['TestClinePostgresConcurrentScopedCAS', 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits', 'TestClinePostgresCreationCannotImportManagedState', 'TestClinePostgresMigrationAndQuotaSchema'],
     'backend/internal/handler/cline_dispatch_test.go': ['TestClineStandaloneAndCompositeDispatch'],
     'backend/internal/handler/admin/account_cline_registration_test.go': ['TestClineGroupAndCompositeRequestBindings'],
@@ -85,6 +85,18 @@ for name, anchors in {
     REQUIRED.setdefault(name, []).extend(anchors)
 
 errors=[]
+for name, anchors in {
+    'backend/internal/service/openai_gateway_cc_pipeline.go': ['normalizeClineFinalRequest(', 'configureClineReasoning(', 'observeClineProviderResponse('],
+    'backend/internal/service/cline_request_contract.go': ['validateClineLoweredToolChoice(', 'request["stream"] = json.RawMessage("false")'],
+    'backend/internal/service/cline_reasoning_replay.go': ['cline.NewReasoningCodec(', 'state.codec.Open(', 'key.UserID', 'attachClineResponsesReasoningEvents('],
+    'backend/internal/pkg/cline/auth.go': ['func WireCredential(', 'AuthAccountToken', 'return "workos:" + key'],
+    'backend/internal/service/cline_platform.go': ['GetClineWireCredential(', 'cline.WireCredential('],
+    'backend/internal/repository/cline_reauthentication.go': ['credentials=$2::jsonb', 'reauth_required', 'INSERT INTO scheduler_outbox'],
+    'backend/internal/repository/cline_provider_observation.go': ['credentials=$2::jsonb', 'observed_unix_ns'],
+    'backend/migrations/270_cline_official_application_headers.sql': ['http-referer', 'x-title', 'encoded_bytes>16384'],
+}.items():
+    REQUIRED.setdefault(name, []).extend(anchors)
+
 for name, anchors in REQUIRED.items():
     path=ROOT/name
     if not path.is_file():errors.append(f'missing: {name}');continue

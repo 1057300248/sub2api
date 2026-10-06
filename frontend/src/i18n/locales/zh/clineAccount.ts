@@ -67,7 +67,7 @@ export default {
   "status": "账户状态",
   "settingsHint": "只提交明确修改的选项；清空代理、负载权重或到期时间会显式移除对应设置。额度冷却不因重新启用调度而清除。",
   "headerDefaults": "账户默认请求头（可选）",
-  "headersHint": "仅允许 User-Agent、Accept-Language、X-Request-ID、X-Client-Name、X-Client-Version 和 X-Metadata-*。请求级 header_overrides 优先于账户默认值；认证、租户和传输头不可覆盖。不作用于额度查询。",
+  "headersHint": "仅允许 User-Agent、Accept-Language、X-Request-ID、X-Client-Name、X-Client-Version, HTTP-Referer, X-Title 和 X-Metadata-*。请求级 header_overrides 优先于账户默认值；认证、租户和传输头不可覆盖。不作用于额度查询。",
   "savedMetadata": "以下目录及额度来自已保存账户；未保存的密钥、地址或模式不会用于查询。",
 
   manualTokenNotice: "Account Token 为手工维护、可能过期的凭据。本账户类型不提供 OAuth 自动续期或 Refresh Token 管理。遇到 401 后请更换凭据，并明确刷新已保存账户的元数据后再重试；不会自动切换 PAYG 或新增模型权限。",

@@ -124,7 +124,13 @@ func TestClineThreeProtocolHTTPForwarding(t *testing.T) {
 						require.NotNil(t, result)
 						require.NotNil(t, upstream.lastReq)
 						require.Equal(t, cline.BaseURL+"/chat/completions", upstream.lastReq.URL.String())
-						require.Equal(t, "Bearer test-key-not-real", upstream.lastReq.Header.Get("Authorization"))
+						expectedKey := "test-key-not-real"
+						if auth == cline.AuthAccountToken {
+							expectedKey = "workos:" + expectedKey
+						}
+						require.Equal(t, "Bearer "+expectedKey, upstream.lastReq.Header.Get("Authorization"))
+						require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
+						require.Equal(t, stream, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 						require.Equal(t, model, gjson.GetBytes(upstream.lastBody, "model").String())
 						require.True(t, gjson.GetBytes(upstream.lastBody, "messages").IsArray())
 						require.False(t, gjson.GetBytes(upstream.lastBody, "input").Exists())

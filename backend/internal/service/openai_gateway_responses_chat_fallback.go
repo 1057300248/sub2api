@@ -118,6 +118,11 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
+	chatBody, err = s.restoreClineReasoning(c, account, customParameterSource, chatBody, "responses")
+	if err != nil {
+		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
+	}
 	chatBody, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, chatBody)
 	if err != nil {
 		var blocked *OpenAIFastBlockedError
@@ -204,6 +209,13 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		return nil, err
 	}
 	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
+	if !compact {
+		token, replayErr := sealClineBufferedReasoning(c, ccResp)
+		if replayErr != nil {
+			return &OpenAIForwardResult{RequestID: requestID, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, Stream: false, Duration: time.Since(startTime)}, replayErr
+		}
+		attachClineResponsesReasoning(responsesResp, token)
+	}
 	recordChatReasoningOnlyFailure(c, requestID, upstreamModel, responsesResp)
 	s.cacheReasoningItemsFromOutput(responsesResp.Output)
 	if suppressSummary {
@@ -281,6 +293,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
+	reasoningReplay := newClineReasoningAccumulator(c)
 	state := apicompat.NewChatCompletionsToResponsesStreamState(originalModel)
 	state.CustomTools = customTools
 	state.FunctionTools = functionTools
@@ -322,12 +335,17 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	scan := s.scanCCStream(c, resp, "openai responses chat fallback", requestID, startTime, func(chunk *apicompat.ChatCompletionsChunk) {
+		reasoningReplay.observe(chunk)
 		events := apicompat.ChatCompletionsChunkToResponsesEvents(chunk, state)
 		s.cacheReasoningItemsFromEvents(events)
 		writeEvents(events)
 	})
 
 	clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
+	replayToken := ""
+	if scan.Err == nil && !clientDisconnected {
+		replayToken, scan.Err = reasoningReplay.seal()
+	}
 	if scan.Err != nil {
 		return &OpenAIForwardResult{
 			RequestID:                   requestID,
@@ -364,6 +382,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	finalEvents := apicompat.FinalizeChatCompletionsResponsesStream(state)
+	finalEvents = attachClineResponsesReasoningEvents(finalEvents, replayToken)
 	for _, event := range finalEvents {
 		if event.Type == "response.failed" {
 			recordChatReasoningOnlyFailure(c, requestID, upstreamModel, event.Response)

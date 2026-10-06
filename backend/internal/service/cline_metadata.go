@@ -37,24 +37,26 @@ type ClineMetadataWindow struct {
 // Do not marshal ClineState or an Account into this response: they carry identity
 // fingerprints and credentials that the panel does not need.
 type ClineMetadataView struct {
-	AutoRefresh        bool                  `json:"auto_refresh"`
-	NextRefreshAt      *time.Time            `json:"next_refresh_at,omitempty"`
-	Cooldowns          []ClineCooldownView   `json:"cooldowns"`
-	RecoveryStatus     string                `json:"recovery_status"`
-	Mode               string                `json:"mode"`
-	AuthType           string                `json:"auth_type"`
-	QuotaStatus        string                `json:"quota_status"`
-	CredentialStatus   string                `json:"credential_status"`
-	IdentityVerified   bool                  `json:"identity_verified"`
-	Windows            []ClineMetadataWindow `json:"windows"`
-	Catalog            *cline.Catalog        `json:"catalog,omitempty"`
-	CatalogStatus      string                `json:"catalog_status"`
-	CatalogFetchedAt   *time.Time            `json:"catalog_fetched_at,omitempty"`
-	FetchedAt          *time.Time            `json:"fetched_at,omitempty"`
-	LastSuccessAt      *time.Time            `json:"last_success_at,omitempty"`
-	Persisted          bool                  `json:"persisted"`
-	Error              string                `json:"error,omitempty"`
-	IncrementalCostUSD *float64              `json:"incremental_cost_usd"`
+	Routing            *cline.ProviderObservation `json:"routing,omitempty"`
+	Models             []ClineModelView           `json:"models,omitempty"`
+	AutoRefresh        bool                       `json:"auto_refresh"`
+	NextRefreshAt      *time.Time                 `json:"next_refresh_at,omitempty"`
+	Cooldowns          []ClineCooldownView        `json:"cooldowns"`
+	RecoveryStatus     string                     `json:"recovery_status"`
+	Mode               string                     `json:"mode"`
+	AuthType           string                     `json:"auth_type"`
+	QuotaStatus        string                     `json:"quota_status"`
+	CredentialStatus   string                     `json:"credential_status"`
+	IdentityVerified   bool                       `json:"identity_verified"`
+	Windows            []ClineMetadataWindow      `json:"windows"`
+	Catalog            *cline.Catalog             `json:"catalog,omitempty"`
+	CatalogStatus      string                     `json:"catalog_status"`
+	CatalogFetchedAt   *time.Time                 `json:"catalog_fetched_at,omitempty"`
+	FetchedAt          *time.Time                 `json:"fetched_at,omitempty"`
+	LastSuccessAt      *time.Time                 `json:"last_success_at,omitempty"`
+	Persisted          bool                       `json:"persisted"`
+	Error              string                     `json:"error,omitempty"`
+	IncrementalCostUSD *float64                   `json:"incremental_cost_usd"`
 }
 
 func ClineMetadataForAccount(account *Account, now time.Time) *ClineMetadataView {
@@ -66,6 +68,7 @@ func ClineMetadataForAccount(account *Account, now time.Time) *ClineMetadataView
 		return view
 	}
 	view.Mode, view.AuthType = account.GetClineMode(), account.GetCredential("cline_auth_type")
+	view.Routing = ClineRouteForAccount(account, now)
 	view.AutoRefresh = ClineMetadataAutoEligible(account, now)
 	view.RecoveryStatus = "unknown"
 	state := account.GetClineState()
@@ -76,6 +79,7 @@ func ClineMetadataForAccount(account *Account, now time.Time) *ClineMetadataView
 		}
 		return view
 	}
+	view.Models = clineModelViews(account, state, now)
 	view.FetchedAt, view.LastSuccessAt, view.Persisted = state.FetchedAt, state.LastSuccessAt, state.Persisted
 	view.NextRefreshAt = state.NextRefreshAt
 	if view.Mode == cline.ModePass {
@@ -98,6 +102,10 @@ func ClineMetadataForAccount(account *Account, now time.Time) *ClineMetadataView
 		}
 	}
 	view.IdentityVerified = cline.ValidSubjectHash(state.Identity) && clineDateFresh(state.IdentityVerifiedAt, now, ClineCatalogFreshness)
+	// Reauthentication is a durable admission state, not an expiring UI sample.
+	if state.CredentialStatus == "reauth_required" {
+		view.CredentialStatus = state.CredentialStatus
+	}
 	if clineDateFresh(state.FetchedAt, now, ClineQuotaFreshness) {
 		switch state.CredentialStatus {
 		case "valid", "invalid":
@@ -143,7 +151,7 @@ func clineDateFresh(at *time.Time, now time.Time, ttl time.Duration) bool {
 
 func safeClineMetadataCode(code string) string {
 	switch code {
-	case "catalog_unavailable", "profile_unavailable", "profile_schema", "usage_unavailable", "usage_schema", "unsupported_origin", "state_not_persisted":
+	case "reauth_required", "catalog_unavailable", "profile_unavailable", "profile_schema", "usage_unavailable", "usage_schema", "unsupported_origin", "state_not_persisted":
 		return code
 	default:
 		return ""
@@ -202,13 +210,13 @@ func (s *OpenAIGatewayService) refreshClineMetadata(ctx context.Context, account
 		state = &ClineState{}
 	}
 	state.QuotaBlocks = ClineQuotaBlocksForState(state)
-	wasInvalid := state.CredentialStatus == "invalid"
+	previousCredentialStatus := state.CredentialStatus
 	state.Mode, state.AuthType, state.Transport = snapshot.GetClineMode(), snapshot.GetCredential("cline_auth_type"), "chat_completions"
 	state.FetchedAt, state.ObservationUnixMS = &now, now.UnixMilli()
 	state.CredentialFingerprint = ClineCredentialFingerprint(snapshot)
 	state.QuotaStatus, state.CredentialStatus, state.CatalogStatus, state.Error = "unknown", "unknown", "unknown", ""
-	if wasInvalid {
-		state.CredentialStatus = "invalid"
+	if previousCredentialStatus == "invalid" || previousCredentialStatus == "reauth_required" {
+		state.CredentialStatus = previousCredentialStatus
 	}
 	state.Persisted = true
 	var body []byte
@@ -237,6 +245,14 @@ func (s *OpenAIGatewayService) refreshClineMetadata(ctx context.Context, account
 			state.Error = "catalog_unavailable"
 		}
 	}
+	if metadataRetryAt == nil && state.Catalog != nil && state.CatalogFetchedAt != nil && state.CatalogFetchedAt.Equal(now) {
+		// Public, bounded, hourly capability enrichment. Failure leaves metadata
+		// unknown and never invents model permissions or changes model mappings.
+		details, code, detailErr := fetch(cline.ModelsURL, false)
+		if detailErr == nil && code == http.StatusOK {
+			_ = cline.EnrichCatalogCapabilities(state.Catalog, details)
+		}
+	}
 	if metadataRetryAt == nil && (state.Mode == cline.ModePass || state.Mode == cline.ModePayG) {
 		body, status, fetchErr = fetch(cline.ProfileURL, true)
 		if fetchErr == nil && status == http.StatusOK {
@@ -252,6 +268,9 @@ func (s *OpenAIGatewayService) refreshClineMetadata(ctx context.Context, account
 			state.Error = "profile_unavailable"
 			if fetchErr == nil && status == http.StatusUnauthorized {
 				state.CredentialStatus = "invalid"
+				if snapshot.IsClineAccountToken() {
+					state.CredentialStatus, state.Error = "reauth_required", "reauth_required"
+				}
 			}
 		}
 		if metadataRetryAt == nil && state.Mode == cline.ModePass && state.CredentialStatus == "valid" && state.IdentityVerifiedAt != nil && state.IdentityVerifiedAt.Equal(now) {
@@ -265,6 +284,9 @@ func (s *OpenAIGatewayService) refreshClineMetadata(ctx context.Context, account
 				}
 			} else {
 				state.Error = "usage_unavailable"
+				if fetchErr == nil && status == http.StatusUnauthorized && snapshot.IsClineAccountToken() {
+					state.CredentialStatus, state.Error = "reauth_required", "reauth_required"
+				}
 			}
 		}
 	}
@@ -292,15 +314,15 @@ func (s *OpenAIGatewayService) refreshClineMetadata(ctx context.Context, account
 	if !saved {
 		return nil, ErrClineMetadataChanged
 	}
-	snapshot.Extra = map[string]any{ClineStateExtraKey: state, "model_rate_limits": snapshot.Extra["model_rate_limits"]}
+	snapshot.Extra = map[string]any{ClineStateExtraKey: state, "model_rate_limits": snapshot.Extra["model_rate_limits"], ClineRouteExtraKey: snapshot.Extra[ClineRouteExtraKey]}
 	return ClineMetadataForAccount(snapshot, time.Now().UTC()), nil
 }
 
 func (s *OpenAIGatewayService) fetchClineMetadata(ctx context.Context, account *Account, endpoint string, authenticated bool) ([]byte, int, error) {
-	if endpoint != cline.CatalogURL && endpoint != cline.ProfileURL && endpoint != cline.UsageURL {
+	if endpoint != cline.CatalogURL && endpoint != cline.ModelsURL && endpoint != cline.ProfileURL && endpoint != cline.UsageURL {
 		return nil, 0, ErrClineMetadataUnavailable
 	}
-	if authenticated != (endpoint != cline.CatalogURL) {
+	if authenticated != (endpoint != cline.CatalogURL && endpoint != cline.ModelsURL) {
 		return nil, 0, ErrClineMetadataUnavailable
 	}
 	ctx = WithHTTPUpstreamPublicHostsOnly(WithHTTPUpstreamRedirectsDisabled(ctx))
@@ -310,7 +332,7 @@ func (s *OpenAIGatewayService) fetchClineMetadata(ctx context.Context, account *
 	}
 	req.Header.Set("Accept", "application/json")
 	if authenticated {
-		key := strings.TrimSpace(account.GetCredential("api_key"))
+		key := account.GetClineWireCredential()
 		if key == "" || len(key) > 8192 || strings.ContainsAny(key, "\r\n\x00") {
 			return nil, 0, ErrClineMetadataUnavailable
 		}
@@ -337,8 +359,12 @@ func (s *OpenAIGatewayService) fetchClineMetadata(ctx context.Context, account *
 		}
 		return nil, resp.StatusCode, nil
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, cline.MaxBodyBytes+1))
-	if err != nil || len(body) > cline.MaxBodyBytes {
+	limit := int64(cline.MaxBodyBytes)
+	if endpoint == cline.ModelsURL {
+		limit = cline.MaxModelCatalogBytes
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil || int64(len(body)) > limit {
 		return nil, resp.StatusCode, ErrClineMetadataUnavailable
 	}
 	return body, resp.StatusCode, nil

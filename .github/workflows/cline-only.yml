@@ -1,9 +1,9 @@
 name: Cline-only validation
 on:
   push:
-    branches: [codex/sub2-v2910-cline-only-20261006]
+    branches: [codex/sub2-v2911-cline-next-20261007]
   pull_request:
-    branches: [codex/sub2-v2910-cline-only-20261006]
+    branches: [codex/sub2-v2911-cline-next-20261007]
   workflow_dispatch:
 permissions:
   contents: read
@@ -47,10 +47,13 @@ env:
     required = set()
     if suite == 'policy':
         required = {'TestClineWrappedRateLimitClassification', 'TestClineJSONEnvelopePreservesCompletionAndUsage', 'TestClineSSEFailurePreventsSuccessfulTerminal', 'TestClineTerminalFailurePreservesOnlyValidatedUsage'}
+        required |= {'TestClineWireCredentials', 'TestClineReasoningEnvelopeBindingAndExpiry', 'TestClineReasoningFragmentsAndBounds', 'TestClineCatalogCapabilitiesAreExplicitAndCloudIsNotEnabled', 'TestClineProviderObservationNeverInventsActual', 'TestClineProviderObservationBodyPreservesWireAndCompletion'}
     if suite == 'service':
         required = {'TestClineCustomParametersProtectAllProtocolFieldsAndCaseAliases', 'TestClineLegacyThreeProtocolParametersSurviveLowering', 'TestClineWrappedLimitPreservesAuditAndStopsSameAccountRetry', 'TestClineThreeProtocolHTTPForwarding', 'TestClineSuccessfulResponseSurvivesLateDeadline', 'TestClineGroupAndCompositeRequestBindings', 'TestClineThreeProtocolRequestHeaderOverrides', 'TestClineQuotaExhaustionSurvivesStalenessErrorsAndExpiry', 'TestClineMetadataWorkerBoundedConcurrencyAndModeIsolation', 'TestClineMetadataRetryAfterDoesNotBecomeInferenceCooldown', 'TestClineAccountSettingsCreateScheduling', 'TestClineAccountSettingsUpdatePreservesUneditedConfiguration', 'TestClineAccountHeaderSettingsValidationAndIsolation', 'TestClineBulkHeaderSettingsRejectBeforeAnyWrite', 'TestClineAccountSettingsHTTPBinding', 'TestClineAccountListUsesSafeCredentialBoundQuotaProjection', 'TestClineAdvancedQuotaValidationAndDelta', 'TestClineAdvancedProtectedErrorsAndTemporaryRules', 'TestClineAdvancedInvalidRulesAndFalsePreservation', 'TestClineAdvancedRuntimeOwnershipAndNotificationThreshold', 'TestClineAdvancedResetsUseIsolatedOperations'}
+        required |= {'TestClineThreeProtocolOmittedStreamAndOfficialHeaders', 'TestClineAccountTokenMetadataReauthenticationAndRecovery', 'TestClineFinalStreamModeAndForcedTools', 'TestClineReasoningThreeProtocolRoundTripAndCallerIsolation', 'TestClineAccountToken401UsesCredentialBoundReauth', 'TestClineReasoningToolBindingAndTerminalEvents'}
     if suite == 'postgres':
         required = {'TestClinePostgresPlatformUnionUpgrade', 'TestClinePostgresCreateOutboxFailureIsAtomic', 'TestClinePostgresCreateReusesOuterTransaction', 'TestClinePostgresMaximumFreeScopeUsesUnfingerprintedColumn', 'TestClinePostgresIdentitySwitchDoesNotReattributeOldLimits', 'TestClinePostgresSharedSubjectLimitsAndRestart', 'TestClinePostgresRefreshLeaseAndObservationOrdering', 'TestClinePostgresOutboxFailureRollsBackState', 'TestClinePostgresDirectAndBulkCredentialGuards', 'TestClinePostgresAdmissionRejectsStaleCredentials', 'TestClinePostgresConcurrentScopedCAS', 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits', 'TestClinePostgresCreationCannotImportManagedState', 'TestClinePostgresMigrationAndQuotaSchema', 'TestClinePostgresMetadataQuotaSharedRecoveryAndStaleObservations', 'TestClinePostgresExpiredQuotaRequiresConfirmedWindow', 'TestClinePostgresHealthyMetadataCannotShortenInferenceCooldown', 'TestClinePostgresAutomaticMetadataCandidatesIncludeCoolingNotDisabled', 'TestClinePostgresAccountSettingsRoundTripAndHeaderGuards', 'TestClinePostgresHeaderGuardDatabaseContract', 'TestClinePostgresAdvancedSettingsGuardsAndBulkAtomicity', 'TestClinePostgresLocalQuotaCountersCannotBeReplayed', 'TestClinePostgresAdvancedOperationsPreservePassAndOtherBlocks', 'TestClinePostgresLocalQuotaFinalAdmissionAndResetRollback'}
+        required |= {'TestClinePostgresQuotaCrossingConcurrencyAndOutboxRollback', 'TestClinePostgresQuotaCrossingAfterRollover', 'TestClinePostgresProviderObservationOwnershipAndOfficialHeaders', 'TestClinePostgresToken401RotationAndObservationCAS', 'TestClinePostgresAllQuotaDimensionsEmitFirstCrossing'}
     if suite == 'handler':
         prefix = 'TestClineHTTPHandlersDurableBillingAndTermination'
         scenarios = ('complete', 'cancel_then_usage', 'writer_stall', 'deadline', 'deadline_headers', 'success_late_deadline', 'success_late_deadline_json', 'parameters_stream', 'parameters_json', 'parameters_legacy_openai_stream', 'parameters_legacy_openai_json', 'parameters_legacy_deepseek_stream', 'parameters_legacy_deepseek_json')
@@ -104,8 +107,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 tools/verify_cline_only.py
           python3 tools/verify_cline_platform.py
-          git diff --check ab7cb27ceed6390441277784cc5560694d95fd73 HEAD
-          mapfile -t files < <(git diff --name-only ab7cb27ceed6390441277784cc5560694d95fd73 HEAD -- '*.go')
+          git diff --check e6addfe4aff745c859f9bb50817bc468e0e1f4f7 HEAD
+          mapfile -t files < <(git diff --name-only e6addfe4aff745c859f9bb50817bc468e0e1f4f7 HEAD -- '*.go')
           unformatted="$(gofmt -l "${files[@]}")"
           test -z "$unformatted" || { printf '%s\n' "$unformatted"; exit 1; }
       - name: Cline SSE, JSON and policy race tests
@@ -196,7 +199,7 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-      - name: Install unchanged upstream dependency lock
+      - name: Install pinned v2.9.11 dependency lock
         working-directory: frontend
         run: pnpm install --frozen-lockfile
       - name: Cline frontend regression tests

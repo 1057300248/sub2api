@@ -55,7 +55,7 @@ export function validateClineHeaderRows(rows: HeaderOverrideRow[]): boolean {
     if (!name && !value) continue
     const lower = name.toLowerCase()
     if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || bytes(name) > 128 ||
-        !(['user-agent', 'accept-language', 'x-request-id', 'x-client-name', 'x-client-version'].includes(lower) || lower.startsWith('x-metadata-')) ||
+        !(['user-agent', 'accept-language', 'x-request-id', 'x-client-name', 'x-client-version', 'http-referer', 'x-title'].includes(lower) || lower.startsWith('x-metadata-')) ||
         seen.has(lower) || bytes(value) > 2048 || [...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return false
     seen.add(lower)
     total += bytes(name) + bytes(value)

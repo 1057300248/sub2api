@@ -4204,8 +4204,11 @@ const nextWeeklyResetAtExpr = `(
 // 日/周额度在周期过期时自动重置为 0 再递增。
 // 支持滚动窗口（rolling）和固定时间（fixed）两种重置模式。
 func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, amount float64) error {
-	rows, err := r.sql.QueryContext(ctx,
-		`UPDATE accounts SET extra = (
+	// Crossing any enabled dimension emits one event in the same transaction as
+	// usage. Period rollover starts at zero before this increment; repeated usage
+	// already above a limit does not generate a new crossing event.
+	_, err := clientFromContext(ctx, r.client).ExecContext(ctx,
+		`WITH changed AS (UPDATE accounts SET extra = (
 			COALESCE(extra, '{}'::jsonb)
 			-- 总额度：始终递增
 			|| jsonb_build_object('quota_used', COALESCE((extra->>'quota_used')::numeric, 0) + $1)
@@ -4245,32 +4248,19 @@ func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, am
 			ELSE '{}'::jsonb END
 		), updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
-		RETURNING
-			COALESCE((extra->>'quota_used')::numeric, 0),
-			COALESCE((extra->>'quota_limit')::numeric, 0)`,
-		amount, id)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var newUsed, limit float64
-	if rows.Next() {
-		if err := rows.Scan(&newUsed, &limit); err != nil {
-			return err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	// 任一维度配额刚超限时触发调度快照刷新
-	if limit > 0 && newUsed >= limit && (newUsed-amount) < limit {
-		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue quota exceeded failed: account=%d err=%v", id, err)
-		}
-	}
-	return nil
+        RETURNING id, extra
+    ) INSERT INTO scheduler_outbox(event_type,account_id)
+    SELECT $3,id FROM changed WHERE
+      (COALESCE((extra->>'quota_limit')::numeric,0)>0
+        AND COALESCE((extra->>'quota_used')::numeric,0)>= (extra->>'quota_limit')::numeric
+        AND COALESCE((extra->>'quota_used')::numeric,0)-$1 < (extra->>'quota_limit')::numeric)
+      OR (COALESCE((extra->>'quota_daily_limit')::numeric,0)>0
+        AND COALESCE((extra->>'quota_daily_used')::numeric,0)>= (extra->>'quota_daily_limit')::numeric
+        AND COALESCE((extra->>'quota_daily_used')::numeric,0)-$1 < (extra->>'quota_daily_limit')::numeric)
+      OR (COALESCE((extra->>'quota_weekly_limit')::numeric,0)>0
+        AND COALESCE((extra->>'quota_weekly_used')::numeric,0)>= (extra->>'quota_weekly_limit')::numeric
+        AND COALESCE((extra->>'quota_weekly_used')::numeric,0)-$1 < (extra->>'quota_weekly_limit')::numeric)`, amount, id, service.SchedulerOutboxEventAccountChanged)
+	return err
 }
 
 // ResetQuotaUsedAndClearRateLimitCooldown resets all quota dimensions and the

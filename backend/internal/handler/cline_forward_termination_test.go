@@ -94,3 +94,14 @@ func TestClineLocalPolicyErrorsAreNeutralAndProtocolCorrect(t *testing.T) {
 		}
 	}
 }
+
+func TestClineContractRejectionDoesNotAppendSSEToJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+	c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "unsupported tool"}})
+	original := rec.Body.String()
+	handled := finishClineForward(c, &service.Account{Platform: service.PlatformCline}, nil, service.ErrClineRequestContract, func(*service.OpenAIForwardResult) { t.Fatal("no usage was observed") }, func() { t.Fatal("not a deadline") })
+	require.True(t, handled)
+	require.Equal(t, original, rec.Body.String())
+}

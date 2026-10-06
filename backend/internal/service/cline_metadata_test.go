@@ -58,6 +58,7 @@ func clineMetadataFixture(t *testing.T) (*Account, *clineMetadataRepoStub, *clin
 	a := clineRoutingAccount(t, cline.ModePass, cline.AuthAPIKey)
 	repo := &clineMetadataRepoStub{claim: true, save: true}
 	transport := &clineMetadataHTTPStub{responses: map[string]string{
+		cline.ModelsURL:  `{"data":[]}`,
 		cline.CatalogURL: `{"clinePass":[{"id":"cline-pass/model"}],"free":[{"id":"vendor/free"}],"recommended":[]}`,
 		cline.ProfileURL: `{"id":"user-fixture","active_account_id":"account-fixture","email":"private@example.invalid"}`,
 		cline.UsageURL:   `{"success":true,"data":{"limits":[{"type":"weekly","percentUsed":12.5}]}}`,
@@ -76,7 +77,7 @@ func TestClineMetadataRefreshUsesBoundedCredentialSafeGETs(t *testing.T) {
 	require.Nil(t, view.Windows[2].PercentUsed)
 	require.Nil(t, view.IncrementalCostUSD)
 	require.True(t, view.IdentityVerified)
-	require.Len(t, transport.requests, 3)
+	require.Len(t, transport.requests, 4)
 	for _, req := range transport.requests {
 		require.Equal(t, "GET", req.Method)
 		require.Equal(t, "api.cline.bot", req.URL.Host)
@@ -84,7 +85,7 @@ func TestClineMetadataRefreshUsesBoundedCredentialSafeGETs(t *testing.T) {
 		require.True(t, HTTPUpstreamPublicHostsOnly(req.Context()))
 		_, hasDeadline := req.Context().Deadline()
 		require.True(t, hasDeadline)
-		if req.URL.String() == cline.CatalogURL {
+		if req.URL.String() == cline.CatalogURL || req.URL.String() == cline.ModelsURL {
 			require.Empty(t, req.Header.Get("Authorization"))
 		} else {
 			require.Equal(t, "Bearer test-key-not-real", req.Header.Get("Authorization"))
@@ -156,7 +157,7 @@ func TestClineMetadataBoundariesAndPersistenceFailure(t *testing.T) {
 			if scenario == "free" || scenario == "unknown" {
 				require.NoError(t, err)
 				require.Equal(t, "not_applicable", view.QuotaStatus)
-				require.Len(t, transport.requests, 1)
+				require.Len(t, transport.requests, 2)
 				require.Empty(t, transport.requests[0].Header.Get("Authorization"))
 				return
 			}

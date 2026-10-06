@@ -17,6 +17,8 @@ import (
 func finishClineForward(c *gin.Context, account *service.Account, result *service.OpenAIForwardResult, err error, submit func(*service.OpenAIForwardResult), writeDeadline func()) bool {
 	status, message := 0, ""
 	switch {
+	case errors.Is(err, service.ErrClineRequestContract):
+		status, message = http.StatusBadRequest, service.ErrClineRequestContract.Error()
 	case errors.Is(err, service.ErrClineHeaderOverrides):
 		status, message = http.StatusBadRequest, service.ErrClineHeaderOverrides.Error()
 	case account.IsCline() && errors.Is(err, service.ErrClineLocalQuotaExceeded):
@@ -40,7 +42,7 @@ func finishClineForward(c *gin.Context, account *service.Account, result *servic
 		}
 		if !c.Writer.Written() {
 			c.JSON(status, payload)
-		} else {
+		} else if strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
 			service.StopOpenAICompactSSEKeepaliveCommitted(c)
 			service.MarkOpsStreamError(c, kind, message, status)
 			c.SSEvent("error", payload)

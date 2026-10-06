@@ -87,6 +87,11 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
+	chatBody, err = s.restoreClineReasoning(c, account, body, chatBody, "messages")
+	if err != nil {
+		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
+	}
 	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(chatBody, upstreamModel); normalized {
 		chatBody = normalizedBody
 	}
@@ -165,6 +170,13 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 		return nil, err
 	}
 	anthropicResp := apicompat.ChatCompletionsResponseToAnthropic(ccResp, originalModel)
+	token, replayErr := sealClineBufferedReasoning(c, ccResp)
+	if replayErr != nil {
+		return &OpenAIForwardResult{RequestID: requestID, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, Stream: false, Duration: time.Since(startTime)}, replayErr
+	}
+	if token != "" {
+		anthropicResp.Content = append(anthropicResp.Content, apicompat.AnthropicContentBlock{Type: "redacted_thinking", Data: token})
+	}
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -199,6 +211,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
+	reasoningReplay := newClineReasoningAccumulator(c)
 	anthropicState := apicompat.NewChatCompletionsToAnthropicStreamState(originalModel)
 	clientDisconnected := false
 
@@ -207,6 +220,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	emitChunk := func(chunk *apicompat.ChatCompletionsChunk) {
 		clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
 		// CC chunk → Anthropic events (direct, single state machine)
+		reasoningReplay.observe(chunk)
 		anthropicEvents := apicompat.ChatCompletionsChunkToAnthropicEvents(chunk, anthropicState)
 		if clientDisconnected {
 			return
@@ -232,6 +246,10 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	usage := scan.Usage
 	clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
 
+	replayToken := ""
+	if scan.Err == nil && !clientDisconnected {
+		replayToken, scan.Err = reasoningReplay.seal()
+	}
 	if scan.Err != nil {
 		// Broken upstream read: skip finalization so no synthetic message_stop
 		// masks the truncation, and surface the error to flag usage incomplete
@@ -255,6 +273,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 
 	// Finalize: close open blocks + emit message_delta/message_stop.
 	finalEvents := apicompat.FinalizeChatCompletionsAnthropicStream(anthropicState)
+	finalEvents = attachClineAnthropicReasoningEvents(finalEvents, anthropicState.ContentBlockIndex, replayToken)
 	if !clientDisconnected {
 		for _, aEvt := range finalEvents {
 			sse, err := apicompat.ResponsesAnthropicEventToSSE(aEvt)

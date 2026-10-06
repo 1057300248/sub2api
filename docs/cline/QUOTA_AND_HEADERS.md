@@ -74,7 +74,7 @@ persisted in the account configuration. Existing `providerOptions` remain intact
 ```
 
 Allowed names are `User-Agent`, `Accept-Language`, `X-Request-ID`, `X-Client-Name`,
-`X-Client-Version`, and valid `X-Metadata-*` names, matched case-insensitively.
+`X-Client-Version`, `HTTP-Referer`, `X-Title`, and valid `X-Metadata-*` names, matched case-insensitively.
 This is intentionally a safe positive list, not unrestricted header injection.
 Authorization, API keys, cookies, Host, forwarding/tenant/organization selectors,
 Content-Type/Accept and transport/framing/hop-by-hop headers cannot be overridden.
@@ -118,3 +118,7 @@ settings before persistence; non-Cline header behavior remains unchanged.
 
 See `ACCOUNT_SETTINGS_AUDIT.md` for the visible create entry, shared account
 settings, credential-preserving edits, saved quota list projection and tests.
+
+## v2.9.11 update
+
+Account tokens use one WorkOS prefix at every authenticated wire boundary; a401 requests reauthentication without permanent account disablement. Daily/weekly quota crossings now publish the same atomic scheduler invalidation as total crossings. See UPGRADE_2.9.11.md and NEXT_PROTOCOL_CONTRACT.md.

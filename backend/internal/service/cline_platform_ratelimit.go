@@ -34,6 +34,9 @@ func (s *RateLimitService) handleClineScopedUpstreamError(ctx context.Context, a
 	if !account.IsCline() {
 		return false
 	}
+	if status == http.StatusUnauthorized && account.IsClineAccountToken() && !isOpenAICompatibleModelNotFoundBody(body) {
+		return s.handleClineReauthentication(ctx, account)
+	}
 	limit, handled := cline.Classify(status, headers, body, upstreamModel, time.Now())
 	if !handled {
 		return false

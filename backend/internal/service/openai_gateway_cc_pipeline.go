@@ -189,6 +189,10 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	userAgent string,
 	grokCacheIdentity string,
 ) (*http.Response, error) {
+	body, contractErr := normalizeClineFinalRequest(account, body, stream)
+	if contractErr != nil {
+		return nil, contractErr
+	}
 	body, headerOverrides, headerErr := extractClineHeaderOverrides(account, body)
 	if headerErr != nil {
 		return nil, headerErr
@@ -199,6 +203,13 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if err := s.checkClineAdmission(ctx, account, body); err != nil {
 		return nil, err
 	}
+	var clineModel struct {
+		Model string `json:"model"`
+	}
+	if isClineProtocolAccount(account) {
+		_ = json.Unmarshal(body, &clineModel)
+	}
+	s.configureClineReasoning(c, account, clineModel.Model)
 	// DeepSeek thinking mode 要求历史 assistant 回传 reasoning_content。
 	// Responses→CC 回退在加密-only / 缺 reasoning item 且缓存未命中时会漏掉该
 	// 字段，上游 400 "The `reasoning_content` in the thinking mode must be
@@ -290,6 +301,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if guardResponse != nil {
 		guardResponse(resp)
 	}
+	s.observeClineProviderResponse(ctx, account, body, stream, resp)
 	if lifetime != nil {
 		if resp == nil || resp.Body == nil {
 			return nil, fmt.Errorf("cline upstream returned no response body")

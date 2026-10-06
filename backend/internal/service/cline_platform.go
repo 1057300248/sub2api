@@ -16,6 +16,19 @@ const PlatformCline = domain.PlatformCline
 const ClineStateExtraKey = "cline_state"
 
 func (a *Account) IsCline() bool { return a != nil && a.Platform == PlatformCline }
+func (a *Account) IsClineAccountToken() bool {
+	return a.IsCline() && a.GetCredential("cline_auth_type") == cline.AuthAccountToken
+}
+func (a *Account) GetClineWireCredential() string {
+	if !a.IsCline() {
+		return ""
+	}
+	key, err := cline.WireCredential(a.GetCredential("api_key"), a.GetCredential("cline_auth_type"))
+	if err != nil {
+		return ""
+	}
+	return key
+}
 func (a *Account) GetClineMode() string {
 	if !a.IsCline() {
 		return cline.ModeUnknown
@@ -83,6 +96,9 @@ func NormalizeClineCredentials(platform, accountType string, credentials map[str
 	}
 	if auth != cline.AuthAPIKey && auth != cline.AuthAccountToken {
 		return bad("Invalid Cline credential type")
+	}
+	if _, err := cline.WireCredential(key, auth); err != nil {
+		return bad(err.Error())
 	}
 	rawBase, ok := stringField("base_url")
 	if !ok {
@@ -192,11 +208,11 @@ func PreserveClineStateExtra(platform string, existing, incoming map[string]any)
 	}
 	out := make(map[string]any, len(incoming)+1)
 	for k, v := range incoming {
-		if k != ClineStateExtraKey && k != "model_rate_limits" {
+		if k != ClineStateExtraKey && k != ClineRouteExtraKey && k != "model_rate_limits" {
 			out[k] = v
 		}
 	}
-	for _, key := range []string{ClineStateExtraKey, "model_rate_limits"} {
+	for _, key := range []string{ClineStateExtraKey, ClineRouteExtraKey, "model_rate_limits"} {
 		if state, ok := existing[key]; ok {
 			out[key] = state
 		}

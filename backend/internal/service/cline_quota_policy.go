@@ -79,7 +79,7 @@ func mergeClineQuotaBlocks(state *ClineState, windows []cline.Window, observed t
 // window after the retry boundary. An empty/partial response is not recovery.
 // Once observed, recovery does not disappear just because the UI becomes stale.
 func ClinePassWindowRecovered(state *ClineState, scope string, after, now time.Time) bool {
-	if state == nil || state.LastSuccessAt == nil || state.LastSuccessAt.Before(after) || state.LastSuccessAt.After(now) || state.CredentialStatus == "invalid" {
+	if state == nil || state.LastSuccessAt == nil || state.LastSuccessAt.Before(after) || state.LastSuccessAt.After(now) || (state.CredentialStatus == "invalid" || state.CredentialStatus == "reauth_required") {
 		return false
 	}
 	name := strings.TrimPrefix(scope, cline.ScopePass)
@@ -103,7 +103,7 @@ func ClineQuotaAdmission(account *Account, now time.Time) error {
 		return nil
 	}
 	state := account.GetClineState()
-	if state != nil && state.CredentialStatus == "invalid" {
+	if state != nil && (state.CredentialStatus == "invalid" || state.CredentialStatus == "reauth_required") {
 		return ErrClineMetadataRequired
 	}
 	if account.GetClineMode() != cline.ModePass {

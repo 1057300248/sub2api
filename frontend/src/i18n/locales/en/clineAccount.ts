@@ -67,7 +67,7 @@ export default {
   "status": "Account status",
   "settingsHint": "Only explicit changes are submitted. Clearing a proxy, load factor or expiry removes it explicitly. Re-enabling scheduling does not clear observed quota cooldowns.",
   "headerDefaults": "Account default request headers (optional)",
-  "headersHint": "Only User-Agent, Accept-Language, X-Request-ID, X-Client-Name, X-Client-Version and X-Metadata-* are allowed. Request-level header_overrides take precedence over account defaults. Authentication, tenant and transport headers cannot be overridden. Quota queries never inherit these defaults.",
+  "headersHint": "Only User-Agent, Accept-Language, X-Request-ID, X-Client-Name, X-Client-Version, HTTP-Referer, X-Title and X-Metadata-* are allowed. Request-level header_overrides take precedence over account defaults. Authentication, tenant and transport headers cannot be overridden. Quota queries never inherit these defaults.",
   "savedMetadata": "The catalog and quota below belong to the saved account. Unsaved credentials, base URL and mode are not used for queries.",
 
   manualTokenNotice: "Account Token is manually maintained and may expire. Sub2API does not provide OAuth automatic renewal or refresh-token rotation for this account type. After a 401, replace the credential and explicitly refresh saved-account metadata before retrying. This does not switch to PAYG or grant additional models.",

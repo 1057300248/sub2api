@@ -76,7 +76,7 @@ func TestClineManagedExtraDeltaIsPlatformScoped(t *testing.T) {
 	require.Equal(t, "$1::jsonb", clineExtraUpdateSQL("$1", map[string]any{"operator_note": "not managed"}))
 	require.Equal(t, clineManagedExtraDeltaSQL("$1"), clineExtraUpdateSQL("$1", map[string]any{"cline_state": nil}))
 	require.Equal(t, clineManagedExtraDeltaSQL("$1"), clineExtraUpdateSQL("$1", map[string]any{"model_rate_limits": nil}))
-	require.Equal(t, "(CASE WHEN platform = 'cline' THEN $1::jsonb - 'cline_state' - 'model_rate_limits' - 'quota_used' - 'quota_daily_used' - 'quota_weekly_used' - 'quota_daily_start' - 'quota_weekly_start' - 'quota_daily_reset_at' - 'quota_weekly_reset_at' ELSE $1::jsonb END)", clineManagedExtraDeltaSQL("$1"))
+	require.Equal(t, "(CASE WHEN platform = 'cline' THEN $1::jsonb - 'cline_state' - 'cline_route' - 'model_rate_limits' - 'quota_used' - 'quota_daily_used' - 'quota_weekly_used' - 'quota_daily_start' - 'quota_weekly_start' - 'quota_daily_reset_at' - 'quota_weekly_reset_at' ELSE $1::jsonb END)", clineManagedExtraDeltaSQL("$1"))
 	for _, key := range []string{"quota_used", "quota_daily_used", "quota_weekly_used", "quota_daily_start", "quota_weekly_start", "quota_daily_reset_at", "quota_weekly_reset_at"} {
 		require.Equal(t, clineManagedExtraDeltaSQL("$1"), clineExtraUpdateSQL("$1", map[string]any{key: nil}), key)
 	}

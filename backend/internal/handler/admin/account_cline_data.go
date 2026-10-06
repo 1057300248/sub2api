@@ -10,7 +10,7 @@ func portableClineExtra(platform string, extra map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(extra))
 	for key, value := range extra {
-		if key != service.ClineStateExtraKey && key != "model_rate_limits" {
+		if key != service.ClineStateExtraKey && key != service.ClineRouteExtraKey && key != "model_rate_limits" {
 			out[key] = value
 		}
 	}

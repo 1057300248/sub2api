@@ -1906,7 +1906,7 @@ func (a *Account) GetOpenAIApiKey() string {
 // 继续以其为准，不受本方法影响。
 func (a *Account) GetOpenAIProtocolAPIKey() string {
 	if a.IsCline() && a.Type == AccountTypeAPIKey {
-		return a.GetCredential("api_key")
+		return a.GetClineWireCredential()
 	}
 	if a == nil {
 		return ""

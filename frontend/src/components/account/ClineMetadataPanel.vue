@@ -7,6 +7,7 @@
     <p class="text-xs text-gray-500">{{ t('clineMetadata.savedCredential') }}</p>
     <p v-if="error" role="alert" class="text-sm text-amber-700 dark:text-amber-300">{{ t('clineMetadata.requestFailed') }}</p>
     <template v-if="metadata">
+      <p v-if="metadata.credential_status === 'reauth_required'" data-testid="cline-reauth-required" role="alert" class="text-sm text-amber-700 dark:text-amber-300">{{ t('clineMetadata.reauthRequired') }}</p>
       <p v-if="metadata.quota_status === 'unknown' || metadata.quota_status === 'partial'" class="text-sm text-amber-700 dark:text-amber-300">{{ t('clineMetadata.unknownNotice') }}</p>
       <p v-if="metadata.quota_status === 'not_applicable'" class="text-sm text-gray-500">{{ t('clineMetadata.passOnly') }}</p>
       <dl class="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -27,13 +28,39 @@
       <p class="break-words text-xs text-gray-500">{{ t('clineMetadata.lastSuccess') }} {{ metadata.last_success_at || '—' }}</p>
       <p class="text-xs text-gray-500">{{ t(metadata.identity_verified ? 'clineMetadata.identityVerified' : 'clineMetadata.identityUnknown') }}</p>
       <p class="text-xs text-gray-500">{{ t('clineMetadata.costNotice') }}</p>
+      <details v-if="metadata.routing" data-testid="cline-routing-evidence" class="rounded-md border p-2 text-xs">
+        <summary class="cursor-pointer font-medium">{{ t('clineMetadata.routingTitle') }}</summary>
+        <p>{{ t('clineMetadata.requestedProvider') }}: {{ metadata.routing.requested?.join(', ') || t('clineMetadata.notSpecified') }}</p>
+        <p>{{ t('clineMetadata.actualProvider') }}: {{ metadata.routing.actual || t('clineMetadata.unknown') }}</p>
+        <p>{{ t('clineMetadata.routingStatus') }}: {{ routingStatus(metadata.routing.status) }}</p>
+        <p>{{ t('clineMetadata.observedModel') }}: {{ metadata.routing.upstream_model }}</p>
+        <p>{{ t('clineMetadata.observedAt') }}: {{ metadata.routing.observed_at }}</p>
+        <p>{{ t('clineMetadata.evidenceSource') }}: {{ metadata.routing.source || t('clineMetadata.unknown') }}</p>
+        <p>{{ t(metadata.routing.complete ? 'clineMetadata.requestCompleted' : 'clineMetadata.requestNotCompleted') }}</p>
+        <p class="text-gray-500">{{ t('clineMetadata.routingNotice') }}</p>
+      </details>
       <div v-if="models.length" class="space-y-2">
         <h5 class="text-sm font-medium">{{ t('clineMetadata.catalog') }}</h5>
         <p v-if="metadata.catalog_status !== 'ok'" class="text-xs text-amber-700 dark:text-amber-300">{{ t('clineMetadata.staleCatalog') }}</p>
         <p class="text-xs text-gray-500">{{ t('clineMetadata.catalogNotice') }}</p>
         <div class="max-h-48 space-y-1 overflow-auto">
           <div v-for="model in models" :key="model.id" class="flex items-center justify-between gap-3 text-sm">
-            <code class="min-w-0 break-all">{{ model.id }}</code>
+            <div class="min-w-0">
+              <code class="break-all">{{ model.id }}</code>
+              <details v-if="modelState(model.id)" :data-testid="`cline-model-capabilities-${model.id}`" class="text-xs text-gray-500">
+                <summary class="cursor-pointer">{{ t('clineMetadata.capabilities') }} · {{ t(modelState(model.id)?.configured ? 'clineMetadata.configured' : 'clineMetadata.notConfigured') }}</summary>
+                <p>{{ t('clineMetadata.contextWindow') }}: {{ modelState(model.id)?.capabilities?.context_window ?? t('clineMetadata.unknown') }}</p>
+                <p>{{ t('clineMetadata.maxOutput') }}: {{ modelState(model.id)?.capabilities?.max_output_tokens ?? t('clineMetadata.unknown') }}</p>
+                <p>{{ t('clineMetadata.images') }}: {{ capabilityFlag(modelState(model.id)?.capabilities?.supports_images) }}</p>
+                <p>{{ t('clineMetadata.tools') }}: {{ capabilityFlag(modelState(model.id)?.capabilities?.supports_tools) }}</p>
+                <p>{{ t('clineMetadata.reasoning') }}: {{ capabilityFlag(modelState(model.id)?.capabilities?.supports_reasoning) }}</p>
+                <p>{{ t('clineMetadata.promptCache') }}: {{ capabilityFlag(modelState(model.id)?.capabilities?.supports_prompt_cache) }}</p>
+                <p>{{ t('clineMetadata.reasoningEfforts') }}: {{ modelState(model.id)?.capabilities?.reasoning_efforts?.join(', ') || t('clineMetadata.unknown') }}</p>
+                <p>{{ t('clineMetadata.evidenceSource') }}: {{ modelState(model.id)?.capabilities?.source || t('clineMetadata.unknown') }} · {{ capabilityStatus(modelState(model.id)?.capability_status) }}</p>
+                <p>{{ t('clineMetadata.modelLastSuccess') }}: {{ modelState(model.id)?.last_successful_at || t('clineMetadata.unknown') }}</p>
+                <p>{{ t('clineMetadata.entitlementUnknown') }}</p>
+              </details>
+            </div>
             <button type="button" class="btn btn-secondary shrink-0" :disabled="busy || !selectable(model.id)" @click="emit('select', model.id)">{{ t('clineMetadata.add') }}</button>
           </div>
         </div>
@@ -59,6 +86,10 @@ const timer = setInterval(() => {
   clock.value = Date.now()
   if (!busy.value && clock.value - lastReadAt >= 30000 && document.visibilityState !== 'hidden') void load(false)
 }, 1000)
+function modelState(id: string) { return metadata.value?.models?.find(model => model.id === id) }
+function capabilityFlag(value: boolean | undefined): string { return t(value === true ? 'clineMetadata.supported' : value === false ? 'clineMetadata.notSupported' : 'clineMetadata.unknown') }
+function capabilityStatus(value: string | undefined): string { return t(value === 'reported' ? 'clineMetadata.reported' : value === 'stale' ? 'clineMetadata.stale' : 'clineMetadata.unknown') }
+function routingStatus(value: string): string { return t(`clineMetadata.route_${['matched', 'mismatch', 'observed', 'conflicting'].includes(value) ? value : 'unknown'}`) }
 const windows = ['five_hour', 'weekly', 'monthly'] as const
 let sequence = 0
 let controller: AbortController | undefined

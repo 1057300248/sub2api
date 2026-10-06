@@ -92,9 +92,10 @@ func ValidateUpstreamModel(mode, id string) error {
 }
 
 type Model struct {
-	ID          string `json:"id"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
+	Capabilities *ModelCapabilities `json:"capabilities,omitempty"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name,omitempty"`
+	Description  string             `json:"description,omitempty"`
 }
 type Catalog struct {
 	Recommended []Model `json:"recommended"`
@@ -110,6 +111,13 @@ func ParseCatalog(body []byte) (*Catalog, error) {
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return nil, errors.New("invalid Cline catalog")
 	}
+	if raw, wrapped := fields["data"]; wrapped {
+		var inner map[string]json.RawMessage
+		if json.Unmarshal(raw, &inner) != nil || inner == nil {
+			return nil, errors.New("invalid Cline catalog envelope")
+		}
+		fields = inner
+	}
 	c := &Catalog{}
 	known := false
 	for key, target := range map[string]*[]Model{"recommended": &c.Recommended, "clinePass": &c.Pass, "free": &c.Free} {
@@ -122,6 +130,9 @@ func ParseCatalog(body []byte) (*Catalog, error) {
 			return nil, fmt.Errorf("invalid Cline catalog bucket: %s", key)
 		}
 		seen := map[string]bool{}
+		for i := range *target {
+			(*target)[i].Capabilities = nil
+		}
 		for _, model := range *target {
 			if !ValidModelID(model.ID) || seen[model.ID] {
 				return nil, errors.New("invalid or duplicate Cline model ID")

@@ -33,6 +33,9 @@ func mergeClineCustomRequestParameters(account *Account, sourceBody, outboundBod
 		return nil, fmt.Errorf("merge Cline custom request parameters: invalid outbound JSON object")
 	}
 
+	if err := validateClineLoweredToolChoice(source, outbound); err != nil {
+		return nil, err
+	}
 	protected := append(jsonStructFieldNames(sourceShape), jsonStructFieldNames(apicompat.ChatCompletionsRequest{})...)
 	changed := false
 	for key, raw := range source {

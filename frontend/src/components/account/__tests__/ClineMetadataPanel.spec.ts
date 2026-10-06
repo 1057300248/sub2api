@@ -159,3 +159,31 @@ describe('Cline automatic quota view', () => {
     } finally { wrapper.unmount() }
   })
 })
+
+describe('Cline next-release evidence display', () => {
+  it('separates unknown actual provider, explicit capabilities and entitlement from the requested constraint', async () => {
+    const data = fixture()
+    data.catalog = { clinePass: [{ id: 'cline-pass/model' }], free: [], recommended: [] }
+    data.models = [{ id: 'cline-pass/model', listed: true, configured: true, entitlement: 'unknown', capability_status: 'stale', capabilities: { context_window: 131072, supports_images: false, supports_reasoning: true, source: 'cline_models' } }]
+    data.routing = { requested: ['deepseek'], constraint_status: 'specified', actual: '', status: 'unknown', upstream_model: 'cline-pass/model', observed_at: new Date().toISOString(), complete: false, http_status: 200 }
+    data.credential_status = 'reauth_required'
+    vi.mocked(getClineMetadata).mockResolvedValueOnce(data)
+    const wrapper = setup()
+    try {
+      await flushPromises()
+      const evidence = wrapper.get('[data-testid="cline-routing-evidence"]').text()
+      expect(evidence).toContain(`${en.actualProvider}: ${en.unknown}`)
+      expect(evidence).toContain('deepseek')
+      expect(evidence).toContain(en.requestNotCompleted)
+      const capability = wrapper.get('[data-testid="cline-model-capabilities-cline-pass/model"]').text()
+      expect(capability).toContain('131072')
+      expect(capability).toContain(`${en.images}: ${en.notSupported}`)
+      expect(capability).toContain(`${en.tools}: ${en.unknown}`)
+      expect(capability).toContain(en.stale)
+      expect(capability).toContain(en.entitlementUnknown)
+      expect(wrapper.get('[data-testid="cline-reauth-required"]').text()).toBe(en.reauthRequired)
+      expect(getClineMetadata).toHaveBeenCalledTimes(1)
+      expect(refreshClineMetadata).not.toHaveBeenCalled()
+    } finally { wrapper.unmount() }
+  })
+})
