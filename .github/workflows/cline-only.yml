@@ -213,6 +213,10 @@ jobs:
           PY
       - name: Full frontend regression and lint
         working-directory: frontend
+        env:
+          # The unchanged upstream harvestAvailability fixture expects +08:00.
+          # Cline-selected and critical tests still run in the UTC runner zone.
+          TZ: Asia/Shanghai
         run: |
           pnpm run lint:check
           pnpm exec vitest run --reporter=json --outputFile="$RUNNER_TEMP/cline-full-frontend-tests.json"
