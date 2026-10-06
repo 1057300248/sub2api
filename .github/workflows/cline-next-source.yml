@@ -1,0 +1,33 @@
+name: Prepare pinned Cline v2.9.11 review sources
+on:
+  push:
+    branches: [codex/cline-v2911-prepare-20261007]
+    paths: [.github/workflows/cline-next-source.yml]
+permissions:
+  contents: read
+jobs:
+  sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 0d923dc088c665cdbf268ad524160f0a55f0cb84
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch pinned release and make an offline Git bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags https://github.com/ranxi2001/sub2api.git e6addfe4aff745c859f9bb50817bc468e0e1f4f7
+          git branch review-pr13 0d923dc088c665cdbf268ad524160f0a55f0cb84
+          git branch review-upstream2911 e6addfe4aff745c859f9bb50817bc468e0e1f4f7
+          git merge-base --is-ancestor ab7cb27ceed6390441277784cc5560694d95fd73 review-upstream2911
+          git bundle create "$RUNNER_TEMP/cline-v2911.bundle" review-pr13 review-upstream2911
+          git diff --stat ab7cb27ceed6390441277784cc5560694d95fd73 e6addfe4aff745c859f9bb50817bc468e0e1f4f7
+          sha256sum "$RUNNER_TEMP/cline-v2911.bundle"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cline-v2911-offline-sources
+          path: ${{ runner.temp }}/cline-v2911.bundle
+          retention-days: 3
