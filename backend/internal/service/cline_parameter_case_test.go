@@ -28,6 +28,12 @@ func TestClineCustomParametersProtectAllProtocolFieldsAndCaseAliases(t *testing.
 						if name == "" || name == "-" {
 							continue
 						}
+						// tool_choice has its own strict lowering contract. Multiple
+						// conflicting aliases are deliberately rejected there, so they do
+						// not belong in this custom-extension shadowing regression.
+						if name == "tool_choice" {
+							continue
+						}
 						for _, alias := range []string{name, strings.ToUpper(name), strings.ToUpper(name[:1]) + name[1:], strings.ReplaceAll(name, "s", "ſ"), strings.ReplaceAll(name, "k", "K")} {
 							source[alias] = "must-not-override-lowered-request"
 						}

@@ -23,7 +23,7 @@ const MaxReasoningBytes = 1 << 20
 const MaxReasoningBlocks = 128
 const ReasoningTTL = 24 * time.Hour
 
-var ErrReasoningContext = errors.New("Cline reasoning context is invalid, expired or belongs to a different caller/account/model")
+var ErrReasoningContext = errors.New("cline reasoning context is invalid, expired or belongs to a different caller/account/model")
 
 // A gateway-owned, versioned transport envelope, NOT an OpenAI or Anthropic
 // native ciphertext. Associated data binds the local caller, upstream identity

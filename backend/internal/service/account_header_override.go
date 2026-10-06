@@ -184,6 +184,21 @@ func (a *Account) ApplyHeaderOverrides(h http.Header) {
 	if len(overrides) == 0 {
 		return
 	}
+	// Native Cline application metadata is ordinary HTTP state rather than
+	// captured Claude wire-casing. Store it through Header.Set so canonical
+	// lookup/serialization is reliable for every permitted name. Request-level
+	// Cline overrides are applied later and therefore retain higher precedence.
+	if a.IsCline() {
+		for name, value := range overrides {
+			for existing := range h {
+				if strings.EqualFold(existing, name) {
+					delete(h, existing)
+				}
+			}
+			h.Set(name, value)
+		}
+		return
+	}
 	// 覆写名两两不同（大小写不敏感）且各自只操作同名键，应用顺序不影响结果。
 	// 全量 EqualFold 扫描兜底删除任意 casing 的既有键：透传链路可能保留客户端
 	// 原始 casing，非 canonical/wire casing 的键 deleteHeaderAllForms 覆盖不到。

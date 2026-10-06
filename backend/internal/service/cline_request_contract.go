@@ -45,7 +45,7 @@ func clineForcedChoice(raw json.RawMessage) bool {
 	if json.Unmarshal(raw, &v) != nil {
 		return true
 	}
-	return v.Type != "auto" && v.Type != "none" && !(v.Type == "allowed_tools" && v.Mode == "auto")
+	return v.Type != "auto" && v.Type != "none" && (v.Type != "allowed_tools" || v.Mode != "auto")
 }
 
 // A forced tool must survive lowering. Merely dropping server tools and then
