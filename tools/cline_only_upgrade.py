@@ -80,7 +80,6 @@ def cline_file(path):
     return path in SHARED or (path.startswith(('backend/', 'frontend/')) and
             ('cline' in Path(path).name.lower() or '/clinemigration/' in path or '/cline/' in path or '/cline-migrate/' in path))
 
-# Use the original Git diff, never replace shared files with old snapshots.
 changed = git('diff', '--name-only', BASE, SOURCE).stdout.splitlines()
 selected = [p for p in changed if cline_file(p)]
 print('PINNED_UPSTREAM', UPSTREAM, 'PINNED_CLINE_SOURCE', SOURCE, flush=True)
@@ -88,11 +87,12 @@ print('KEEP', json.dumps(selected, indent=2), flush=True)
 print('DROP', json.dumps(sorted(set(changed) - set(selected)), indent=2), flush=True)
 work = Path(tempfile.mkdtemp(prefix='cline-only-', dir=os.environ.get('RUNNER_TEMP')))
 git('worktree', 'add', '--detach', str(work), UPSTREAM)
+resolutions_path = ROOT / 'tools/cline_only_resolutions.json'
+resolutions = json.loads(resolutions_path.read_text()) if resolutions_path.exists() else {}
+unresolved = []
 
 for path in selected:
     patch = git('diff', '--binary', '--full-index', BASE, SOURCE, '--', path).stdout
-    # A legacy-cookie privacy hunk shares account_repo.go with Cline hooks.
-    # Remove only that independent hunk. Never discard a mixed Cline hunk.
     sections = re.split(r'(?m)(?=^@@ )', patch)
     kept = [sections[0]]
     for hunk in sections[1:]:
@@ -108,10 +108,26 @@ for path in selected:
     applied = git('apply', '--3way', '--index', '-', cwd=work, data=''.join(kept), check=False)
     if applied.returncode:
         print('APPLY_ERROR', path, applied.stdout, applied.stderr, flush=True)
-        print(git('diff', '--cc', cwd=work, check=False).stdout, flush=True)
-        raise RuntimeError('Unresolved transplant; nothing was pushed')
+        edits = resolutions.get(path)
+        if edits:
+            current = (work / path).read_text()
+            for edit in edits:
+                if current.count(edit['old']) != 1:
+                    raise RuntimeError(f'Exact conflict resolution no longer matches: {path}')
+                current = current.replace(edit['old'], edit['new'], 1)
+            if re.search(r'(?m)^(<<<<<<<|=======|>>>>>>>)', current):
+                raise RuntimeError(f'Incomplete reviewed resolution: {path}')
+            (work / path).write_text(current)
+            git('add', '--', path, cwd=work)
+            print('RESOLVED_WITH_REVIEWED_EXACT_EDIT', path, flush=True)
+        else:
+            unresolved.append(path)
+if unresolved:
+    print('UNRESOLVED_PATHS', unresolved, flush=True)
+    print(git('diff', '--cc', cwd=work, check=False).stdout, flush=True)
+    raise RuntimeError('Unresolved transplant; nothing was pushed')
 
-# Keep a Cline-only integrity manifest, not the removed Wanchuan updater/patchpack.
+# This manifest describes only Cline. There is no automatic fork updater.
 docdir = work / 'docs/cline'
 docdir.mkdir(parents=True, exist_ok=True)
 allowed = sorted(set(selected) | {'docs/cline/patches.json', 'docs/cline/UPGRADE_2.9.10.md',
@@ -213,7 +229,6 @@ subprocess.run(['python3', 'tools/verify_cline_platform.py'], cwd=work, check=Tr
 git('diff', '--cached', '--check', cwd=work)
 print('FINAL_STAT\n' + git('diff', '--cached', '--stat', cwd=work).stdout, flush=True)
 print('SHARED_CLINE_DIFF\n' + git('diff', '--cached', '--', *sorted(SHARED - {'tools/verify_cline_platform.py'}), cwd=work).stdout, flush=True)
-# No force-push: the remote must still be the branch created from v2.9.10.
 remote = git('ls-remote', 'origin', f'refs/heads/{TARGET}').stdout.split()
 if not remote or remote[0] != UPSTREAM:
     raise RuntimeError('Target branch moved; refusing to overwrite concurrent work')
