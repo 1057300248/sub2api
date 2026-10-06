@@ -135,7 +135,7 @@ func ClineQuotaAdmission(account *Account, now time.Time) error {
 func ClineMetadataAutoEligible(a *Account, now time.Time) bool {
 	return a.IsCline() && a.Type == AccountTypeAPIKey && a.GetClineMode() == cline.ModePass &&
 		cline.IsOfficialBase(a.GetClineBaseURL()) && a.Status == StatusActive && a.Schedulable &&
-		!(a.AutoPauseOnExpired && a.ExpiresAt != nil && !a.ExpiresAt.After(now))
+		(!a.AutoPauseOnExpired || a.ExpiresAt == nil || a.ExpiresAt.After(now))
 }
 
 // ClineMetadataNextRefresh bounds polling: normal five minutes, long exhaustion

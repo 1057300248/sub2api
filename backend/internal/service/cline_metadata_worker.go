@@ -118,7 +118,10 @@ func (s *OpenAIGatewayService) runClineMetadataWorker(ctx context.Context, done 
 }
 
 func (s *OpenAIGatewayService) refreshClineMetadataPage(ctx context.Context, after int64) (int64, bool, error) {
-	repo := s.accountRepo.(clineMetadataCandidateRepository)
+	repo, ok := s.accountRepo.(clineMetadataCandidateRepository)
+	if !ok {
+		return after, false, ErrClineMetadataUnavailable
+	}
 	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	accounts, err := repo.ListClineMetadataCandidates(queryCtx, after, clineMetadataBatchSize)
 	cancel()

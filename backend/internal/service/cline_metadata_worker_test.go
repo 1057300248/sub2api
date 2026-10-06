@@ -165,3 +165,11 @@ func TestClineMetadataRetryAfterDoesNotBecomeInferenceCooldown(t *testing.T) {
 		require.Equal(t, now.Add(30*time.Second), clineMetadataRetryAt(http.Header{"Retry-After": []string{value}}, now))
 	}
 }
+
+func TestClineMetadataWorkerMissingRepository(t *testing.T) {
+	s := &OpenAIGatewayService{}
+	next, full, err := s.refreshClineMetadataPage(context.Background(), 7)
+	require.ErrorIs(t, err, ErrClineMetadataUnavailable)
+	require.EqualValues(t, 7, next)
+	require.False(t, full)
+}

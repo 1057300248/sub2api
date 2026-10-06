@@ -26,9 +26,10 @@ func finishClineForward(c *gin.Context, account *service.Account, result *servic
 	}
 	if status != 0 {
 		kind := "invalid_request_error"
-		if status == http.StatusTooManyRequests {
+		switch status {
+		case http.StatusTooManyRequests:
 			kind = "rate_limit_error"
-		} else if status == http.StatusServiceUnavailable {
+		case http.StatusServiceUnavailable:
 			kind = "admission_unavailable"
 		}
 		payload := gin.H{"error": gin.H{"type": kind, "message": message}}
