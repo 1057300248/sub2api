@@ -1,0 +1,32 @@
+name: Finalize Cline merge formatting
+on:
+  push:
+    branches: [codex/cline-v2911-assemble-20261007]
+    paths: [.github/workflows/cline-next-format.yml]
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Store exact whitespace-only formatted source blob
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, urllib.request
+          url='https://api.github.com/repos/1057300248/sub2api/git/blobs'
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'}
+          with urllib.request.urlopen(urllib.request.Request(url+'/f97d91e192794715de8962bc3bd0ee846499dc00',headers=headers),timeout=45) as r: source=json.load(r)
+          data=base64.b64decode(source['content']).decode()
+          old='\tSchedulable         *bool // Optional Cline operator setting; other platform contracts are unchanged.\n'
+          assert data.count(old)==1
+          data=data.replace(old,'\tSchedulable         *bool              // Optional Cline operator setting; other platform contracts are unchanged.\n').encode()
+          expected=hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+          assert expected=='299cbe28d3cf88461098c440b297a88f2c8e3f55'
+          req=urllib.request.Request(url,method='POST',headers=headers,data=json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode())
+          with urllib.request.urlopen(req,timeout=45) as r: result=json.load(r)
+          assert result['sha']==expected
+          print('FORMATTED_BLOB',expected)
+          PY
