@@ -47,7 +47,7 @@ func validateClineLoweredToolChoice(a *Account, source json.RawMessage, chat *ap
 		return nil
 	}
 	fail := func() error {
-		return fmt.Errorf("Cline Chat transport cannot preserve the requested tool_choice; use a supported declared function/custom tool or an explicit auto/none choice")
+		return fmt.Errorf("cline chat transport cannot preserve the requested tool_choice; use a supported declared function/custom tool or an explicit auto/none choice")
 	}
 	var value string
 	if json.Unmarshal(source, &value) == nil {
