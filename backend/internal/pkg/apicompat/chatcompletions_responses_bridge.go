@@ -371,6 +371,18 @@ func responsesInputToChatMessagesWithOptions(instructions string, inputRaw json.
 		return nil, err
 	}
 	normalized := normalizeChatMessagesWithToolOutputMedia(built, mediaByCallID)
+	// Never silently discard signed vendor history when generic normalization
+	// removes an unanswered tool call. The caller must repair that history.
+	detailCount := func(items []ChatMessage) int {
+		n := 0
+		for _, m := range items {
+			n += len(m.ReasoningDetails)
+		}
+		return n
+	}
+	if detailCount(built) != detailCount(normalized) {
+		return nil, ErrClineReasoningDetails
+	}
 	return normalizeResponsesDerivedChatMessageRoles(normalized), nil
 }
 
@@ -439,6 +451,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 	// across an assistant message (so a following tool call in the same turn
 	// still receives it); any other role ends the thinking span.
 	var pendingReasoning string
+	var pendingDetails ClineReasoningDetails
 	// lastTurnReasoning is the most recent reasoning text of the current turn,
 	// surviving tool outputs. DeepSeek emits reasoning only once per turn, so
 	// chained tool calls (reasoning → call A → output A → call B) leave call B's
@@ -469,8 +482,12 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			if textErr := json.Unmarshal(raw, &text); textErr == nil {
 				content, _ := json.Marshal(text)
 				messages = append(messages, ChatMessage{Role: "user", Content: content})
+				if len(pendingDetails) > 0 {
+					return nil, nil, ErrClineReasoningDetails
+				}
 				pendingReasoning = ""
 				lastTurnReasoning = ""
+				pendingDetails = nil
 				continue
 			}
 			return nil, nil, fmt.Errorf("parse responses input item: %w", err)
@@ -478,6 +495,21 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 
 		role := chatCompletionsBridgeRole(rawString(item["role"]))
 		itemType := rawString(item["type"])
+		var itemDetails ClineReasoningDetails
+		if raw, ok := item["reasoning_details"]; ok {
+			if err := json.Unmarshal(raw, &itemDetails); err != nil {
+				return nil, nil, err
+			}
+		}
+		if len(itemDetails) > 0 && (role == "assistant" || itemType == "reasoning" || itemType == "function_call" || itemType == "custom_tool_call" || itemType == "tool_search_call") {
+			pendingDetails = append(pendingDetails, itemDetails...)
+		}
+		if ((itemType == "" || itemType == "message") && role != "assistant") || itemType == "agent_message" || itemType == "input_text" || itemType == "text" || itemType == "input_image" {
+			if len(pendingDetails) > 0 {
+				return nil, nil, ErrClineReasoningDetails
+			}
+		}
+
 		switch itemType {
 		case "reasoning":
 			if txt := extractResponsesReasoningText(item); txt != "" {
@@ -532,6 +564,11 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 				},
 			}
 			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant())
+			if len(pendingDetails) > 0 {
+				last := &messages[len(messages)-1]
+				last.ReasoningDetails = append(last.ReasoningDetails, pendingDetails...)
+				pendingDetails = nil
+			}
 			pendingReasoning = ""
 			continue
 		case "tool_search_call":
@@ -553,6 +590,11 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 				},
 			}
 			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant())
+			if len(pendingDetails) > 0 {
+				last := &messages[len(messages)-1]
+				last.ReasoningDetails = append(last.ReasoningDetails, pendingDetails...)
+				pendingDetails = nil
+			}
 			pendingReasoning = ""
 			continue
 		case "custom_tool_call":
@@ -577,6 +619,11 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 				},
 			}
 			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant())
+			if len(pendingDetails) > 0 {
+				last := &messages[len(messages)-1]
+				last.ReasoningDetails = append(last.ReasoningDetails, pendingDetails...)
+				pendingDetails = nil
+			}
 			pendingReasoning = ""
 			continue
 		case "function_call_output", "custom_tool_call_output", "tool_search_output":
@@ -632,12 +679,14 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			messages = append(messages, ChatMessage{Role: "user", Content: content})
 			pendingReasoning = ""
 			lastTurnReasoning = ""
+			pendingDetails = nil
 			continue
 		case "input_text", "text":
 			content, _ := json.Marshal(rawString(item["text"]))
 			messages = append(messages, ChatMessage{Role: "user", Content: content})
 			pendingReasoning = ""
 			lastTurnReasoning = ""
+			pendingDetails = nil
 			continue
 		case "input_image":
 			content, err := chatContentFromSingleResponsesPart(itemType, item)
@@ -647,6 +696,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			messages = append(messages, ChatMessage{Role: "user", Content: content})
 			pendingReasoning = ""
 			lastTurnReasoning = ""
+			pendingDetails = nil
 			continue
 		}
 
@@ -681,14 +731,20 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 		// ReasoningContent when it is still empty.
 		if role == "assistant" {
 			msg.ReasoningContent = reasoningForAssistant()
+			msg.ReasoningDetails = pendingDetails
+			pendingDetails = nil
 			pendingReasoning = ""
 		} else {
 			pendingReasoning = ""
 			lastTurnReasoning = ""
+			pendingDetails = nil
 		}
 		messages = append(messages, msg)
 	}
 
+	if len(pendingDetails) > 0 {
+		return nil, nil, ErrClineReasoningDetails
+	}
 	return messages, mediaByCallID, nil
 }
 
@@ -1412,14 +1468,16 @@ func ChatCompletionsResponseToResponses(resp *ChatCompletionsResponse, model str
 		out.Model = resp.Model
 	}
 
+	out.ClineProvider = observedClineProvider(resp.Provider)
 	if len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
 		out.Output = chatMessageToResponsesOutput(choice.Message, customTools, functionTools, toolSearch, namespaceTools)
+		attachClineDetailsToResponses(out.Output, choice.Message.ReasoningDetails)
 		if choice.FinishReason == "length" {
 			out.Status = "incomplete"
 			out.IncompleteDetails = &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
 		}
-		if strings.TrimSpace(choice.Message.reasoningText()) != "" && strings.TrimSpace(chatMessageContentText(choice.Message.Content)) == "" && len(choice.Message.ToolCalls) == 0 {
+		if (strings.TrimSpace(choice.Message.reasoningText()) != "" || len(choice.Message.ReasoningDetails) > 0) && strings.TrimSpace(chatMessageContentText(choice.Message.Content)) == "" && len(choice.Message.ToolCalls) == 0 {
 			out.Status = "failed"
 			out.IncompleteDetails = nil
 			out.Error = chatReasoningOnlyError()
@@ -1634,6 +1692,8 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 // ChatCompletionsToResponsesStreamState tracks state while converting Chat
 // Completions SSE chunks into Responses SSE events.
 type ChatCompletionsToResponsesStreamState struct {
+	clineDetails   clineReasoningAccumulator
+	clineProvider  clineProviderObserver
 	ResponseID     string
 	Model          string
 	Created        int64
@@ -1776,10 +1836,15 @@ func ChatCompletionsChunkToResponsesEvents(
 		state.Usage = ChatUsageToResponsesUsage(chunk.Usage)
 	}
 
+	state.clineProvider.Observe(chunk.Provider)
 	var events []ResponsesStreamEvent
 	events = append(events, ensureChatToResponsesCreated(state)...)
 
 	for _, choice := range chunk.Choices {
+		state.clineDetails.Add(choice.Delta.ReasoningDetails)
+		if state.ClineDetailsError() != nil {
+			return nil
+		}
 		// Reasoning is emitted as its own output item and must be opened
 		// (output_item.added + reasoning_summary_part.added) before the first
 		// delta, otherwise a strict client discards the delta. The leading
@@ -1870,7 +1935,7 @@ func ChatCompletionsChunkToResponsesEvents(
 
 // FinalizeChatCompletionsResponsesStream emits terminal Responses events.
 func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
-	if state == nil || state.CompletedSent {
+	if state == nil || state.CompletedSent || state.ClineDetailsError() != nil {
 		return nil
 	}
 	var events []ResponsesStreamEvent
@@ -1921,7 +1986,7 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 	}
 	terminalType := "response.completed"
 	var responseError *ResponsesError
-	if strings.TrimSpace(state.Reasoning.String()) != "" && strings.TrimSpace(state.Text.String()) == "" && len(state.ToolCalls) == 0 {
+	if (strings.TrimSpace(state.Reasoning.String()) != "" || len(state.clineDetails.parts) > 0) && strings.TrimSpace(state.Text.String()) == "" && len(state.ToolCalls) == 0 {
 		status, terminalType = "failed", "response.failed"
 		incompleteDetails = nil
 		responseError = chatReasoningOnlyError()
@@ -1936,12 +2001,28 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 			Model:             state.Model,
 			Status:            status,
 			ServiceTier:       state.ServiceTier,
+			ClineProvider:     state.clineProvider.View(),
 			Output:            state.chatOutput(),
 			Usage:             state.Usage,
 			IncompleteDetails: incompleteDetails,
 			Error:             responseError,
 		},
 	}))
+	for _, event := range events {
+		if event.Response == nil {
+			continue
+		}
+		for _, item := range event.Response.Output {
+			if len(item.ReasoningDetails) == 0 {
+				continue
+			}
+			for i := range events {
+				if events[i].Type == "response.output_item.done" && events[i].Item != nil && events[i].Item.ID == item.ID {
+					events[i].Item.ReasoningDetails = item.ReasoningDetails
+				}
+			}
+		}
+	}
 	return events
 }
 
@@ -2268,7 +2349,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 			}
 			outputs = append(outputs, ResponsesOutput{
 				Type:      "custom_tool_call",
-				ID:        generateItemID(),
+				ID:        state.ToolItemIDs[i],
 				CallID:    toolCall.ID,
 				Name:      name,
 				Namespace: namespace,
@@ -2280,7 +2361,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 		if state.toolIsToolSearch[i] {
 			outputs = append(outputs, ResponsesOutput{
 				Type:      "tool_search_call",
-				ID:        generateItemID(),
+				ID:        state.ToolItemIDs[i],
 				CallID:    toolCall.ID,
 				Arguments: arguments,
 				Status:    "completed",
@@ -2293,7 +2374,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 		}
 		outputs = append(outputs, ResponsesOutput{
 			Type:      "function_call",
-			ID:        generateItemID(),
+			ID:        state.ToolItemIDs[i],
 			CallID:    toolCall.ID,
 			Name:      name,
 			Namespace: namespace,
@@ -2301,6 +2382,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 			Status:    "completed",
 		})
 	}
+	attachClineDetailsToResponses(outputs, state.clineDetails.Values())
 	return outputs
 }
 

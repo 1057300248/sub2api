@@ -202,6 +202,12 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
 	}
 
+	if p := account.InitialQualityPlan; p != nil {
+		_, err := client.ExecContext(ctx, `INSERT INTO scheduled_test_plans (account_id, model_id, cron_expression, enabled, max_results, auto_recover, next_run_at, pelican_config, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,false,$6,$7,NOW(),NOW())`, created.ID, p.ModelID, p.CronExpression, p.Enabled, p.MaxResults, p.NextRunAt, marshalPelicanConfig(p.PelicanConfig))
+		if err != nil {
+			return err
+		}
+	}
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
@@ -4198,8 +4204,17 @@ const nextWeeklyResetAtExpr = `(
 // 日/周额度在周期过期时自动重置为 0 再递增。
 // 支持滚动窗口（rolling）和固定时间（fixed）两种重置模式。
 func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, amount float64) error {
-	rows, err := r.sql.QueryContext(ctx,
-		`UPDATE accounts SET extra = (
+	// Honor caller-owned transactions. Inference already in flight still settles;
+	// this is an atomic notification contract, not a reservation/zero-overshoot budget.
+	_, err := clientFromContext(ctx, r.client).ExecContext(ctx,
+		`WITH prior AS MATERIALIZED (
+ SELECT id AS locked_id,
+ COALESCE((extra->>'quota_used')::numeric,0) AS prev_total,
+ CASE WHEN `+dailyExpiredExpr+` THEN 0 ELSE COALESCE((extra->>'quota_daily_used')::numeric,0) END AS prev_daily,
+ CASE WHEN `+weeklyExpiredExpr+` THEN 0 ELSE COALESCE((extra->>'quota_weekly_used')::numeric,0) END AS prev_weekly
+ FROM accounts WHERE id=$2 AND deleted_at IS NULL FOR UPDATE
+), changed AS (
+ UPDATE accounts SET extra = (
 			COALESCE(extra, '{}'::jsonb)
 			-- 总额度：始终递增
 			|| jsonb_build_object('quota_used', COALESCE((extra->>'quota_used')::numeric, 0) + $1)
@@ -4238,33 +4253,19 @@ func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, am
 				   ELSE '{}'::jsonb END
 			ELSE '{}'::jsonb END
 		), updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
-		RETURNING
-			COALESCE((extra->>'quota_used')::numeric, 0),
-			COALESCE((extra->>'quota_limit')::numeric, 0)`,
-		amount, id)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var newUsed, limit float64
-	if rows.Next() {
-		if err := rows.Scan(&newUsed, &limit); err != nil {
-			return err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	// 任一维度配额刚超限时触发调度快照刷新
-	if limit > 0 && newUsed >= limit && (newUsed-amount) < limit {
-		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue quota exceeded failed: account=%d err=%v", id, err)
-		}
-	}
-	return nil
+		WHERE id = (SELECT locked_id FROM prior)
+ RETURNING id, extra
+ ) INSERT INTO scheduler_outbox(event_type,account_id)
+ SELECT $3,changed.id FROM changed CROSS JOIN prior
+ WHERE EXISTS (
+  SELECT 1 FROM (VALUES
+   (COALESCE((extra->>'quota_used')::numeric,0), COALESCE((extra->>'quota_limit')::numeric,0), prev_total),
+   (COALESCE((extra->>'quota_daily_used')::numeric,0), COALESCE((extra->>'quota_daily_limit')::numeric,0), prev_daily),
+   (COALESCE((extra->>'quota_weekly_used')::numeric,0), COALESCE((extra->>'quota_weekly_limit')::numeric,0), prev_weekly)
+  ) AS quota(used,limit_value,previous_used)
+  WHERE limit_value>0 AND used>=limit_value AND previous_used<limit_value
+ )`, amount, id, service.SchedulerOutboxEventAccountChanged)
+	return err
 }
 
 // ResetQuotaUsedAndClearRateLimitCooldown resets all quota dimensions and the

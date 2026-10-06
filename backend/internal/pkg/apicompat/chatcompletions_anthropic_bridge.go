@@ -148,7 +148,23 @@ func anthropicToChatMessages(system json.RawMessage, msgs []AnthropicMessage) ([
 func anthropicMsgToChatMessages(m AnthropicMessage) ([]ChatMessage, error) {
 	switch m.Role {
 	case "assistant":
-		return anthropicAssistantToChatMessages(m.Content)
+		messages, err := anthropicAssistantToChatMessages(m.Content)
+		if err != nil {
+			return nil, err
+		}
+		details := m.ReasoningDetails
+		if len(details) == 0 {
+			var blocks []AnthropicContentBlock
+			if json.Unmarshal(m.Content, &blocks) == nil {
+				for _, b := range blocks {
+					details = append(details, b.ReasoningDetails...)
+				}
+			}
+		}
+		if len(messages) > 0 {
+			messages[0].ReasoningDetails = details
+		}
+		return messages, nil
 	default: // "user" and any unknown role
 		return anthropicUserToChatMessages(m.Content)
 	}
@@ -409,6 +425,7 @@ func ChatCompletionsResponseToAnthropic(resp *ChatCompletionsResponse, model str
 
 	if resp != nil {
 		out.ID = resp.ID
+		out.ClineProvider = observedClineProvider(resp.Provider)
 		if out.Model == "" {
 			out.Model = resp.Model
 		}
@@ -416,6 +433,7 @@ func ChatCompletionsResponseToAnthropic(resp *ChatCompletionsResponse, model str
 		if len(resp.Choices) > 0 {
 			choice := resp.Choices[0]
 			out.Content = chatMessageToAnthropicBlocks(choice.Message)
+			attachClineDetailsToAnthropic(out.Content, choice.Message.ReasoningDetails)
 			out.StopReason = AnthropicStopReasonPtr(chatFinishReasonToAnthropicStopReason(choice.FinishReason, out.Content))
 			// "length" → "max_tokens" is handled by chatFinishReasonToAnthropicStopReason;
 			// Anthropic conveys max-tokens via stop_reason only, no incomplete_details field.
@@ -550,6 +568,8 @@ func chatUsageToAnthropicUsage(usage *ChatUsage) AnthropicUsage {
 // ChatCompletionsToResponsesStreamState + ResponsesEventToAnthropicState pair
 // into one state machine.
 type ChatCompletionsToAnthropicStreamState struct {
+	clineDetails     clineReasoningAccumulator
+	clineProvider    clineProviderObserver
 	MessageStartSent bool
 	MessageStopSent  bool
 
@@ -630,10 +650,15 @@ func ChatCompletionsChunkToAnthropicEvents(
 		state.CacheCreationInputTokens = u.CacheCreationInputTokens
 	}
 
+	state.clineProvider.Observe(chunk.Provider)
 	var events []AnthropicStreamEvent
 	events = append(events, ensureCCAnthropicMessageStart(state)...)
 
 	for _, choice := range chunk.Choices {
+		state.clineDetails.Add(choice.Delta.ReasoningDetails)
+		if state.ClineDetailsError() != nil {
+			return nil
+		}
 		// Reasoning content → thinking block.
 		reasoning := choice.Delta.reasoningText()
 		if reasoning != nil && *reasoning != "" {
@@ -671,7 +696,7 @@ func ChatCompletionsChunkToAnthropicEvents(
 // FinalizeChatCompletionsAnthropicStream emits terminal Anthropic events
 // (close open blocks + message_delta + message_stop) when the stream ends.
 func FinalizeChatCompletionsAnthropicStream(state *ChatCompletionsToAnthropicStreamState) []AnthropicStreamEvent {
-	if state == nil || state.MessageStopSent {
+	if state == nil || state.MessageStopSent || state.ClineDetailsError() != nil {
 		return nil
 	}
 
@@ -703,9 +728,11 @@ func FinalizeChatCompletionsAnthropicStream(state *ChatCompletionsToAnthropicStr
 
 	events = append(events,
 		AnthropicStreamEvent{
-			Type: "message_delta",
+			Type:          "message_delta",
+			ClineProvider: state.clineProvider.View(),
 			Delta: &AnthropicDelta{
-				StopReason: stopReason,
+				StopReason:       stopReason,
+				ReasoningDetails: state.clineDetails.Values(),
 			},
 			Usage: &AnthropicUsage{
 				InputTokens:              state.InputTokens,

@@ -50,7 +50,7 @@ func TestClinePostgresPlatformUnionUpgrade(t *testing.T) {
 			require.True(t, strings.HasPrefix(version, "18.6"), version)
 			oldFS := fstest.MapFS{}
 			for _, file := range files {
-				if file == "267_cline_typesafe_platform_union.sql" || file == "268_cline_header_settings_guard.sql" || file == "269_cline_advanced_settings_guard.sql" {
+				if file == "267_cline_typesafe_platform_union.sql" || file == "268_cline_header_settings_guard.sql" || file == "269_cline_advanced_settings_guard.sql" || file == "270_cline_attribution_headers.sql" {
 					continue
 				}
 				clineMigration := strings.HasPrefix(file, "263_cline_") || strings.HasPrefix(file, "264_cline_") || strings.HasPrefix(file, "265_cline_") || strings.HasPrefix(file, "266_cline_")
@@ -130,6 +130,10 @@ func TestClinePostgresPlatformUnionUpgrade(t *testing.T) {
 					require.NoError(t, err)
 				}
 			}
+			// New migrations must not enter a historical fixture before its upgrade:
+			// otherwise 268 can overwrite 270 after 270 was incorrectly marked applied.
+			_, err = db.ExecContext(ctx, `INSERT INTO accounts(name,platform,type,credentials) VALUES('attribution-upgrade-fixture','cline','apikey','{"api_key":"fixture-only","account_mode":"pass","cline_auth_type":"account_token","model_mapping":{"model":"cline-pass/model"},"header_override_enabled":true,"header_overrides":{"HTTP-Referer":"https://gateway.example.invalid","X-Title":"Upgrade fixture"}}'::jsonb)`)
+			require.NoError(t, err, "latest attribution guard survives fresh and historical upgrades")
 			var monitorCheck string
 			require.NoError(t, db.QueryRowContext(ctx, "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='channel_monitors_provider_check'").Scan(&monitorCheck))
 			assert.Contains(t, monitorCheck, "'cline'")

@@ -1,7 +1,7 @@
 name: Cline-only validation
 on:
   push:
-    branches: [codex/sub2-v2910-cline-only-20261006]
+    branches: [codex/sub2-v2911-cline-complete-20261007]
   pull_request:
     branches: [codex/sub2-v2910-cline-only-20261006]
   workflow_dispatch:
@@ -51,6 +51,9 @@ env:
         required = {'TestClineCustomParametersProtectAllProtocolFieldsAndCaseAliases', 'TestClineLegacyThreeProtocolParametersSurviveLowering', 'TestClineWrappedLimitPreservesAuditAndStopsSameAccountRetry', 'TestClineThreeProtocolHTTPForwarding', 'TestClineSuccessfulResponseSurvivesLateDeadline', 'TestClineGroupAndCompositeRequestBindings', 'TestClineThreeProtocolRequestHeaderOverrides', 'TestClineQuotaExhaustionSurvivesStalenessErrorsAndExpiry', 'TestClineMetadataWorkerBoundedConcurrencyAndModeIsolation', 'TestClineMetadataRetryAfterDoesNotBecomeInferenceCooldown', 'TestClineAccountSettingsCreateScheduling', 'TestClineAccountSettingsUpdatePreservesUneditedConfiguration', 'TestClineAccountHeaderSettingsValidationAndIsolation', 'TestClineBulkHeaderSettingsRejectBeforeAnyWrite', 'TestClineAccountSettingsHTTPBinding', 'TestClineAccountListUsesSafeCredentialBoundQuotaProjection', 'TestClineAdvancedQuotaValidationAndDelta', 'TestClineAdvancedProtectedErrorsAndTemporaryRules', 'TestClineAdvancedInvalidRulesAndFalsePreservation', 'TestClineAdvancedRuntimeOwnershipAndNotificationThreshold', 'TestClineAdvancedResetsUseIsolatedOperations'}
     if suite == 'postgres':
         required = {'TestClinePostgresPlatformUnionUpgrade', 'TestClinePostgresCreateOutboxFailureIsAtomic', 'TestClinePostgresCreateReusesOuterTransaction', 'TestClinePostgresMaximumFreeScopeUsesUnfingerprintedColumn', 'TestClinePostgresIdentitySwitchDoesNotReattributeOldLimits', 'TestClinePostgresSharedSubjectLimitsAndRestart', 'TestClinePostgresRefreshLeaseAndObservationOrdering', 'TestClinePostgresOutboxFailureRollsBackState', 'TestClinePostgresDirectAndBulkCredentialGuards', 'TestClinePostgresAdmissionRejectsStaleCredentials', 'TestClinePostgresConcurrentScopedCAS', 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits', 'TestClinePostgresCreationCannotImportManagedState', 'TestClinePostgresMigrationAndQuotaSchema', 'TestClinePostgresMetadataQuotaSharedRecoveryAndStaleObservations', 'TestClinePostgresExpiredQuotaRequiresConfirmedWindow', 'TestClinePostgresHealthyMetadataCannotShortenInferenceCooldown', 'TestClinePostgresAutomaticMetadataCandidatesIncludeCoolingNotDisabled', 'TestClinePostgresAccountSettingsRoundTripAndHeaderGuards', 'TestClinePostgresHeaderGuardDatabaseContract', 'TestClinePostgresAdvancedSettingsGuardsAndBulkAtomicity', 'TestClinePostgresLocalQuotaCountersCannotBeReplayed', 'TestClinePostgresAdvancedOperationsPreservePassAndOtherBlocks', 'TestClinePostgresLocalQuotaFinalAdmissionAndResetRollback'}
+    if suite == 'bridge': required = {'TestClineReasoningDetailsJSONAndRoundTrip', 'TestClineReasoningDetailsStreamLateFragmentsAndToolIDs', 'TestClineReasoningDetailsBoundsAndConflictsFail', 'TestClineReasoningDetailsToolPassbackAndTurnIsolation', 'TestClineProviderObservationNeverInfersOrBills', 'TestClineReasoningDetailsOrphanHistoryFailsInsteadOfDropping'}
+    if suite == 'service': required |= {'TestClineOAuthFormattingMetadataAndRotation', 'TestClineExplicitStreamContract', 'TestClineForcedUnsupportedToolNeverCallsUpstream', 'TestClineThreeProtocolReasoningAndProviderEvidence', 'TestClineMetadataCapabilityFailureDoesNotInvalidateCredentials'}
+    if suite == 'postgres': required |= {'TestClinePostgresQuotaOutboxEveryDimensionAndPeriod', 'TestClinePostgresQuotaOutboxConcurrentCrossingAndUnlimited', 'TestClinePostgresQuotaOutboxFailureAndOuterRollback', 'TestClinePostgresAttributionHeaderGuard'}
     if suite == 'handler':
         prefix = 'TestClineHTTPHandlersDurableBillingAndTermination'
         scenarios = ('complete', 'cancel_then_usage', 'writer_stall', 'deadline', 'deadline_headers', 'success_late_deadline', 'success_late_deadline_json', 'parameters_stream', 'parameters_json', 'parameters_legacy_openai_stream', 'parameters_legacy_openai_json', 'parameters_legacy_deepseek_stream', 'parameters_legacy_deepseek_json')
@@ -104,13 +107,16 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 tools/verify_cline_only.py
           python3 tools/verify_cline_platform.py
-          git diff --check ab7cb27ceed6390441277784cc5560694d95fd73 HEAD
-          mapfile -t files < <(git diff --name-only ab7cb27ceed6390441277784cc5560694d95fd73 HEAD -- '*.go')
+          git diff --check e6addfe4aff745c859f9bb50817bc468e0e1f4f7 HEAD
+          mapfile -t files < <(git diff --name-only e6addfe4aff745c859f9bb50817bc468e0e1f4f7 HEAD -- '*.go')
           unformatted="$(gofmt -l "${files[@]}")"
           test -z "$unformatted" || { printf '%s\n' "$unformatted"; exit 1; }
       - name: Cline SSE, JSON and policy race tests
         working-directory: backend
         run: python3 -c "$CLINE_TEST_DRIVER" policy 3 unit '^Test' yes ./internal/pkg/cline
+      - name: Complete shared protocol bridge regressions including opaque Cline extensions
+        working-directory: backend
+        run: python3 -c "$CLINE_TEST_DRIVER" bridge 1 unit '^Test' no ./internal/pkg/apicompat
       - name: Cline service, legacy routing, registration and offline contract tests
         working-directory: backend
         run: python3 -c "$CLINE_TEST_DRIVER" service 1 unit '^Test(Cline|ParseCline|SetCline|Handle429Cline)' no ./internal/service ./internal/repository ./internal/handler ./internal/handler/admin ./internal/handler/dto ./internal/clinemigration

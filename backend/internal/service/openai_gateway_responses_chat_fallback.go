@@ -90,6 +90,11 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, fmt.Errorf("convert responses to chat completions: %w", err)
 	}
 
+	if err := validateClineLoweredToolChoice(account, responsesReq.ToolChoice, chatReq); err != nil {
+		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
+	}
+
 	billingModel := resolveOpenAIForwardModel(account, originalModel, "")
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
 	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
@@ -328,6 +333,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	})
 
 	clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
+	if scan.Err == nil {
+		scan.Err = state.ClineDetailsError()
+	}
 	if scan.Err != nil {
 		return &OpenAIForwardResult{
 			RequestID:                   requestID,

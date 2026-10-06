@@ -33,7 +33,10 @@
         <p class="text-xs text-gray-500">{{ t('clineMetadata.catalogNotice') }}</p>
         <div class="max-h-48 space-y-1 overflow-auto">
           <div v-for="model in models" :key="model.id" class="flex items-center justify-between gap-3 text-sm">
-            <code class="min-w-0 break-all">{{ model.id }}</code>
+            <div class="min-w-0">
+              <code class="break-all">{{ model.id }}</code>
+              <p class="text-xs text-gray-500" data-testid="cline-model-capabilities">{{ capabilityText(model) }}</p>
+            </div>
             <button type="button" class="btn btn-secondary shrink-0" :disabled="busy || !selectable(model.id)" @click="emit('select', model.id)">{{ t('clineMetadata.add') }}</button>
           </div>
         </div>
@@ -45,7 +48,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getClineMetadata, refreshClineMetadata, type ClineMetadata } from '@/api/admin/clineMetadata'
+import { getClineMetadata, refreshClineMetadata, type ClineMetadata, type ClineCatalogModel } from '@/api/admin/clineMetadata'
 
 const props = defineProps<{ accountId: number; mode: string }>()
 const emit = defineEmits<{ select: [modelId: string] }>()
@@ -114,6 +117,17 @@ const models = computed(() => {
   if (!catalog) return []
   return (props.mode === 'pass' ? catalog.clinePass : props.mode === 'payg' ? catalog.recommended : props.mode === 'free' ? catalog.free : []) || []
 })
+function capabilityText(model: ClineCatalogModel): string {
+  const cap = model.capabilities
+  if (!cap || cap.source !== 'official_model_catalog') return t('clineMetadata.capabilitiesUnknown')
+  const parts: string[] = []
+  if (cap.context_window) parts.push(`${t('clineMetadata.contextWindow')}: ${cap.context_window}`)
+  if (cap.max_output_tokens) parts.push(`${t('clineMetadata.maxOutput')}: ${cap.max_output_tokens}`)
+  for (const key of ['images', 'tools', 'reasoning'] as const) {
+    if (typeof cap[key] === 'boolean') parts.push(`${t(`clineMetadata.${key}`)}: ${t(cap[key] ? 'clineMetadata.supported' : 'clineMetadata.unsupported')}`)
+  }
+  return parts.join(' · ') || t('clineMetadata.capabilitiesUnknown')
+}
 function selectable(id: string): boolean {
   // Keep literal forbidden characters out of a Unicode regexp character class.
   if (!id || id.length > 256 || /\s/u.test(id) || id.includes('*') || id.includes('\\') || id.includes(String.fromCharCode(0))) return false

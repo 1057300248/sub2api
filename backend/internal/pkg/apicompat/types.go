@@ -48,13 +48,15 @@ type AnthropicThinking struct {
 
 // AnthropicMessage is a single message in the Anthropic conversation.
 type AnthropicMessage struct {
-	Role    string          `json:"role"` // "user" | "assistant"
-	Content json.RawMessage `json:"content"`
+	ReasoningDetails ClineReasoningDetails `json:"reasoning_details,omitempty"`
+	Role             string                `json:"role"` // "user" | "assistant"
+	Content          json.RawMessage       `json:"content"`
 }
 
 // AnthropicContentBlock is one block inside a message's content array.
 type AnthropicContentBlock struct {
-	Type string `json:"type"`
+	ReasoningDetails ClineReasoningDetails `json:"reasoning_details,omitempty"`
+	Type             string                `json:"type"`
 
 	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
 
@@ -133,14 +135,15 @@ type AnthropicCacheControl struct {
 // (official Anthropic wire format). A plain string zero-value would marshal as
 // "" which strict clients treat as invalid mid-stream state.
 type AnthropicResponse struct {
-	ID           string                  `json:"id"`
-	Type         string                  `json:"type"` // "message"
-	Role         string                  `json:"role"` // "assistant"
-	Content      []AnthropicContentBlock `json:"content"`
-	Model        string                  `json:"model"`
-	StopReason   *string                 `json:"stop_reason"`
-	StopSequence *string                 `json:"stop_sequence,omitempty"`
-	Usage        AnthropicUsage          `json:"usage"`
+	ClineProvider *ClineProviderObservation `json:"cline_provider,omitempty"`
+	ID            string                    `json:"id"`
+	Type          string                    `json:"type"` // "message"
+	Role          string                    `json:"role"` // "assistant"
+	Content       []AnthropicContentBlock   `json:"content"`
+	Model         string                    `json:"model"`
+	StopReason    *string                   `json:"stop_reason"`
+	StopSequence  *string                   `json:"stop_sequence,omitempty"`
+	Usage         AnthropicUsage            `json:"usage"`
 }
 
 // AnthropicStopReasonPtr returns a non-nil pointer to s for final stop reasons.
@@ -184,7 +187,8 @@ type AnthropicUsage struct {
 
 // AnthropicStreamEvent is a single SSE event in the Anthropic streaming protocol.
 type AnthropicStreamEvent struct {
-	Type string `json:"type"`
+	ClineProvider *ClineProviderObservation `json:"cline_provider,omitempty"`
+	Type          string                    `json:"type"`
 
 	// message_start
 	Message *AnthropicResponse `json:"message,omitempty"`
@@ -202,7 +206,8 @@ type AnthropicStreamEvent struct {
 
 // AnthropicDelta carries incremental content in streaming events.
 type AnthropicDelta struct {
-	Type string `json:"type,omitempty"` // "text_delta" | "input_json_delta" | "thinking_delta" | "signature_delta"
+	ReasoningDetails ClineReasoningDetails `json:"reasoning_details,omitempty"`
+	Type             string                `json:"type,omitempty"` // "text_delta" | "input_json_delta" | "thinking_delta" | "signature_delta"
 
 	// text_delta
 	Text string `json:"text,omitempty"`
@@ -361,8 +366,9 @@ func (t *ResponsesTool) UnmarshalJSON(data []byte) error {
 
 // ResponsesResponse is the non-streaming response from POST /v1/responses.
 type ResponsesResponse struct {
-	ID     string `json:"id"`
-	Object string `json:"object"` // "response"
+	ClineProvider *ClineProviderObservation `json:"cline_provider,omitempty"`
+	ID            string                    `json:"id"`
+	Object        string                    `json:"object"` // "response"
 	// CreatedAt is the unix creation timestamp. Strict Responses clients declare
 	// it non-optional and abort with `missing field 'created_at'` when it is
 	// absent, so it is always emitted — no omitempty. Same rule as ID (see the
@@ -394,7 +400,8 @@ type ResponsesIncompleteDetails struct {
 
 // ResponsesOutput is one output item in a Responses API response.
 type ResponsesOutput struct {
-	Type string `json:"type"` // "message" | "reasoning" | "function_call" | "web_search_call"
+	ReasoningDetails ClineReasoningDetails `json:"reasoning_details,omitempty"`
+	Type             string                `json:"type"` // "message" | "reasoning" | "function_call" | "web_search_call"
 
 	// type=message
 	ID      string                 `json:"id,omitempty"`
@@ -445,6 +452,9 @@ func (o ResponsesOutput) MarshalJSON() ([]byte, error) {
 		"call_id":   o.CallID,
 		"execution": "client",
 		"arguments": toolSearchCallArgumentsJSON(o.Arguments),
+	}
+	if len(o.ReasoningDetails) > 0 {
+		m["reasoning_details"] = o.ReasoningDetails
 	}
 	if o.Status != "" {
 		m["status"] = o.Status
@@ -704,13 +714,14 @@ type ChatStreamOptions struct {
 
 // ChatMessage is a single message in the Chat Completions conversation.
 type ChatMessage struct {
-	Role             string          `json:"role"` // "system" | "user" | "assistant" | "tool" | "function"
-	Content          json.RawMessage `json:"content,omitempty"`
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	Reasoning        string          `json:"reasoning,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	ToolCalls        []ChatToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID       string          `json:"tool_call_id,omitempty"`
+	ReasoningDetails ClineReasoningDetails `json:"reasoning_details,omitempty"`
+	Role             string                `json:"role"` // "system" | "user" | "assistant" | "tool" | "function"
+	Content          json.RawMessage       `json:"content,omitempty"`
+	ReasoningContent string                `json:"reasoning_content,omitempty"`
+	Reasoning        string                `json:"reasoning,omitempty"`
+	Name             string                `json:"name,omitempty"`
+	ToolCalls        []ChatToolCall        `json:"tool_calls,omitempty"`
+	ToolCallID       string                `json:"tool_call_id,omitempty"`
 
 	// Legacy function calling
 	FunctionCall *ChatFunctionCall `json:"function_call,omitempty"`
@@ -779,14 +790,15 @@ type ChatFunctionCall struct {
 
 // ChatCompletionsResponse is the non-streaming response from POST /v1/chat/completions.
 type ChatCompletionsResponse struct {
-	ID                string       `json:"id"`
-	Object            string       `json:"object"` // "chat.completion"
-	Created           int64        `json:"created"`
-	Model             string       `json:"model"`
-	Choices           []ChatChoice `json:"choices"`
-	Usage             *ChatUsage   `json:"usage,omitempty"`
-	SystemFingerprint string       `json:"system_fingerprint,omitempty"`
-	ServiceTier       string       `json:"service_tier,omitempty"`
+	Provider          json.RawMessage `json:"provider,omitempty"`
+	ID                string          `json:"id"`
+	Object            string          `json:"object"` // "chat.completion"
+	Created           int64           `json:"created"`
+	Model             string          `json:"model"`
+	Choices           []ChatChoice    `json:"choices"`
+	Usage             *ChatUsage      `json:"usage,omitempty"`
+	SystemFingerprint string          `json:"system_fingerprint,omitempty"`
+	ServiceTier       string          `json:"service_tier,omitempty"`
 }
 
 // ChatChoice is a single completion choice.
@@ -825,6 +837,7 @@ type ChatTokenDetails struct {
 
 // ChatCompletionsChunk is a single streaming chunk from POST /v1/chat/completions.
 type ChatCompletionsChunk struct {
+	Provider          json.RawMessage   `json:"provider,omitempty"`
 	ID                string            `json:"id"`
 	Object            string            `json:"object"` // "chat.completion.chunk"
 	Created           int64             `json:"created"`
@@ -844,11 +857,12 @@ type ChatChunkChoice struct {
 
 // ChatDelta carries incremental content in a streaming chunk.
 type ChatDelta struct {
-	Role             string         `json:"role,omitempty"`
-	Content          *string        `json:"content,omitempty"` // pointer: omit when not present, null vs "" matters
-	ReasoningContent *string        `json:"reasoning_content,omitempty"`
-	Reasoning        *string        `json:"reasoning,omitempty"`
-	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
+	ReasoningDetails ClineReasoningDetails `json:"reasoning_details,omitempty"`
+	Role             string                `json:"role,omitempty"`
+	Content          *string               `json:"content,omitempty"` // pointer: omit when not present, null vs "" matters
+	ReasoningContent *string               `json:"reasoning_content,omitempty"`
+	Reasoning        *string               `json:"reasoning,omitempty"`
+	ToolCalls        []ChatToolCall        `json:"tool_calls,omitempty"`
 }
 
 func (m ChatMessage) reasoningText() string {

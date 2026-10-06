@@ -159,3 +159,23 @@ describe('Cline automatic quota view', () => {
     } finally { wrapper.unmount() }
   })
 })
+
+
+describe('Cline exact model capability observations', () => {
+  it('distinguishes explicit false from absent and never changes the selection', async () => {
+    const data = fixture()
+    data.catalog!.clinePass = [
+      { id: 'cline-pass/known', capabilities: { source: 'official_model_catalog', context_window: 131072, images: false, tools: true } },
+      { id: 'cline-pass/unknown' }
+    ]
+    vi.mocked(getClineMetadata).mockResolvedValueOnce(data)
+    const wrapper = setup()
+    await flushPromises()
+    const rows = wrapper.findAll('[data-testid="cline-model-capabilities"]')
+    expect(rows[0].text()).toContain('131072')
+    expect(rows[0].text()).toContain(en.unsupported)
+    expect(rows[1].text()).toBe(en.capabilitiesUnknown)
+    expect(wrapper.emitted('select')).toBeUndefined()
+    wrapper.unmount()
+  })
+})

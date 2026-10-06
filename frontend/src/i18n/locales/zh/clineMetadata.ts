@@ -1,4 +1,13 @@
 export default {
+  capabilitiesUnknown: '能力未知，不根据模型名称推断。',
+  contextWindow: '上下文',
+  maxOutput: '最大输出',
+  images: '图片',
+  tools: '工具',
+  reasoning: '推理',
+  supported: '支持',
+  unsupported: '不支持',
+
   automatic: "服务端自动刷新已启用。下次计划检查：",
   cooldownNotice: "已确认的额度阻塞会保留至复查。所有耗尽窗口都恢复后才放行；倒计时结束本身不会自动放行。",
   inferenceSource: "推理限流",

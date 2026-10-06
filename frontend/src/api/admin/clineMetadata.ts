@@ -1,6 +1,14 @@
 import { apiClient } from '../client'
 
-export interface ClineCatalogModel { id: string; name?: string; description?: string }
+export interface ClineModelCapabilities {
+  source: 'official_model_catalog'
+  context_window?: number
+  max_output_tokens?: number
+  images?: boolean
+  tools?: boolean
+  reasoning?: boolean
+}
+export interface ClineCatalogModel { id: string; name?: string; description?: string; capabilities?: ClineModelCapabilities }
 export interface ClineMetadata {
   auto_refresh?: boolean
   next_refresh_at?: string
@@ -12,7 +20,7 @@ export interface ClineMetadata {
   credential_status: string
   identity_verified: boolean
   windows: { type: string; percent_used: number | null; resets_at?: string }[]
-  catalog?: { recommended: ClineCatalogModel[] | null; clinePass: ClineCatalogModel[] | null; free: ClineCatalogModel[] | null }
+  catalog?: { capabilities_status?: string; recommended: ClineCatalogModel[] | null; clinePass: ClineCatalogModel[] | null; free: ClineCatalogModel[] | null }
   catalog_status: string
   catalog_fetched_at?: string
   fetched_at?: string
