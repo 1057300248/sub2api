@@ -293,3 +293,13 @@ func TestPriorityOAuthQuotaScopeAndPartitions(t *testing.T) {
 	require.Equal(t, int64(2), order[0].account.ID)
 	require.False(t, order[0].priorityAPIStandby, "unknown compact OAuth cannot suppress supported API")
 }
+
+func TestPriorityExplorationDoesNotPromoteAPIKeys(t *testing.T) {
+	cfg := DefaultPrioritySchedulingConfig()
+	api := priorityCandidate(1, .1, 0)
+	applyPriorityCandidate(cfg, &api, PrioritySchedulingSignal{}, time.Now())
+	require.False(t, api.priorityExploration, "the OAuth exploration lane must not let API keys bypass the ranked tail")
+	api.account.Type = AccountTypeOAuth
+	applyPriorityCandidate(cfg, &api, PrioritySchedulingSignal{}, time.Now())
+	require.True(t, api.priorityExploration, "safe OAuth cold starts retain exploration")
+}
