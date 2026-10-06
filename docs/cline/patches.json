@@ -205,7 +205,7 @@
     "frontend/src/components/account/__tests__/CreateAccountModal.spec.ts",
     "frontend/src/components/account/__tests__/clineAccountForm.spec.ts",
     "frontend/src/components/account/__tests__/clineAccountSettings.spec.ts",
-    "frontend/src/components/account/__tests__/clineAdvancedSettings.spec.ts",
+    "frontend/src/components/account/__tests__/clineAdvancedSettingsPayload.spec.ts",
     "frontend/src/components/account/clineAccountForm.ts",
     "frontend/src/components/account/clineAccountSettings.ts",
     "frontend/src/components/account/clineAdvancedSettings.ts",

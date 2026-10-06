@@ -100,6 +100,14 @@ if pipeline_path.is_file():
     if not (0 <= prepare < send < guard):
         errors.append('Cline request identity must be captured before transport and guarded after it')
 manifest=json.loads((ROOT/'docs/cline/patches.json').read_text())
+# Account development is also performed on Windows. Case-only file pairs
+# would pass Linux tests but overwrite each other in a case-insensitive checkout.
+case_paths = {}
+for name in manifest['allowed_changed_files']:
+    folded = name.casefold()
+    if folded in case_paths and case_paths[folded] != name:
+        errors.append(f'case-insensitive path collision: {case_paths[folded]} / {name}')
+    case_paths[folded] = name
 modules={item['id']:item for item in manifest['modules']}
 for module in ('cline-platform','cline-rate-limit-cas'):
     if module not in modules or modules[module].get('review_on_upstream_touch') is not True:
