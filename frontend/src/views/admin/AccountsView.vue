@@ -457,7 +457,7 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <ClineAccountModal :show="showCline" :account="clineEditAccount" :groups="groups" :allow-composite="!authStore.isSimpleMode" @close="showCline = false" @saved="reload" />
+    <ClineAccountModal :show="showCline" :account="clineEditAccount" :proxies="proxies" :groups="groups" :allow-composite="!authStore.isSimpleMode" @close="showCline = false" @saved="reload" />
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
@@ -1403,6 +1403,7 @@ watch(accounts, (rows) => {
 const isAnyModalOpen = computed(() => {
   return (
     showCreate.value ||
+    showCline.value ||
     showEdit.value ||
     showSync.value ||
     showImportData.value ||

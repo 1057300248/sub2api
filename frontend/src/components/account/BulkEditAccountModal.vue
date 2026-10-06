@@ -766,6 +766,7 @@
             class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
           />
         </div>
+        <p v-if="targetSelectedPlatforms.includes('cline')" class="mt-2 text-xs text-gray-500">{{ t('clineAccount.headersHint') }}</p>
         <div v-if="enableHeaderOverride" id="bulk-edit-header-override-body" class="mt-3 space-y-3">
           <button
             type="button"
@@ -1562,6 +1563,7 @@
 </template>
 
 <script setup lang="ts">
+import { validateClineHeaderRows } from './clineAccountSettings'
 import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier } from '@/utils/accountCost'
 
 import { ref, watch, computed } from 'vue'
@@ -2442,6 +2444,10 @@ const handleSubmit = async () => {
     // 既有覆写配置静默清空，必须显式拦截（清空请走关闭开关的路径，有专门提示）
     if (!headerOverrideRows.value.some((row) => row.name.trim())) {
       appStore.showError(t('admin.accounts.headerOverride.bulkEmptyRows'))
+      return
+    }
+    if (targetSelectedPlatforms.value.includes('cline') && !validateClineHeaderRows(headerOverrideRows.value)) {
+      appStore.showError(t('clineAccount.errors.headers'))
       return
     }
     const headerError = validateHeaderOverrideRows(headerOverrideRows.value)

@@ -1263,6 +1263,7 @@ export interface OpenCodeGoUsageSettings {
 }
 
 export interface Account {
+  cline_usage?: import('@/api/admin/clineMetadata').ClineMetadata
   id: number
   name: string
   notes?: string | null
@@ -1600,6 +1601,7 @@ export interface OpenAIResponsesState {
 }
 
 export interface CreateAccountRequest {
+  schedulable?: boolean // Cline create: keep setup accounts paused without a second write.
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1640,6 +1642,7 @@ export interface UpdateAccountRequest {
   load_factor?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
+  group_rate_multiplier?: number
   schedulable?: boolean
   status?: 'active' | 'inactive' | 'error'
   group_ids?: number[]

@@ -62,6 +62,18 @@ for name, anchors in {
 }.items():
     REQUIRED.setdefault(name, []).extend(anchors)
 
+# Visible entry and common-setting anchors must survive upstream transplants.
+# Actual rendered component/API assertions live in the required CI suites.
+for name, anchors in {
+    'frontend/src/components/account/CreateAccountModal.vue': ['data-testid="create-platform-cline"', '<ClineAccountModal', '@saved="emit(\'created\')"'],
+    'frontend/src/components/account/ClineAccountModal.vue': ['HeaderOverrideEditor', 'AccountGroupModelLimits', 'cline-proxy', 'cline-cost', 'cline-expiry'],
+    'frontend/src/components/account/clineAccountSettings.ts': ['proxy_fallback_origin_id', 'group_allowed_models', 'cost_multiplier', 'validateClineHeaderRows'],
+    'frontend/src/components/account/AccountUsageCell.vue': ['ClineAccountUsageCell'],
+    'backend/internal/service/cline_account_settings.go': ['mergeClineAccountCredentials', 'applyClineSchedulingSettings', 'validateClineAccountHeaderSettings'],
+    'backend/internal/handler/dto/account_cline_view.go': ['ClineMetadataForAccount', 'view.Catalog = nil'],
+}.items():
+    REQUIRED.setdefault(name, []).extend(anchors)
+
 errors=[]
 for name, anchors in REQUIRED.items():
     path=ROOT/name

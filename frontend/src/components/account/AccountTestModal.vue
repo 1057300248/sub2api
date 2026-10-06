@@ -41,6 +41,7 @@
         </span>
       </div>
 
+      <p v-if="isClineAccount" data-testid="cline-test-notice" class="text-xs text-amber-700 dark:text-amber-300">{{ t(clineTestEnabled ? 'clineAccount.testNotice' : 'clineAccount.testUnavailable') }}</p>
       <div class="space-y-1.5">
         <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
           {{ t('admin.accounts.selectTestModel') }}
@@ -205,7 +206,7 @@
         </button>
         <button
           @click="startTest"
-          :disabled="status === 'connecting' || !selectedModelId"
+          :disabled="status === 'connecting' || !selectedModelId || (isClineAccount && !clineTestEnabled)"
           :class="[
             'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
             status === 'connecting' || !selectedModelId
@@ -245,6 +246,7 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import { clineTestModelAllowed } from './clineAccountForm'
 import Select from '@/components/common/Select.vue'
 import TextArea from '@/components/common/TextArea.vue'
 import { Icon } from '@/components/icons'
@@ -288,6 +290,8 @@ let abortController: AbortController | null = null
 const generatedImages = ref<PreviewImage[]>([])
 const testMode = ref<'default' | 'compact' | 'bps_tools'>('default')
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
+const isClineAccount = computed(() => props.account?.platform === 'cline')
+const clineTestEnabled = computed(() => clineTestModelAllowed(props.account, selectedModelId.value))
 const isBPSAccount = computed(() =>
   isOpenAIAccount.value && props.account?.type === 'oauth' && props.account?.extra?.openai_excel_bps === true
 )
@@ -358,7 +362,7 @@ const loadAvailableModels = async () => {
     const models = await adminAPI.accounts.getAvailableModels(props.account.id)
     availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
       ? sortTestModels(models)
-      : models
+      : props.account.platform === 'cline' ? models.filter(model => clineTestModelAllowed(props.account, model.id)) : models
     // Default selection by platform
     if (availableModels.value.length > 0) {
       if (props.account.platform === 'gemini') {
@@ -413,7 +417,7 @@ const scrollToBottom = async () => {
 }
 
 const startTest = async () => {
-  if (!props.account || !selectedModelId.value) return
+  if (!props.account || !selectedModelId.value || (isClineAccount.value && !clineTestEnabled.value)) return
 
   resetState()
   status.value = 'connecting'

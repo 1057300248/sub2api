@@ -453,6 +453,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	applyClineSchedulingSettings(account, input.Schedulable)
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
 			return nil, ErrUpstreamBillingProbeAccountInvalid
@@ -526,6 +527,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		return nil, err
 	}
 
+	if err := validateClineAccountHeaderSettings(input.Platform, input.Credentials); err != nil {
+		return nil, err
+	}
 	// 绑定分组
 	groupIDs := input.GroupIDs
 	// 如果没有指定分组,自动绑定对应平台的默认分组
@@ -638,6 +642,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
+	if account.IsCline() && input.Extra != nil {
+		copyInput := *input
+		copyInput.Extra = mergeClineAccountExtra(account, input.Extra)
+		input = &copyInput
+	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
 		normalizedExtra, err = normalizeOpenAILongContextBillingUpdateExtra(account, input)
@@ -706,7 +715,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	} else if len(input.Credentials) > 0 {
 		// 敏感子键采用"incoming 没提供就保留"的合并语义：前端响应已脱敏，
 		// 全对象 PUT 编辑时不会再带回 token，避免覆盖时清空已有凭证。
-		account.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+		account.Credentials = mergeClineAccountCredentials(account, input.Credentials)
+		if err := validateClineAccountHeaderSettings(account.Platform, account.Credentials); err != nil {
+			return nil, err
+		}
 		if err := ValidateModelMappingMode(account.Credentials); err != nil {
 			return nil, err
 		}
@@ -898,6 +910,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if input.Status != "" {
 		account.Status = input.Status
 	}
+	applyClineSchedulingSettings(account, input.Schedulable)
 	if input.ExpiresAt != nil {
 		if *input.ExpiresAt <= 0 {
 			account.ExpiresAt = nil
@@ -1239,6 +1252,13 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 	}
 
+	for _, target := range cachedTargets {
+		if target != nil && target.IsCline() {
+			if err := validateClineAccountHeaderSettings(target.Platform, input.Credentials); err != nil {
+				return nil, err
+			}
+		}
+	}
 	// 校验并规范化请求头覆写配置（批量路径为 JSONB 顶层 key 合并，直接校验增量即可）
 	if err := ValidateModelMappingMode(input.Credentials); err != nil {
 		return nil, err

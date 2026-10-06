@@ -208,4 +208,53 @@ describe('AccountTestModal', () => {
 
     expect(wrapper.text()).toContain('已通过 /v1/chat/completions 验证')
   })
+
+  it('opens Cline testing with saved mapped models only and never probes until an explicit click', async () => {
+    const account = { ...buildAccount(), platform: 'cline', type: 'apikey', credentials: {
+      account_mode: 'pass', model_mapping: { 'public-model': 'cline-pass/example' }
+    } }
+    getAvailableModelsMock.mockResolvedValue([{ id: 'public-model', display_name: 'Mapped' }, { id: 'other-model', display_name: 'Unmapped' }])
+    const wrapper = mount(AccountTestModal, {
+      props: { show: false, account },
+      global: { stubs: { BaseDialog: BaseDialogStub, Select: SelectStub, TextArea: TextAreaStub, Icon: true } }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(getAvailableModelsMock).toHaveBeenCalledWith(account.id)
+    expect(wrapper.find('option[value="public-model"]').exists()).toBe(true)
+    expect(wrapper.find('option[value="other-model"]').exists()).toBe(false)
+    expect(wrapper.find('option[value="compact"]').exists()).toBe(false)
+    expect(wrapper.find('option[value="bps_tools"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="cline-test-notice"]').text()).toBe('clineAccount.testNotice')
+    expect(global.fetch).not.toHaveBeenCalled()
+    const start = wrapper.findAll('button').find(b => b.text().includes('admin.accounts.startTest'))!
+    expect(start.attributes('disabled')).toBeUndefined()
+    await start.trigger('click')
+    await flushPromises()
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toEqual({ model_id: 'public-model', prompt: '', mode: 'default' })
+    wrapper.unmount()
+  })
+
+  it.each(['free', 'unknown'])('does not offer or execute an unentitled Cline %s connection test', async mode => {
+    const account = { ...buildAccount(), platform: 'cline', type: 'apikey', credentials: {
+      account_mode: mode, model_mapping: { 'public-model': 'cline-pass/example' }
+    } }
+    getAvailableModelsMock.mockResolvedValue([{ id: 'public-model', display_name: 'Mapped' }])
+    const wrapper = mount(AccountTestModal, {
+      props: { show: false, account },
+      global: { stubs: { BaseDialog: BaseDialogStub, Select: SelectStub, TextArea: TextAreaStub, Icon: true } }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.find('option[value="public-model"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="cline-test-notice"]').text()).toBe('clineAccount.testUnavailable')
+    const start = wrapper.findAll('button').find(b => b.text().includes('admin.accounts.startTest'))!
+    expect(start.attributes('disabled')).toBeDefined()
+    ;(wrapper.vm as any).selectedModelId = 'public-model'
+    await (wrapper.vm as any).startTest()
+    expect(global.fetch).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
 })

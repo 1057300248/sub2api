@@ -7,6 +7,12 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/account/__tests__/clineAccountForm.spec.ts \
 	src/components/account/__tests__/ClineMetadataPanel.spec.ts \
 	src/components/account/__tests__/ClineAccountModal.spec.ts \
+	src/components/account/__tests__/clineAccountSettings.spec.ts \
+	src/components/account/__tests__/ClineAccountUsageCell.spec.ts \
+	src/components/account/__tests__/CreateAccountModal.spec.ts \
+	src/components/account/__tests__/AccountTestModal.spec.ts \
+	src/components/account/__tests__/AccountUsageCell.spec.ts \
+	src/views/admin/__tests__/AccountsView.lite.spec.ts \
 	src/views/admin/ops/__tests__/TokenGuardV2View.spec.ts \
 	src/features/channel-monitor-v2/__tests__/MonitorCandySettings.spec.ts \
 	src/features/channel-monitor-v2/__tests__/MonitorStatusCards.spec.ts \

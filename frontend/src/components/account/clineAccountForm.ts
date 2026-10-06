@@ -1,10 +1,12 @@
 import type { Account, CreateAccountRequest, UpdateAccountRequest } from '@/types'
+import { clineAccountSettings, clineAccountSettingsPayload, clineAccountHeaderCredentials, type ClineAccountSettings } from './clineAccountSettings'
 
 export const CLINE_BASE_URL = 'https://api.cline.bot/api/v1'
 export type ClineMode = 'pass' | 'free' | 'payg' | 'unknown'
 export type ClineAuthType = 'api_key' | 'account_token'
 export interface ClineModelRow { publicID: string; upstreamID: string }
-export interface ClineAccountDraft {
+
+export interface ClineAccountDraft extends ClineAccountSettings {
   name: string
   notes: string
   mode: ClineMode
@@ -38,6 +40,7 @@ export function clineAccountDraft(account?: Account | null): ClineAccountDraft {
     : []
   const authType = credentials.cline_auth_type
   return {
+    ...clineAccountSettings(account),
     name: account?.name ?? '', notes: account?.notes ?? '',
     mode: account ? clineMode(credentials.account_mode) : 'pass',
     authType: !account ? 'api_key' : authType === 'api_key' || authType === 'account_token' ? authType : '',
@@ -90,17 +93,32 @@ export function buildClineAccountPayload(draft: ClineAccountDraft, account?: Acc
   if (!Number.isInteger(draft.priority) || draft.priority < 0 || draft.priority > 10000) throw new ClineFormError('priority')
   if (draft.groupIDs.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new ClineFormError('groups')
   const common = {
-    name: draft.name.trim(), notes: draft.notes || null, credentials: checkedCredentials(draft, !!account),
+    name: draft.name.trim(), notes: draft.notes, credentials: checkedCredentials(draft, !!account),
+    ...clineAccountSettingsPayload(draft, draft.groupIDs, account),
     concurrency: draft.concurrency, priority: draft.priority
   }
   const groupIDs = [...new Set(draft.groupIDs)]
-  if (!account) return { ...common, platform: 'cline', type: 'apikey', group_ids: groupIDs }
+  const originalHeaders = clineAccountSettings(account)
+  if (draft.headerOverrideEnabled || originalHeaders.headerOverrideEnabled || JSON.stringify(draft.headerOverrideRows) !== JSON.stringify(originalHeaders.headerOverrideRows)) {
+    Object.assign(common.credentials, clineAccountHeaderCredentials(draft))
+  }
+  if (!account) return { ...common, platform: 'cline', type: 'apikey', group_ids: groupIDs, schedulable: (draft.mode === 'pass' || draft.mode === 'payg') && draft.schedulable }
   const update: UpdateAccountRequest = {
     ...common, schedulable: (draft.mode === 'pass' || draft.mode === 'payg') && draft.schedulable
   }
   const before = [...(account.group_ids ?? [])].sort((a, b) => a - b)
   if (JSON.stringify(before) !== JSON.stringify([...groupIDs].sort((a, b) => a - b))) update.group_ids = groupIDs
-  // Do not send Extra, billing settings, probe state, a platform conversion,
-  // or unchanged group bindings/limits as collateral of a credential edit.
+  // Send only explicitly changed cost Extra keys, never runtime/probe state,
+  // a platform conversion or unchanged common settings/group bindings.
   return update
+}
+
+export function clineTestModelAllowed(account: Account | null | undefined, id: string): boolean {
+  if (account?.platform !== 'cline' || account.type !== 'apikey' || !validID(id)) return false
+  const mapping = account.credentials?.model_mapping
+  if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping) || !Object.prototype.hasOwnProperty.call(mapping, id)) return false
+  const upstream = (mapping as Record<string, unknown>)[id]
+  if (typeof upstream !== 'string' || !validID(upstream)) return false
+  const mode = clineMode(account.credentials?.account_mode)
+  return mode === 'pass' ? upstream.startsWith('cline-pass/') && upstream !== 'cline-pass/' : mode === 'payg' && !upstream.startsWith('cline-pass/')
 }

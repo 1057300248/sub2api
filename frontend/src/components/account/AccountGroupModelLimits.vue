@@ -43,7 +43,7 @@
           class="text-xs text-amber-600 dark:text-amber-400"
           data-testid="group-model-limit-empty"
         >
-          {{ t('admin.accounts.groupModelLimits.emptyHint') }}
+          {{ t(platform === 'cline' ? 'clineAccount.errors.groupModels' : 'admin.accounts.groupModelLimits.emptyHint') }}
         </p>
       </div>
     </div>

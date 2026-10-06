@@ -1776,4 +1776,13 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).not.toContain('7d S')
     expect(wrapper.text()).not.toContain('7d F')
   })
+  it('routes native Cline to its saved quota cell without a per-row usage request', async () => {
+    const wrapper = mount(AccountUsageCell, { props: { account: makeAccount({ platform: 'cline', type: 'apikey', credentials: { account_mode: 'pass' } }) } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="cline-usage-cell"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('clineAccount.usageUnknown')
+    expect(getUsage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
 })

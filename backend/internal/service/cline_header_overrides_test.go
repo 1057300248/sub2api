@@ -81,6 +81,8 @@ func TestClineThreeProtocolRequestHeaderOverrides(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/%s/stream=%v", platform, protocol, stream), func(t *testing.T) {
 					a := clineRoutingAccount(t, cline.ModePass, cline.AuthAPIKey)
 					a.Platform = platform
+					a.Credentials["header_override_enabled"] = true
+					a.Credentials["header_overrides"] = map[string]any{"user-agent": "account-default/1", "x-client-name": "saved-client"}
 					if platform != PlatformCline {
 						a.Extra["openai_responses_mode"] = "force_chat_completions"
 					}
@@ -101,6 +103,38 @@ func TestClineThreeProtocolRequestHeaderOverrides(t *testing.T) {
 					require.Equal(t, "request-fixture", upstream.lastReq.Header.Get("X-Request-ID"))
 					require.Equal(t, "Bearer test-key-not-real", upstream.lastReq.Header.Get("Authorization"))
 					require.False(t, gjson.GetBytes(upstream.lastBody, "header_overrides").Exists())
+					savedClient := ""
+					for name, values := range upstream.lastReq.Header {
+						if strings.EqualFold(name, "X-Client-Name") && len(values) == 1 {
+							savedClient = values[0]
+						}
+					}
+					require.Equal(t, "saved-client", savedClient)
+					count := 0
+					for name := range upstream.lastReq.Header {
+						if strings.EqualFold(name, "User-Agent") {
+							count++
+						}
+					}
+					require.Equal(t, 1, count, "account/request wire-casing variants must not both be sent")
+					secondBody, secondPath := clineProtocolRequest(protocol, stream)
+					upstream.resp = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{media}}, Body: io.NopCloser(strings.NewReader(payload))}
+					c2, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c2.Request = httptest.NewRequest("POST", secondPath, bytes.NewReader(secondBody))
+					_, err = invokeClineProtocol(svc, c2, a, secondBody, protocol)
+					require.NoError(t, err)
+					// Generic header application may preserve lowercase wire names.
+					got := ""
+					for name, values := range upstream.lastReq.Header {
+						if strings.EqualFold(name, "User-Agent") {
+							require.Len(t, values, 1)
+							got = values[0]
+						}
+					}
+					require.Equal(t, "account-default/1", got)
+					require.NotEqual(t, "request-fixture", upstream.lastReq.Header.Get("X-Request-ID"))
+					require.Equal(t, "Bearer test-key-not-real", upstream.lastReq.Header.Get("Authorization"))
+
 				})
 			}
 		}

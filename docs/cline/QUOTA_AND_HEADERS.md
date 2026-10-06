@@ -99,3 +99,22 @@ The existing handler/ledger parameter cases now assert final headers and body
 stripping, including streaming, non-streaming and compaction. Tests use synthetic
 credentials/transports and disposable PostgreSQL only. CI results must be read
 for the exact delivered commit; passing an earlier revision is not final evidence.
+
+## Optional account defaults and account settings
+
+The native Cline account editor now also exposes the existing administrator
+account-default header fields, `credentials.header_override_enabled` and
+`credentials.header_overrides`. They obey the same stricter Cline positive list
+and byte limits as the request extension. They are optional and disabled by
+default; no account-level body/providerOptions override has been introduced.
+
+Precedence: gateway defaults < enabled account header defaults < request-level
+`header_overrides`. All existing case variants are removed before replacement.
+Only configured account defaults persist; a request override never changes them
+or leaks to later requests. Metadata GETs inherit neither form of override.
+Clearing the account toggle sends false plus an empty header object. Native
+create/edit, mixed bulk updates and repository credential writes validate the
+settings before persistence; non-Cline header behavior remains unchanged.
+
+See `ACCOUNT_SETTINGS_AUDIT.md` for the visible create entry, shared account
+settings, credential-preserving edits, saved quota list projection and tests.

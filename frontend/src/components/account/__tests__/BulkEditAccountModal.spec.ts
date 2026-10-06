@@ -6,6 +6,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import BulkEditAccountModal from '../BulkEditAccountModal.vue'
+import HeaderOverrideEditor from '../HeaderOverrideEditor.vue'
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
 import { adminAPI } from '@/api/admin'
 
@@ -1392,5 +1393,27 @@ describe('bulk BPS defaults integration', () => {
       openai_excel_bps_auto_disable_on_403: true, openai_excel_bps_cache_creation_as_input: true
     }) }))
     wrapper.unmount()
+  })
+})
+
+
+describe('Cline bulk header settings', () => {
+  beforeEach(() => {
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockReset().mockResolvedValue({ success: 2, failed: 0 } as any)
+    showError.mockClear()
+  })
+  it.each([{ selectedPlatforms: ['cline'] }, { selectedPlatforms: ['cline', 'openai'] }])('offers safe default headers to eligible targets $selectedPlatforms', async ({ selectedPlatforms }) => {
+    const w = mountModal({ selectedPlatforms, selectedTypes: ['apikey'] })
+    await w.get('#bulk-edit-header-override-enabled').setValue(true)
+    await w.get('#bulk-edit-header-override-body > button').trigger('click'); await flushPromises()
+    w.getComponent(HeaderOverrideEditor).vm.$emit('update:rows', [{ name: 'X-Tenant-ID', value: 'must-not-send' }])
+    await flushPromises(); await w.get('#bulk-edit-account-form').trigger('submit'); await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('clineAccount.errors.headers')
+    w.getComponent(HeaderOverrideEditor).vm.$emit('update:rows', [{ name: 'User-Agent', value: 'fixture/1' }])
+    await flushPromises(); await w.get('#bulk-edit-account-form').trigger('submit'); await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0][1]).toMatchObject({ credentials: { header_override_enabled: true, header_overrides: { 'user-agent': 'fixture/1' } } })
+    w.unmount()
   })
 })

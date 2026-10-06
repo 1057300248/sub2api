@@ -416,6 +416,7 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
+	Schedulable         *bool // Optional Cline operator setting; other platform contracts are unchanged.
 	Name                string
 	Notes               *string
 	Platform            string
@@ -449,6 +450,7 @@ type ShadowOptions struct {
 }
 
 type UpdateAccountInput struct {
+	Schedulable         *bool // Optional Cline operator setting; other platform contracts are unchanged.
 	Name                string
 	Notes               *string
 	Type                string // Account type: oauth, setup-token, apikey
