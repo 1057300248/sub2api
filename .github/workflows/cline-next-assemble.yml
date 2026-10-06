@@ -1,0 +1,114 @@
+name: Assemble pinned v2.9.11 Cline review tree
+on:
+  push:
+    branches: [codex/cline-v2911-assemble-20261007]
+    paths: [.github/workflows/cline-next-assemble.yml, '.cline-next-apply/**']
+permissions:
+  contents: write
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reproduce reviewed merge and source patch; store blobs only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags https://github.com/ranxi2001/sub2api.git e6addfe4aff745c859f9bb50817bc468e0e1f4f7
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, os, re, subprocess, urllib.request
+          from pathlib import Path
+          root = Path.cwd()
+          work = Path(os.environ['RUNNER_TEMP'])/'product'
+          old = '0d923dc088c665cdbf268ad524160f0a55f0cb84'
+          upstream = 'e6addfe4aff745c859f9bb50817bc468e0e1f4f7'
+          def git(*args, cwd=work, check=True, data=None):
+              p = subprocess.run(['git', *args], cwd=cwd, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+              if check and p.returncode:
+                  raise RuntimeError(f'git {args}: {p.stdout.decode()} {p.stderr.decode()}')
+              return p
+          def out(*args): return git(*args).stdout.decode().strip()
+          git('worktree','add','--detach',str(work),old,cwd=root)
+          merged = git('-c','user.name=Review builder','-c','user.email=review@example.invalid','merge','--no-commit','--no-ff',upstream,check=False)
+          conflicts=set(out('diff','--name-only','--diff-filter=U').splitlines())
+          expected={'backend/internal/repository/account_repo.go','backend/internal/service/admin_service.go','frontend/package.json','frontend/pnpm-lock.yaml'}
+          assert merged.returncode == 1 and conflicts == expected, (merged.returncode,conflicts)
+          pattern=r'(?ms)^<<<<<<< HEAD\n(.*?)^=======\n(.*?)^>>>>>>> '+upstream+r'\n'
+          for name in sorted(expected):
+              path=work/name
+              if name.startswith('frontend/'):
+                  path.write_bytes(git('show',upstream+':'+name).stdout)
+              else:
+                  text=path.read_text()
+                  blocks=list(re.finditer(pattern,text))
+                  assert len(blocks)==1, name
+                  ours,theirs=blocks[0].groups()
+                  if name.endswith('account_repo.go'):
+                      assert ours == '\treturn r.createAccountAtomic(ctx, account, nil, false)\n'
+                      assert 'InitialQualityPlan' in theirs and 'createAccountRecord' in theirs
+                      replacement=ours
+                  else:
+                      assert ours=='\tSchedulable         *bool // Optional Cline operator setting; other platform contracts are unchanged.\n'
+                      assert theirs=='\tInitialQualityPlan  *ScheduledTestPlan `json:"-"`\n'
+                      replacement=ours+theirs
+                  text=text[:blocks[0].start()]+replacement+text[blocks[0].end():]
+                  assert not re.search(r'(?m)^(<<<<<<<|=======|>>>>>>>)',text)
+                  path.write_text(text)
+              git('add','--',name)
+          merge_tree=out('write-tree')
+          assert merge_tree=='19402e5c460491353b007f657d83cbca5e235b4e',merge_tree
+          uploaded=set()
+          def entries(base,tree):
+              names=git('diff','--name-only','-z',base,tree).stdout.decode().split('\0')
+              result=[]
+              for name in filter(None,names):
+                  rec=git('ls-tree','-z',tree,'--',name).stdout.decode().strip('\0')
+                  if not rec:
+                      result.append({'path':name,'mode':'100644','type':'blob','sha':None}); continue
+                  info,found=rec.split('\t',1)
+                  mode,kind,sha=info.split()
+                  assert found==name and kind=='blob'
+                  if sha not in uploaded:
+                      known=False
+                      for ref in (old,upstream):
+                          check=git('rev-parse',ref+':'+name,check=False)
+                          if check.returncode==0 and check.stdout.decode().strip()==sha: known=True; break
+                      if not known:
+                          data=git('cat-file','blob',sha).stdout
+                          assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()==sha
+                          req=urllib.request.Request('https://api.github.com/repos/1057300248/sub2api/git/blobs',method='POST',data=json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode(),headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'})
+                          with urllib.request.urlopen(req,timeout=60) as response: stored=json.load(response)
+                          assert stored['sha']==sha
+                      uploaded.add(sha)
+                  result.append({'path':name,'mode':mode,'type':kind,'sha':sha})
+              return result
+          merge_entries=entries(old,merge_tree)
+          encoded=''.join((root/'.cline-next-apply'/('%02d.b64'%i)).read_text().strip() for i in range(4))
+          patch=lzma.decompress(base64.b64decode(encoded,validate=True),memlimit=128*1024*1024)
+          assert len(patch)==178012
+          assert hashlib.sha256(patch).hexdigest()=='54891368c6f77d295253891118db720adfc81566d0a0097627a747a888da4bdb'
+          git('apply','--check','--index','-',data=patch)
+          git('apply','--index','-',data=patch)
+          final_tree=out('write-tree')
+          assert final_tree=='e7b1c6a924b3ff6dc0ae080f2373db8024fe6012',final_tree
+          subprocess.run(['python3','tools/verify_cline_only.py'],cwd=work,check=True)
+          subprocess.run(['python3','tools/verify_cline_platform.py'],cwd=work,check=True)
+          git('diff','--cached','--check')
+          feature_entries=entries(merge_tree,final_tree)
+          report={'old':old,'upstream':upstream,'merge_tree':merge_tree,'final_tree':final_tree,'merge_entries':merge_entries,'feature_entries':feature_entries}
+          Path(os.environ['RUNNER_TEMP'],'cline-next-objects.json').write_text(json.dumps(report,indent=2)+'\n')
+          print('MERGE_TREE',merge_tree,'FEATURE_TREE',final_tree,'MERGE_PATHS',len(merge_entries),'FEATURE_PATHS',len(feature_entries))
+          print(git('diff','--stat',upstream,final_tree).stdout.decode())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cline-next-objects
+          path: ${{ runner.temp }}/cline-next-objects.json
+          retention-days: 3
