@@ -18,7 +18,7 @@ var ErrClineHeaderOverrides = infraerrors.BadRequest("INVALID_CLINE_HEADER_OVERR
 // becoming client-controlled. No values are logged or persisted on an account.
 func permittedClineOverrideHeader(name string) bool {
 	switch strings.ToLower(name) {
-	case "user-agent", "accept-language", "x-request-id", "x-client-name", "x-client-version", "http-referer", "x-title":
+	case "user-agent", "accept-language", "x-request-id", "x-client-name", "x-client-version", "x-client-type", "http-referer", "x-title":
 		return true
 	default:
 		return strings.HasPrefix(strings.ToLower(name), "x-metadata-")

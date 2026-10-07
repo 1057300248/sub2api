@@ -36,7 +36,7 @@ BEGIN
             RAISE EXCEPTION 'invalid Cline header configuration' USING ERRCODE='23514';
         END IF;
         folded := lower(pair.key COLLATE "C");
-        IF folded = ANY(seen) OR NOT (folded IN ('user-agent','accept-language','x-request-id','x-client-name','x-client-version','http-referer','x-title')
+        IF folded = ANY(seen) OR NOT (folded IN ('user-agent','accept-language','x-request-id','x-client-name','x-client-version','x-client-type','http-referer','x-title')
             OR starts_with(folded,'x-metadata-')) THEN
             RAISE EXCEPTION 'invalid Cline header configuration' USING ERRCODE='23514';
         END IF;
