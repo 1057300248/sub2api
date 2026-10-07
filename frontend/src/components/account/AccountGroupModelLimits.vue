@@ -36,6 +36,7 @@
           :model-value="modelValue[group.id] ?? []"
           :platform="platform || 'anthropic'"
           :account-id="accountId"
+          :sync-disabled="syncDisabled"
           @update:model-value="setModels(group.id, $event)"
         />
         <p
@@ -60,6 +61,7 @@ const props = defineProps<{
   groups: { id: number; name: string }[]
   platform?: string
   accountId?: number
+  syncDisabled?: boolean
 }>()
 
 const emit = defineEmits<{

@@ -8,8 +8,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cline"
 )
 
-// The Cline editor submits credential deltas. Keep unedited options on the
-// server, rather than round-tripping stored secrets through the browser.
+// Preserve the deployed Cline credential-delta API contract. The native account
+// form uses this same endpoint; stored secrets must not round-trip through it.
 func mergeClineAccountCredentials(account *Account, incoming map[string]any) map[string]any {
 	if !account.IsCline() {
 		return MergePreservingSensitiveCreds(account.Credentials, incoming)
@@ -100,9 +100,9 @@ func applyClineRequestHeaders(target, overrides http.Header) {
 	}
 }
 
-// Native Cline account settings are deltas. Managed keys are still reloaded
-// under the repository lock; an editable cost change must not erase ordinary
-// options omitted by this small form. Other platforms retain full-PUT semantics.
+// Deployed Cline account settings use deltas. The native form sends common
+// settings through that existing contract. Managed keys are reloaded under the
+// repository lock; omitted settings are preserved. Other platforms keep PUT semantics.
 func mergeClineAccountExtra(account *Account, incoming map[string]any) map[string]any {
 	out := make(map[string]any, len(account.Extra)+len(incoming))
 	for key, value := range account.Extra {

@@ -91,12 +91,18 @@ watch(localEnabled, (val) => {
 })
 
 // Common timezone options
-const timezoneOptions = [
+const timezonePresets = [
   'UTC', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore', 'Asia/Kolkata',
   'Asia/Dubai', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
   'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
   'America/Sao_Paulo', 'Australia/Sydney', 'Pacific/Auckland',
 ]
+
+// Keep a saved IANA timezone visible even when it is outside the quick presets.
+// Rendering or editing another field must not silently replace it with UTC.
+const timezoneOptions = computed(() => Array.from(new Set([
+  ...timezonePresets, ...(props.resetTimezone ? [props.resetTimezone] : []),
+])))
 
 // Hours for dropdown (0-23)
 const hourOptions = Array.from({ length: 24 }, (_, i) => i)

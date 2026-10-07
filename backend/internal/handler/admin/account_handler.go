@@ -3214,11 +3214,13 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 // POST /api/v1/admin/accounts/models/sync-upstream-preview
 func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 	var req struct {
-		Platform     string            `json:"platform" binding:"required"`
-		Type         string            `json:"type" binding:"required"`
-		BaseURL      string            `json:"base_url"`
-		APIKey       string            `json:"api_key" binding:"required"`
-		ModelMapping map[string]string `json:"model_mapping"`
+		Platform      string            `json:"platform" binding:"required"`
+		Type          string            `json:"type" binding:"required"`
+		BaseURL       string            `json:"base_url"`
+		APIKey        string            `json:"api_key" binding:"required"`
+		ModelMapping  map[string]string `json:"model_mapping"`
+		AccountMode   string            `json:"account_mode"`
+		ClineAuthType string            `json:"cline_auth_type"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -3244,6 +3246,10 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 		return
 	}
 
+	if tempAccount.IsCline() {
+		tempAccount.Credentials["account_mode"] = req.AccountMode
+		tempAccount.Credentials["cline_auth_type"] = req.ClineAuthType
+	}
 	catalog, err := h.accountTestService.SyncUpstreamModelCatalog(c.Request.Context(), tempAccount)
 	if err != nil {
 		var syncErr *service.UpstreamModelSyncError

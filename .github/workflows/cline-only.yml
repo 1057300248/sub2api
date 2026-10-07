@@ -1,9 +1,9 @@
 name: Cline-only validation
 on:
   push:
-    branches: [codex/sub2-v2100-cline-rebuild-20261007]
+    branches: [codex/sub2-v2100-cline-rebuild-20261007, codex/cline-native-account-flow-20261007]
   pull_request:
-    branches: [codex/sub2-v2100-upstream-base]
+    branches: [codex/sub2-v2100-upstream-base, codex/sub2-v2100-cline-rebuild-20261007]
   workflow_dispatch:
 permissions:
   contents: read
@@ -55,6 +55,8 @@ env:
         required |= {'TestClineThreeProtocolOmittedStreamAndOfficialHeaders', 'TestClineAccountTokenMetadataReauthenticationAndRecovery', 'TestClineFinalStreamModeAndForcedTools', 'TestClineReasoningThreeProtocolRoundTripAndCallerIsolation', 'TestClineAccountToken401UsesCredentialBoundReauth', 'TestClineReasoningToolBindingAndTerminalEvents'}
     if suite == 'service':
         required |= {'TestClineLegacyProductionWeeklyCooldown', 'TestClineLegacyIncidentDoesNotClaimOtherOrigins', 'TestClineIncidentAPIKeyDiagnosticsTrackActualSelection', 'TestClineIncidentAPIKeyDiagnosticBoundsAndDuplicates', 'TestClineIncidentUsageIdentityMatchesSQLSnapshot', 'TestClineIncidentSnapshotDiagnosticsSeparateMissingFromBackend', 'TestClineIncidentUsageFKDiagnosticsPreserveRecordIdentity'}
+    if suite == 'service':
+        required |= {'TestClineNativeModelSyncUsesExistingTransportAndModeBuckets', 'TestClineNativeModelSyncRejectsInvalidConnectionsWithoutHTTP', 'TestClineNativeModelSyncFailureAndPickerContracts', 'TestClineNativeModelSyncPreviewUsesOriginalEndpoint'}
     if suite == 'postgres':
         required = {'TestClinePostgresPlatformUnionUpgrade', 'TestClinePostgresCreateOutboxFailureIsAtomic', 'TestClinePostgresCreateReusesOuterTransaction', 'TestClinePostgresMaximumFreeScopeUsesUnfingerprintedColumn', 'TestClinePostgresIdentitySwitchDoesNotReattributeOldLimits', 'TestClinePostgresSharedSubjectLimitsAndRestart', 'TestClinePostgresRefreshLeaseAndObservationOrdering', 'TestClinePostgresOutboxFailureRollsBackState', 'TestClinePostgresDirectAndBulkCredentialGuards', 'TestClinePostgresAdmissionRejectsStaleCredentials', 'TestClinePostgresConcurrentScopedCAS', 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits', 'TestClinePostgresCreationCannotImportManagedState', 'TestClinePostgresMigrationAndQuotaSchema', 'TestClinePostgresMetadataQuotaSharedRecoveryAndStaleObservations', 'TestClinePostgresExpiredQuotaRequiresConfirmedWindow', 'TestClinePostgresHealthyMetadataCannotShortenInferenceCooldown', 'TestClinePostgresAutomaticMetadataCandidatesIncludeCoolingNotDisabled', 'TestClinePostgresAccountSettingsRoundTripAndHeaderGuards', 'TestClinePostgresHeaderGuardDatabaseContract', 'TestClinePostgresAdvancedSettingsGuardsAndBulkAtomicity', 'TestClinePostgresLocalQuotaCountersCannotBeReplayed', 'TestClinePostgresAdvancedOperationsPreservePassAndOtherBlocks', 'TestClinePostgresLocalQuotaFinalAdmissionAndResetRollback'}
         required |= {'TestClinePostgresQuotaCrossingConcurrencyAndOutboxRollback', 'TestClinePostgresQuotaCrossingAfterRollover', 'TestClinePostgresProviderObservationOwnershipAndOfficialHeaders', 'TestClinePostgresToken401RotationAndObservationCAS', 'TestClinePostgresAllQuotaDimensionsEmitFirstCrossing'}
@@ -211,7 +213,7 @@ jobs:
       - name: Cline frontend regression tests
         working-directory: frontend
         run: |
-          pnpm exec vitest run src/components/account/__tests__/ClineAccountModal.spec.ts src/components/account/__tests__/ClineMetadataPanel.spec.ts src/components/account/__tests__/clineAccountForm.spec.ts src/components/account/__tests__/clineAdvancedSettingsPayload.spec.ts src/components/account/__tests__/ClineAdvancedSettings.spec.ts src/components/account/__tests__/clineAccountSettings.spec.ts src/components/account/__tests__/ClineAccountUsageCell.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/BulkEditAccountModal.spec.ts src/components/account/__tests__/AccountTestModal.spec.ts src/components/account/__tests__/AccountUsageCell.spec.ts src/views/admin/__tests__/AccountsView.lite.spec.ts --reporter=json --outputFile="$RUNNER_TEMP/cline-frontend-tests.json"
+          pnpm exec vitest run src/components/account/__tests__/EditAccountModal.spec.ts src/components/account/__tests__/ModelWhitelistSelector.spec.ts src/components/account/__tests__/credentialsBuilder.spec.ts src/composables/__tests__/useQuotaNotifyState.spec.ts src/components/account/__tests__/ClineMetadataPanel.spec.ts src/components/account/__tests__/clineAccountForm.spec.ts src/components/account/__tests__/ClineAccountUsageCell.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/BulkEditAccountModal.spec.ts src/components/account/__tests__/AccountTestModal.spec.ts src/components/account/__tests__/AccountUsageCell.spec.ts src/views/admin/__tests__/AccountsView.lite.spec.ts --reporter=json --outputFile="$RUNNER_TEMP/cline-frontend-tests.json"
           python3 - <<'PY'
           import json, os
           from pathlib import Path

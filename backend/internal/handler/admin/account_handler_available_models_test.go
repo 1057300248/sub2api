@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -38,12 +39,14 @@ func setupAvailableModelsRouter(adminSvc service.AdminService) *gin.Engine {
 }
 
 type syncUpstreamHTTPUpstream struct {
+	lastReq   *http.Request
 	resp      *http.Response
 	responses []*http.Response
 	err       error
 }
 
 func (u *syncUpstreamHTTPUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	u.lastReq = req
 	if u.err != nil {
 		return nil, u.err
 	}
@@ -72,6 +75,9 @@ func setupSyncUpstreamModelsRouter(adminSvc service.AdminService, upstream servi
 		&config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
 		nil,
 	)
+	accountTestSvc.SetOpenAIGatewayService(service.NewOpenAIGatewayService(
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil,
+	))
 	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, accountTestSvc, nil, nil, nil, nil, nil)
 	router.POST("/api/v1/admin/accounts/:id/models/sync-upstream", handler.SyncUpstreamModels)
 	router.POST("/api/v1/admin/accounts/models/sync-upstream-preview", handler.SyncUpstreamModelsPreview)
@@ -557,5 +563,26 @@ func TestAccountHandlerGetAvailableModels_TypeSafeOnlyReturnsJev(t *testing.T) {
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 		require.Len(t, resp.Data, 1)
 		require.Equal(t, "jev-latest", resp.Data[0].ID)
+	}
+}
+
+func TestClineNativeModelSyncPreviewUsesOriginalEndpoint(t *testing.T) {
+	for _, tc := range []struct{ mode, auth, want string }{
+		{"pass", "account_token", "cline-pass/model"}, {"payg", "api_key", "vendor/paid"}, {"free", "api_key", "vendor/free"},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			upstream := &syncUpstreamHTTPUpstream{resp: &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"clinePass":[{"id":"cline-pass/model"}],"recommended":[{"id":"vendor/paid"}],"free":[{"id":"vendor/free"}]}`))}}
+			router := setupSyncUpstreamModelsRouter(nil, upstream)
+			body := fmt.Sprintf(`{"platform":"cline","type":"apikey","api_key":"fixture-secret","account_mode":%q,"cline_auth_type":%q}`, tc.mode, tc.auth)
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/models/sync-upstream-preview", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, req)
+			require.Equal(t, 200, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), tc.want)
+			require.NotContains(t, recorder.Body.String(), "fixture-secret")
+			require.NotNil(t, upstream.lastReq)
+			require.Empty(t, upstream.lastReq.Header.Get("Authorization"))
+		})
 	}
 }

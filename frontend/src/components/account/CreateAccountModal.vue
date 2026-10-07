@@ -1,6 +1,6 @@
 <template>
   <BaseDialog
-    :show="show && !showClineCreate"
+    :show="show"
     :title="t('admin.accounts.createAccount')"
     width="wide"
     @close="handleClose"
@@ -242,8 +242,9 @@
             TypeSafe / Jev
           </button>
           <button type="button" data-testid="create-platform-cline" :disabled="submitting"
-            class="flex min-w-[96px] flex-1 items-center justify-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
-            @click="showClineCreate = true">Cline</button>
+            :class="['flex min-w-[96px] flex-1 items-center justify-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-all', form.platform === 'cline' ? 'bg-white text-primary-600 shadow-sm dark:bg-dark-600 dark:text-primary-400' : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200']"
+            :aria-pressed="form.platform === 'cline'"
+            @click="selectClinePlatform()"><PlatformIcon platform="cline" size="sm" />Cline</button>
         </div>
       </div>
 
@@ -1386,6 +1387,21 @@
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
+        <div v-if="form.platform === 'cline'" class="space-y-3" data-testid="cline-provider-fields">
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label class="input-label">{{ t('clineAccount.mode') }}</label>
+              <Select v-model="clineAccountMode" :options="clineModeOptions" data-testid="cline-mode" />
+            </div>
+            <div>
+              <label class="input-label">{{ t('clineAccount.authType') }}</label>
+              <Select v-model="clineAuthType" :options="clineAuthOptions" data-testid="cline-auth" />
+            </div>
+          </div>
+          <p class="input-hint">{{ t('clineAccount.nativeHint') }}</p>
+          <p v-if="clineAuthType === 'account_token'" class="input-hint">{{ t('clineAccount.manualTokenNotice') }}</p>
+          <p v-if="clineAccountMode === 'free' || clineAccountMode === 'unknown'" role="status" class="text-sm text-amber-700 dark:text-amber-300">{{ t(clineAccountMode === 'free' ? 'clineAccount.freeNotice' : 'clineAccount.unknownNotice') }}</p>
+        </div>
         <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
@@ -1552,7 +1568,7 @@
               />
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-                <span v-if="allowedModels.length === 0">{{
+                <span v-if="allowedModels.length === 0 && form.platform !== 'cline'">{{
                   t('admin.accounts.supportsAllModels')
                 }}</span>
               </p>
@@ -1671,11 +1687,12 @@
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.poolModeHint') }}
+                {{ t(form.platform === 'cline' ? 'clineAccount.poolUnavailable' : 'admin.accounts.poolModeHint') }}
               </p>
             </div>
             <button
               type="button"
+              :disabled="form.platform === 'cline'"
               @click="poolModeEnabled = !poolModeEnabled"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -3886,16 +3903,13 @@
     @confirm="handleMixedChannelConfirm"
     @cancel="handleMixedChannelCancel"
   />
-  <ClineAccountModal v-if="show && showClineCreate" :show="true" :proxies="proxies" :groups="groups"
-    :allow-composite="!authStore.isSimpleMode" :initial="{ name: form.name, notes: form.notes || '' }"
-    show-platform-back @back="showClineCreate = false" @close="handleClose" @saved="emit('created')" />
 </template>
 
 <script setup lang="ts">
 import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier } from '@/utils/accountCost'
 
 import OpenAITwoFAImport from './OpenAITwoFAImport.vue'
-import ClineAccountModal from './ClineAccountModal.vue'
+import { CLINE_BASE_URL, clineModeOptions, clineAuthOptions, clineModelError, applyClineCredentialFields, type ClineMode, type ClineAuthType } from './clineAccountForm'
 import { createTokenGuardV2Account } from '@/api/admin/accountTokenGuardV2'
 import type { TokenGuardReloginAccount } from '@/api/admin/accountTokenGuard'
 import { ref, reactive, computed, watch } from 'vue'
@@ -4041,14 +4055,14 @@ const withAccountExtraSettings = (extra?: Record<string, unknown>): Record<strin
 const baseUrlHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
-  if (form.platform === 'grok') return ''
+  if (form.platform === 'grok' || form.platform === 'cline') return ''
   return t('admin.accounts.baseUrlHint')
 })
 
 const apiKeyHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.apiKeyHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.apiKeyHint')
-  if (form.platform === 'grok') return ''
+  if (form.platform === 'grok' || form.platform === 'cline') return ''
   return t('admin.accounts.apiKeyHint')
 })
 
@@ -4065,6 +4079,8 @@ const apiKeyBaseUrlPlaceholder = computed(() => {
       return 'https://generativelanguage.googleapis.com'
     case 'grok':
       return 'https://api.x.ai/v1'
+    case 'cline':
+      return CLINE_BASE_URL
     case 'typesafe':
       return 'https://api.typesafe.ai'
     default:
@@ -4103,8 +4119,13 @@ interface Props {
 }
 
 const props = defineProps<Props>()
-const showClineCreate = ref(false)
-watch(() => props.show, () => { showClineCreate.value = false })
+const clineAccountMode = ref<ClineMode>('pass')
+const clineAuthType = ref<ClineAuthType>('api_key')
+function selectClinePlatform() {
+  accountCategory.value = 'apikey'
+  form.platform = 'cline'
+}
+
 const emit = defineEmits<{
   close: []
   created: []
@@ -4382,6 +4403,7 @@ const syncPreviewCredentials = computed(() => {
     type: form.type,
     base_url: baseUrl || undefined,
     api_key: apiKeyValue.value,
+    ...(form.platform === 'cline' ? { account_mode: clineAccountMode.value, cline_auth_type: clineAuthType.value } : {}),
     ...(modelMapping ? { model_mapping: modelMapping } : {})
   }
 })
@@ -4448,7 +4470,7 @@ const validateGrokOAuthUpstreamConfig = (): boolean => {
     }
   }
   if (headerOverrideEnabled.value) {
-    const headerError = validateHeaderOverrideRows(headerOverrideRows.value)
+    const headerError = validateHeaderOverrideRows(headerOverrideRows.value, form.platform)
     if (headerError) {
       appStore.showError(t(`admin.accounts.headerOverride.${headerError}`))
       return false
@@ -4875,13 +4897,14 @@ watch(
 // Reset platform-specific settings when platform changes
 watch(
   () => form.platform,
-  (newPlatform) => {
+  (newPlatform, previousPlatform) => {
     // Reset base URL based on platform
     if (isCNProviderPlatform(newPlatform) || newPlatform === 'opencode_go') {
       const mode = newPlatform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
       apiKeyBaseUrl.value = defaultCNBaseUrl(newPlatform, mode, apiProtocol.value)
     } else {
       apiKeyBaseUrl.value =
+        newPlatform === 'cline' ? CLINE_BASE_URL :
         (newPlatform === 'openai')
           ? 'https://api.openai.com'
           : newPlatform === 'gemini'
@@ -4891,6 +4914,17 @@ watch(
               : newPlatform === 'typesafe'
                 ? 'https://api.typesafe.ai'
               : 'https://api.anthropic.com'
+    }
+    // Never carry another provider's unsaved secret or policy into Cline (or back).
+    if (newPlatform === 'cline' || previousPlatform === 'cline') {
+      apiKeyValue.value = ''
+    }
+    if (newPlatform === 'cline') {
+      accountCategory.value = 'apikey'
+      poolModeEnabled.value = false
+      upstreamBillingAutoProbeEnabled.value = false
+      clineAccountMode.value = 'pass'
+      clineAuthType.value = 'api_key'
     }
     // Clear model-related settings
     allowedModels.value = []
@@ -5302,7 +5336,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       Object.values(modelMapping).some((target) =>
         typeof target === 'string' && target.trim() !== '' && !target.includes('*')
       )
-    if (upstreamModelsPreviewed.value || hasConcreteMappedTarget) {
+    if (payload.platform !== 'cline' && (upstreamModelsPreviewed.value || hasConcreteMappedTarget)) {
       try {
         const result = await adminAPI.accounts.syncUpstreamModels(account.id)
         const warnings = result.warnings ?? []
@@ -5695,6 +5729,7 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (submitting.value) return
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !isOpenAITwoFA.value && !form.name.trim()) {
@@ -5839,6 +5874,13 @@ const handleSubmit = async () => {
     return
   }
 
+  // The standard form owns all common settings; this hook validates only Cline's provider contract.
+  if (form.platform === 'cline') {
+    const issue = clineModelError(clineAccountMode.value,
+      modelRestrictionMode.value === 'whitelist' ? allowedModels.value : [],
+      modelRestrictionMode.value === 'mapping' ? modelMappings.value : [])
+    if (issue) { appStore.showError(t(`clineAccount.errors.${issue}`)); return }
+  }
   // For apikey type, create directly
   if (!apiKeyValue.value.trim()) {
     appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
@@ -5847,6 +5889,7 @@ const handleSubmit = async () => {
 
   // Determine default base URL based on platform
   const defaultBaseUrl =
+    form.platform === 'cline' ? CLINE_BASE_URL :
     form.platform === 'openai'
       ? 'https://api.openai.com'
       : form.platform === 'gemini'
@@ -5868,7 +5911,7 @@ const handleSubmit = async () => {
 
   // 国产供应商：账号模式 + 协议 + 对应端点写入凭据；后端按 account_mode 路由
   // 额度/余额探测，按 api_protocol 路由转发端点与格式。注意 CN apikey 走本函数
-  // 的通用路径（直接 doCreateAccount），不经过 createAccountAndFinish。
+  // 的通用路径，最终共用 createAccountAndFinish 序列化配额与通用设置。
   if (isCNProviderPlatform(form.platform) || form.platform === 'opencode_go') {
     credentials.account_mode = form.platform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
     credentials.api_protocol = apiProtocol.value
@@ -5934,7 +5977,7 @@ const handleSubmit = async () => {
   // Add header override if enabled for this API-key platform
   if (isHeaderOverrideCapable(form.platform, 'apikey')) {
     if (headerOverrideEnabled.value) {
-      const headerError = validateHeaderOverrideRows(headerOverrideRows.value)
+      const headerError = validateHeaderOverrideRows(headerOverrideRows.value, form.platform)
       if (headerError) {
         appStore.showError(t(`admin.accounts.headerOverride.${headerError}`))
         return
@@ -5948,16 +5991,16 @@ const handleSubmit = async () => {
     return
   }
 
+  if (form.platform === 'cline') {
+    const issue = applyClineCredentialFields(credentials, clineAccountMode.value, clineAuthType.value)
+    if (issue) { appStore.showError(t(`clineAccount.errors.${issue}`)); return }
+  }
   form.credentials = credentials
   const extra = buildAnthropicExtra(buildOpenAIExtra())
 
-  await doCreateAccount({
-    ...form,
-    group_ids: form.group_ids,
-    extra: withAccountExtraSettings(extra),
-    upstream_billing_probe_enabled: upstreamBillingAutoProbeEnabled.value,
-    auto_pause_on_expired: autoPauseOnExpired.value
-  })
+  // Reuse the same quota/notification and common-settings finalizer as the
+  // other API-key creation paths; do not bypass it for a provider extension.
+  await createAccountAndFinish(form.platform, form.type, credentials, extra)
 }
 
 const goBackToBasicInfo = () => {

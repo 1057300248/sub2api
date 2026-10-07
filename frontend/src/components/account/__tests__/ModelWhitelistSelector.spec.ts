@@ -269,3 +269,39 @@ describe('ModelWhitelistSelector', () => {
     expect(syncButton?.exists()).toBe(true)
   })
 })
+
+
+describe('native model sync with Cline provider', () => {
+  beforeEach(()=>{ syncUpstreamModels.mockReset(); syncUpstreamModelsPreview.mockReset(); showError.mockReset() })
+  const syncButton = (w: ReturnType<typeof mountSelector>) => w.findAll('button').find(b=>b.text()==='admin.accounts.syncUpstreamModels')!
+  it('uses the original preview endpoint with mode and credential kind, retaining prior selections', async () => {
+    const credentials={platform:'cline',type:'apikey',api_key:'fixture',account_mode:'pass',cline_auth_type:'account_token',base_url:'https://api.cline.bot/api/v1'}
+    syncUpstreamModelsPreview.mockResolvedValue({models:['cline-pass/model'],warnings:[{code:'cline_public_catalog'}]})
+    const w=mountSelector({platform:'cline',modelValue:['stale/model'],syncCredentials:credentials})
+    await syncButton(w).trigger('click'); await flushPromises()
+    expect(syncUpstreamModelsPreview).toHaveBeenCalledWith(credentials)
+    expect(w.emitted('update:modelValue')).toEqual([[['stale/model','cline-pass/model']]])
+    expect(syncUpstreamModels).not.toHaveBeenCalled(); w.unmount()
+  })
+  it('uses the saved account ID without resending its secret', async () => {
+    syncUpstreamModels.mockResolvedValue({models:['cline-pass/model']})
+    const w=mountSelector({platform:'cline',accountId:41})
+    await syncButton(w).trigger('click'); await flushPromises()
+    expect(syncUpstreamModels).toHaveBeenCalledWith(41); expect(syncUpstreamModelsPreview).not.toHaveBeenCalled(); w.unmount()
+  })
+  it('ignores a late discovery result after the draft mode changes', async () => {
+    let finish!: (v:any)=>void; syncUpstreamModelsPreview.mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+    const credentials={platform:'cline',type:'apikey',api_key:'fixture',account_mode:'pass'}
+    const w=mountSelector({platform:'cline',syncCredentials:credentials})
+    await syncButton(w).trigger('click')
+    await w.setProps({syncCredentials:{...credentials,account_mode:'payg'}})
+    finish({models:['cline-pass/model']}); await flushPromises()
+    expect(w.emitted('update:modelValue')).toBeUndefined(); w.unmount()
+  })
+  it('disables saved-credential sync for an unsaved connection and rejects its in-flight response', async () => {
+    let finish!: (v:any)=>void; syncUpstreamModels.mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+    const w=mountSelector({platform:'cline',accountId:41}); await syncButton(w).trigger('click')
+    await w.setProps({syncDisabled:true}); finish({models:['cline-pass/model']}); await flushPromises()
+    expect(syncButton(w)).toBeUndefined(); expect(w.emitted('update:modelValue')).toBeUndefined(); w.unmount()
+  })
+})

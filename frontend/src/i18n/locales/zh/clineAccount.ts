@@ -1,4 +1,6 @@
 export default {
+  nativeHint: 'Cline 使用通用账号设置；Chat、Responses、Messages 通过现有网关适配到 Chat Completions。模型必须明确指定，切换用量模式不会自动改写模型或启用付费回退。',
+  poolUnavailable: 'Cline 按账号真实额度冷却，不启用池模式的同账号自动重试，避免重复消耗或撞限。',
   "advanced": {
   "title": "高级设置（可选）",
   "localHint": "以下金额是本站计量的本地使用限制，不是 Cline Pass 实际账单或官方剩余额度。留空或 0 不设限；Pass 五小时／周／月额度仍独立生效。",

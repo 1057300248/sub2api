@@ -5,11 +5,10 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/__tests__/AstraGatewayRuntime.spec.ts \
 	src/components/admin/__tests__/AstraGatewayHistory.spec.ts \
 	src/components/account/__tests__/clineAccountForm.spec.ts \
-	src/components/account/__tests__/clineAdvancedSettingsPayload.spec.ts \
-	src/components/account/__tests__/ClineAdvancedSettings.spec.ts \
+	src/components/account/__tests__/EditAccountModal.spec.ts \
+	src/components/account/__tests__/ModelWhitelistSelector.spec.ts \
+	src/composables/__tests__/useQuotaNotifyState.spec.ts \
 	src/components/account/__tests__/ClineMetadataPanel.spec.ts \
-	src/components/account/__tests__/ClineAccountModal.spec.ts \
-	src/components/account/__tests__/clineAccountSettings.spec.ts \
 	src/components/account/__tests__/ClineAccountUsageCell.spec.ts \
 	src/components/account/__tests__/CreateAccountModal.spec.ts \
 	src/components/account/__tests__/AccountTestModal.spec.ts \

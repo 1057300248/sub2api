@@ -56,6 +56,21 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
+        <div v-if="account.platform === 'cline'" class="space-y-3" data-testid="cline-provider-fields">
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label class="input-label">{{ t('clineAccount.mode') }}</label>
+              <Select v-model="editClineMode" :options="clineModeOptions" data-testid="cline-mode" />
+            </div>
+            <div>
+              <label class="input-label">{{ t('clineAccount.authType') }}</label>
+              <Select v-model="editClineAuth" :options="clineAuthOptions" data-testid="cline-auth" />
+            </div>
+          </div>
+          <p class="input-hint">{{ t('clineAccount.nativeHint') }}</p>
+          <p v-if="editClineAuth === 'account_token'" class="input-hint">{{ t('clineAccount.manualTokenNotice') }}</p>
+          <p v-if="editClineMode === 'free' || editClineMode === 'unknown'" role="status" class="text-sm text-amber-700 dark:text-amber-300">{{ t(editClineMode === 'free' ? 'clineAccount.freeNotice' : 'clineAccount.unknownNotice') }}</p>
+        </div>
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
@@ -63,7 +78,7 @@
             type="text"
             class="input"
             :placeholder="
-              account.platform === 'openai'
+              account.platform === 'cline' ? CLINE_BASE_URL : account.platform === 'openai'
                 ? 'https://api.openai.com'
                 : account.platform === 'gemini'
                   ? 'https://generativelanguage.googleapis.com'
@@ -243,7 +258,7 @@
             data-lpignore="true"
             data-bwignore="true"
             :placeholder="
-              account.platform === 'openai'
+              account.platform === 'cline' ? t('admin.accounts.leaveEmptyToKeep') : account.platform === 'openai'
                 ? 'sk-proj-...'
                 : account.platform === 'gemini'
                   ? 'AIza...'
@@ -327,10 +342,10 @@
 
             <!-- Whitelist Mode -->
             <div v-if="modelRestrictionMode === 'whitelist'">
-              <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
+              <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" :sync-disabled="clineDiscoveryDraftChanged" />
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-                <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
+                <span v-if="account.platform !== 'cline' && allowedModels.length === 0 && modelMappings.length === 0">{{
                   t('admin.accounts.supportsAllModels')
                 }}</span>
               </p>
@@ -449,11 +464,12 @@
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.poolModeHint') }}
+                {{ t(account.platform === 'cline' ? 'clineAccount.poolUnavailable' : 'admin.accounts.poolModeHint') }}
               </p>
             </div>
             <button
               type="button"
+              :disabled="account.platform === 'cline'"
               @click="poolModeEnabled = !poolModeEnabled"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -1302,11 +1318,12 @@
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.poolModeHint') }}
+                {{ t(account.platform === 'cline' ? 'clineAccount.poolUnavailable' : 'admin.accounts.poolModeHint') }}
               </p>
             </div>
             <button
               type="button"
+              :disabled="account.platform === 'cline'"
               @click="poolModeEnabled = !poolModeEnabled"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -3247,8 +3264,13 @@
         :groups="groupsForModelLimits"
         :platform="account?.platform"
         :account-id="account?.id"
+        :sync-disabled="clineDiscoveryDraftChanged"
       />
 
+      <section v-if="account.platform === 'cline'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <button type="button" class="btn btn-secondary" :disabled="submitting" @click="showClineMetadata = !showClineMetadata">{{ t('clineMetadata.open') }}</button>
+        <ClineMetadataPanel v-if="showClineMetadata" :account-id="account.id" :mode="clineMode(account.credentials?.account_mode)" :readonly-catalog="true" />
+      </section>
     </form>
 
     <template #footer>
@@ -3303,6 +3325,8 @@
 </template>
 
 <script setup lang="ts">
+import { CLINE_BASE_URL, clineMode, clineModeOptions, clineAuthOptions, clineModelError, clineGroupModelError, applyClineCredentialFields, clineExtraDelta, type ClineMode, type ClineAuthType } from './clineAccountForm'
+import ClineMetadataPanel from './ClineMetadataPanel.vue'
 import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier, readAccountCostMultiplier } from '@/utils/accountCost'
 
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
@@ -3442,6 +3466,9 @@ const selectableGroups = computed(() => {
     if (assignedIds.has(group.id) && !groups.has(group.id)) {
       groups.set(group.id, group)
     }
+  }
+  for (const id of assignedIds) {
+    if (!groups.has(id)) groups.set(id, { id, name: `#${id}`, platform: props.account?.platform } as Group)
   }
   return Array.from(groups.values())
 })
@@ -3600,6 +3627,17 @@ interface TempUnschedRuleForm {
 
 // State
 const submitting = ref(false)
+const editClineMode = ref<ClineMode>('unknown')
+const editClineAuth = ref<ClineAuthType>('api_key')
+const showClineMetadata = ref(false)
+// The saved-account discovery route must not query a different credential/mode
+// than the draft currently being edited. No secret is sent for an unchanged key.
+const clineDiscoveryDraftChanged = computed(() => props.account?.platform === 'cline' && (
+  !!editApiKey.value.trim() || editClineMode.value !== clineMode(props.account.credentials?.account_mode) ||
+  editClineAuth.value !== (props.account.credentials?.cline_auth_type || 'api_key') ||
+  editBaseUrl.value.trim() !== (props.account.credentials?.base_url || CLINE_BASE_URL)
+))
+watch(() => [props.show, props.account?.id], () => { showClineMetadata.value = false })
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
 const prismBrowserEnabled = ref(false)
@@ -4285,6 +4323,7 @@ const tempUnschedPresets = computed(() => [
 
 // Computed: default base URL based on platform
 const defaultBaseUrl = computed(() => {
+  if (props.account?.platform === 'cline') return CLINE_BASE_URL
   if (props.account?.platform === 'openai') return 'https://api.openai.com'
   if (props.account?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
   if (props.account?.platform === 'grok') return 'https://api.x.ai/v1'
@@ -4374,7 +4413,7 @@ const normalizePoolModeRetryCount = (value: number) => {
 }
 
 const loadModelRestrictionFromMapping = (rawMapping?: Record<string, unknown>) => {
-  const parsed = splitModelMappingObject(rawMapping)
+  const parsed = splitModelMappingObject(rawMapping, props.account?.platform === 'cline')
   allowedModels.value = parsed.allowedModels
   modelMappings.value = parsed.modelMappings
   modelRestrictionMode.value =
@@ -4415,6 +4454,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   if (!newAccount) {
     return
   }
+  editClineMode.value = clineMode(newAccount.credentials?.account_mode)
+  editClineAuth.value = newAccount.credentials?.cline_auth_type === 'account_token' ? 'account_token' : 'api_key'
   openaiModelAliases.value = newAccount.credentials?.model_mapping_mode === 'aliases'
   // 进入回填窗口：抑制 CN 模式/协议 watcher 联动重置 base_url（见 syncingForm 注释）。
   syncingForm.value = true
@@ -4428,7 +4469,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningAction.value = null
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
-  form.proxy_id = newAccount.proxy_id
+  form.proxy_id = newAccount.proxy_fallback_origin_id ?? newAccount.proxy_id
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
@@ -4791,6 +4832,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       }
     }
     const platformDefaultUrl =
+      newAccount.platform === 'cline' ? CLINE_BASE_URL :
       newAccount.platform === 'openai'
         ? 'https://api.openai.com'
         : newAccount.platform === 'gemini'
@@ -4871,6 +4913,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined)
   } else {
     const platformDefaultUrl =
+      newAccount.platform === 'cline' ? CLINE_BASE_URL :
       newAccount.platform === 'openai'
         ? 'https://api.openai.com'
         : newAccount.platform === 'gemini'
@@ -5503,6 +5546,7 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 }
 
 const handleSubmit = async () => {
+  if (submitting.value) return
   if (bpsDefaults.loading.value) return
   if (!props.account) return
   const accountID = props.account.id
@@ -5536,6 +5580,13 @@ const handleSubmit = async () => {
 		}
 	}
 
+  if (props.account.platform === 'cline') {
+    if (clineGroupModelError(form.group_ids, groupAllowedModels.value)) {
+      appStore.showError(t('clineAccount.errors.groupModels')); return
+    }
+    const issue = clineModelError(editClineMode.value, allowedModels.value, modelMappings.value)
+    if (issue) { appStore.showError(t(`clineAccount.errors.${issue}`)); return }
+  }
   const updatePayload: Record<string, unknown> = { ...form }
   try {
     if (authStore.isObserver) {
@@ -5672,7 +5723,7 @@ const handleSubmit = async () => {
       // Add header override if enabled for this API-key platform
       if (isHeaderOverrideCapable(props.account.platform, 'apikey')) {
         if (headerOverrideEnabled.value) {
-          const headerError = validateHeaderOverrideRows(headerOverrideRows.value)
+          const headerError = validateHeaderOverrideRows(headerOverrideRows.value, props.account.platform)
           if (headerError) {
             appStore.showError(t(`admin.accounts.headerOverride.${headerError}`))
             return
@@ -5688,6 +5739,20 @@ const handleSubmit = async () => {
         return
       }
 
+      if (props.account.platform === 'cline') {
+        const issue = applyClineCredentialFields(newCredentials, editClineMode.value, editClineAuth.value)
+        if (issue) { appStore.showError(t(`clineAccount.errors.${issue}`)); return }
+        // Legacy Cline API clients use credential deltas. Explicit false/[] clears
+        // the same native switches without replaying credentials from the DOM.
+        newCredentials.custom_error_codes_enabled = customErrorCodesEnabled.value
+        newCredentials.custom_error_codes = customErrorCodesEnabled.value ? [...selectedErrorCodes.value] : []
+        newCredentials.temp_unschedulable_enabled = tempUnschedEnabled.value
+        newCredentials.temp_unschedulable_rules = tempUnschedEnabled.value ? newCredentials.temp_unschedulable_rules : []
+        newCredentials.header_override_enabled = headerOverrideEnabled.value
+        newCredentials.header_overrides = headerOverrideEnabled.value ? newCredentials.header_overrides : {}
+        newCredentials.intercept_warmup_requests = interceptWarmupRequests.value
+        if (!editApiKey.value.trim()) delete newCredentials.api_key
+      }
       updatePayload.credentials = newCredentials
     } else if (props.account.type === 'upstream') {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
@@ -5874,7 +5939,7 @@ const handleSubmit = async () => {
       }
 
       if (headerOverrideEnabled.value) {
-        const headerError = validateHeaderOverrideRows(headerOverrideRows.value)
+        const headerError = validateHeaderOverrideRows(headerOverrideRows.value, props.account.platform)
         if (headerError) {
           appStore.showError(t(`admin.accounts.headerOverride.${headerError}`))
           return
@@ -6364,7 +6429,9 @@ const handleSubmit = async () => {
     } else {
       delete costExtra.cost_multiplier_auto_sync
     }
-    updatePayload.extra = costExtra
+    updatePayload.extra = props.account.platform === 'cline'
+      ? clineExtraDelta(costExtra, props.account.extra ?? {})
+      : costExtra
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
       await submitUpdateAccount(accountID, updatePayload)

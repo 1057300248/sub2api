@@ -194,6 +194,13 @@ func newUpstreamModelSyncInternalError(message string, err error) error {
 // FetchUpstreamSupportedModels fetches only live model IDs. The admin sync path
 // uses SyncUpstreamModelCatalog so capability metadata can also be persisted.
 func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, account *Account) ([]string, error) {
+	if account.IsCline() {
+		catalog, err := s.syncClineUpstreamModelCatalog(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+		return catalog.Models, nil
+	}
 	models, _, err := s.fetchUpstreamModelList(ctx, account)
 	return models, err
 }
@@ -208,6 +215,9 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 // snapshot. When no model is complete, the existing account snapshot is left
 // untouched.
 func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, account *Account) (*UpstreamModelCatalog, error) {
+	if account.IsCline() {
+		return s.syncClineUpstreamModelCatalog(ctx, account)
+	}
 	models, body, err := s.fetchUpstreamModelList(ctx, account)
 	liveListAvailable := err == nil
 	if err != nil {

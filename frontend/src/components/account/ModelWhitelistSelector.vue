@@ -145,7 +145,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { accountsAPI } from '@/api/admin/accounts'
@@ -163,12 +163,8 @@ const props = defineProps<{
   platform?: string
   platforms?: string[]
   accountId?: number
-  syncCredentials?: {
-    platform: string
-    type: string
-    base_url?: string
-    api_key: string
-  }
+  syncCredentials?: SyncUpstreamPreviewParams
+  syncDisabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -211,9 +207,11 @@ const upstreamSyncPlatforms = new Set([
   'zhipu',
   'deepseek',
   'minimax',
-  'opencode_go'
+  'opencode_go',
+  'cline'
 ])
 const canSyncUpstream = computed(() => {
+  if (props.syncDisabled) return false
   if (props.accountId) {
     if (normalizedPlatforms.value.length === 0) return true
     return normalizedPlatforms.value.some(platform => upstreamSyncPlatforms.has(platform.toLowerCase()))
@@ -300,11 +298,15 @@ const fillRelated = () => {
   emit('update:modelValue', newModels)
 }
 
+let syncEpoch = 0
+watch(() => [props.accountId, props.platform, props.syncCredentials, props.syncDisabled], () => { syncEpoch += 1 }, { deep: true, flush: 'sync' })
+onBeforeUnmount(() => { syncEpoch += 1 })
 const syncUpstreamModels = async () => {
-  if (isSyncingUpstream.value) return
+  if (isSyncingUpstream.value || props.syncDisabled) return
   if (!props.accountId && !props.syncCredentials) return
 
   isSyncingUpstream.value = true
+  const epoch = syncEpoch
   try {
     let result
     if (props.accountId) {
@@ -315,6 +317,7 @@ const syncUpstreamModels = async () => {
       return
     }
 
+    if (epoch !== syncEpoch) return
     const upstreamModels = result.models.map(model => model.trim()).filter(Boolean)
     if (upstreamModels.length === 0) {
       appStore.showInfo(t('admin.accounts.syncUpstreamModelsEmpty'))
@@ -342,6 +345,9 @@ const syncUpstreamModels = async () => {
     const hasIncompleteMetadata = warnings.some(
       warning => warning.code === 'upstream_model_metadata_incomplete'
     )
+    if (warnings.some(warning => warning.code === 'cline_public_catalog')) {
+      appStore.showWarning(t('clineMetadata.catalogNotice'))
+    }
     if (hasIncompleteMetadata) {
       appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataIncomplete'))
       return
@@ -355,6 +361,7 @@ const syncUpstreamModels = async () => {
       appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataPartial'))
     }
   } catch (error) {
+    if (epoch !== syncEpoch) return
     const message = error instanceof Error ? error.message : t('admin.accounts.syncUpstreamModelsFailed')
     appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
   } finally {

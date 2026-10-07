@@ -187,3 +187,10 @@ describe('Cline next-release evidence display', () => {
     } finally { wrapper.unmount() }
   })
 })
+
+it('native edit uses metadata as read-only information, not another model editor', async () => {
+  const wrapper=setup();await wrapper.setProps({readonlyCatalog:true});await flushPromises()
+  expect(wrapper.findAll('button').filter(button=>button.text()===en.add)).toHaveLength(0)
+  expect(wrapper.text()).toContain('cline-pass/model')
+  expect(wrapper.emitted('select')).toBeUndefined();wrapper.unmount()
+})
