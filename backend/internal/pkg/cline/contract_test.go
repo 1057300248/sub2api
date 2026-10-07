@@ -73,13 +73,15 @@ func TestClineLimitClassification(t *testing.T) {
 		{`{"error":{"message":"You have reached your weekly Clinepass limit. The limit resets in 7d, please try again later."}}`, ScopePass + "weekly", 7 * 24 * time.Hour},
 		{`{"error":{"message":"You have reached your monthly Clinepass limit. The limit resets in 30d, please try again later."}}`, ScopePass + "monthly", 30 * 24 * time.Hour},
 		{`{"error":{"message":"You have reached your 5-hour Clinepass limit. The limit resets in 5h, please try again later."}}`, ScopePass + "five_hour", 5 * time.Hour},
+		{`{"error":{"message":"Try again in 1hour"}}`, ScopeThrottle, time.Hour},
+		{`{"error":{"message":"Try again in 2 hours"}}`, ScopeThrottle, 2 * time.Hour},
 	} {
 		l, ok := Classify(429, nil, []byte(tc.body), "", now)
 		if !ok || l.Scope != tc.scope || l.ResetAt == nil || l.ResetAt.Sub(now) != tc.wait {
 			t.Fatalf("%s: %+v", tc.body, l)
 		}
 	}
-	for _, text := range []string{"Try again in -1h", "Try again in 1hour", "Try again in 1h4w", "Try again in 99999999999999999999999d"} {
+	for _, text := range []string{"Try again in -1h", "Try again in 1hourglass", "Try again in 1h4w", "Try again in 99999999999999999999999d"} {
 		l, _ := Classify(429, nil, []byte(text), "", now)
 		if l.ResetAt != nil {
 			t.Fatalf("accepted reset %q", text)

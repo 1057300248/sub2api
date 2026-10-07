@@ -5,11 +5,11 @@ package repository
 import (
 	"context"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/incidentdiag"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/incidentdiag"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
