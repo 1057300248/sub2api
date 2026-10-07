@@ -6,6 +6,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import BulkEditAccountModal from '../BulkEditAccountModal.vue'
+import HeaderOverrideEditor from '../HeaderOverrideEditor.vue'
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
 import { adminAPI } from '@/api/admin'
 
@@ -1393,4 +1394,42 @@ describe('bulk BPS defaults integration', () => {
     }) }))
     wrapper.unmount()
   })
+})
+
+
+describe('Cline bulk header settings', () => {
+  beforeEach(() => {
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockReset().mockResolvedValue({ success: 2, failed: 0 } as any)
+    showError.mockClear()
+  })
+  it.each([{ selectedPlatforms: ['cline'] }, { selectedPlatforms: ['cline', 'openai'] }])('offers safe default headers to eligible targets $selectedPlatforms', async ({ selectedPlatforms }) => {
+    const w = mountModal({ selectedPlatforms, selectedTypes: ['apikey'] })
+    await w.get('#bulk-edit-header-override-enabled').setValue(true)
+    await w.get('#bulk-edit-header-override-body > button').trigger('click'); await flushPromises()
+    w.getComponent(HeaderOverrideEditor).vm.$emit('update:rows', [{ name: 'X-Tenant-ID', value: 'must-not-send' }])
+    await flushPromises(); await w.get('#bulk-edit-account-form').trigger('submit'); await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('clineAccount.errors.headers')
+    w.getComponent(HeaderOverrideEditor).vm.$emit('update:rows', [{ name: 'User-Agent', value: 'fixture/1' }])
+    await flushPromises(); await w.get('#bulk-edit-account-form').trigger('submit'); await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0][1]).toMatchObject({ credentials: { header_override_enabled: true, header_overrides: { 'user-agent': 'fixture/1' } } })
+    w.unmount()
+  })
+})
+
+it('offers Cline-only advanced bulk edits with explicit removal and no runtime counters', async () => {
+  vi.mocked(adminAPI.accounts.bulkUpdate).mockClear()
+  const w = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+  await w.get('[data-testid=cline-bulk-advanced-enabled]').setValue(true)
+  await w.get('[data-testid=cline-bulk-clear-limits]').setValue(true)
+  await w.get('[data-testid=cline-bulk-disable-notify]').setValue(true)
+  await w.get('[data-testid=cline-bulk-disable-policies]').setValue(true)
+  await w.get('#bulk-edit-account-form').trigger('submit.prevent'); await flushPromises()
+  expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { credentials: { custom_error_codes_enabled: false, temp_unschedulable_enabled: false }, extra: { quota_limit: null, quota_daily_limit: null, quota_weekly_limit: null, quota_notify_total_enabled: false, quota_notify_daily_enabled: false, quota_notify_weekly_enabled: false } })
+  w.unmount()
+})
+it('does not expose Cline-specific advanced bulk settings for mixed platforms', () => {
+  const w = mountModal({ selectedPlatforms: ['cline', 'openai'], selectedTypes: ['apikey'] })
+  expect(w.find('[data-testid=cline-bulk-advanced]').exists()).toBe(false); w.unmount()
 })

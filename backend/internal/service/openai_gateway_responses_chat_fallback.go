@@ -30,6 +30,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	body []byte,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	customParameterSource := body
 
 	// DeepSeek 原生 /responses 不认识 compaction_trigger：remote compaction v2 会得到
 	// reasoning+message 而非 compaction item，Codex 判 fatal。这里改写成普通总结回合
@@ -111,6 +112,16 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	chatBody, err := json.Marshal(chatReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal chat completions fallback request: %w", err)
+	}
+	chatBody, err = mergeClineCustomRequestParameters(account, customParameterSource, chatBody, apicompat.ResponsesRequest{})
+	if err != nil {
+		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
+	}
+	chatBody, err = s.restoreClineReasoning(c, account, customParameterSource, chatBody, "responses")
+	if err != nil {
+		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
 	}
 	chatBody, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, chatBody)
 	if err != nil {
@@ -198,6 +209,13 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		return nil, err
 	}
 	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
+	if !compact {
+		token, replayErr := sealClineBufferedReasoning(c, ccResp)
+		if replayErr != nil {
+			return &OpenAIForwardResult{RequestID: requestID, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, Stream: false, Duration: time.Since(startTime)}, replayErr
+		}
+		attachClineResponsesReasoning(responsesResp, token)
+	}
 	recordChatReasoningOnlyFailure(c, requestID, upstreamModel, responsesResp)
 	s.cacheReasoningItemsFromOutput(responsesResp.Output)
 	if suppressSummary {
@@ -275,6 +293,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
+	reasoningReplay := newClineReasoningAccumulator(c)
 	state := apicompat.NewChatCompletionsToResponsesStreamState(originalModel)
 	state.CustomTools = customTools
 	state.FunctionTools = functionTools
@@ -283,6 +302,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	clientDisconnected := false
 
 	writeEvents := func(events []apicompat.ResponsesStreamEvent) {
+		clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
 		// Cache the original completed reasoning items before this write boundary;
 		// clients can return the opaque item ID for DeepSeek tool-history replay.
 		if suppressSummary {
@@ -303,6 +323,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			}
 			if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 				clientDisconnected = true
+				beginClineBodyDrain(resp.Body)
 				logger.L().Debug("openai responses chat fallback: client disconnected, continuing to drain upstream for billing",
 					zap.Error(err),
 					zap.String("request_id", requestID),
@@ -314,11 +335,17 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	scan := s.scanCCStream(c, resp, "openai responses chat fallback", requestID, startTime, func(chunk *apicompat.ChatCompletionsChunk) {
+		reasoningReplay.observe(chunk)
 		events := apicompat.ChatCompletionsChunkToResponsesEvents(chunk, state)
 		s.cacheReasoningItemsFromEvents(events)
 		writeEvents(events)
 	})
 
+	clientDisconnected = clineBodyClientDisconnected(resp.Body, clientDisconnected)
+	replayToken := ""
+	if scan.Err == nil && !clientDisconnected {
+		replayToken, scan.Err = reasoningReplay.seal()
+	}
 	if scan.Err != nil {
 		return &OpenAIForwardResult{
 			RequestID:                   requestID,
@@ -333,6 +360,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			Stream:                      true,
 			Duration:                    time.Since(startTime),
 			FirstTokenMs:                scan.FirstTokenMs,
+			ClientDisconnect:            clineBodyDisconnectResult(resp.Body, clientDisconnected),
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
 	if err := state.ValidateToolCallArguments(); err != nil {
@@ -349,10 +377,12 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			Stream:                      true,
 			Duration:                    time.Since(startTime),
 			FirstTokenMs:                scan.FirstTokenMs,
+			ClientDisconnect:            clineBodyDisconnectResult(resp.Body, clientDisconnected),
 		}, fmt.Errorf("invalid tool call arguments from upstream: %w", err)
 	}
 
 	finalEvents := apicompat.FinalizeChatCompletionsResponsesStream(state)
+	finalEvents = attachClineResponsesReasoningEvents(finalEvents, replayToken)
 	for _, event := range finalEvents {
 		if event.Type == "response.failed" {
 			recordChatReasoningOnlyFailure(c, requestID, upstreamModel, event.Response)
@@ -364,6 +394,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		writeStreamHeaders()
 		if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err != nil {
 			clientDisconnected = true
+			beginClineBodyDrain(resp.Body)
 		}
 		if !clientDisconnected {
 			c.Writer.Flush()
@@ -386,6 +417,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		Stream:                      true,
 		Duration:                    time.Since(startTime),
 		FirstTokenMs:                scan.FirstTokenMs,
+		ClientDisconnect:            clineBodyDisconnectResult(resp.Body, clientDisconnected),
 	}, nil
 }
 

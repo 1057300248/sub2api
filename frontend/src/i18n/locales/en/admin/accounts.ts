@@ -115,6 +115,7 @@ export default {
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
         opencode_go: 'OpenCode',
+        cline: 'Cline',
         typesafe: 'TypeSafe / Jev',
       },
       cnProviders: {

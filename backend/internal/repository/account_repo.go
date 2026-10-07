@@ -130,37 +130,17 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
-	client := r.client
-	var tx *dbent.Tx
-	if account != nil && account.InitialQualityPlan != nil {
-		var err error
-		tx, err = r.client.Tx(ctx)
-		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-			return err
-		}
-		if err == nil {
-			defer func() { _ = tx.Rollback() }()
-			client = tx.Client()
-		}
-	}
-	if err := createAccountRecord(ctx, client, account); err != nil {
-		return err
-	}
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account create failed: account=%d err=%v", account.ID, err)
-	}
-	return nil
+	return r.createAccountAtomic(ctx, account, nil, false)
 }
 
 func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account) error {
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
+	if err := service.NormalizeClineCredentials(account.Platform, account.Type, account.Credentials); err != nil {
+		return err
+	}
+	account.Extra = service.PreserveClineStateExtra(account.Platform, nil, account.Extra)
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -237,63 +217,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 // CreateWithAccountGroups atomically persists an account, its exact per-group priorities,
 // and the scheduler outbox event used to publish the new routing snapshot.
 func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup) error {
-	if account == nil {
-		return service.ErrAccountNilInput
-	}
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return err
-	}
-
-	var txClient *dbent.Client
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		txClient = tx.Client()
-	} else {
-		// Reuse a caller-owned transaction when this repository is already transactional.
-		txClient = r.client
-	}
-	groupIDs := make([]int64, 0, len(groups))
-	for i := range groups {
-		groupIDs = append(groupIDs, groups[i].GroupID)
-	}
-	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
-		return err
-	}
-
-	if err := createAccountRecord(ctx, txClient, account); err != nil {
-		return err
-	}
-	if len(groups) > 0 {
-		builders := make([]*dbent.AccountGroupCreate, 0, len(groups))
-		for i := range groups {
-			groups[i].AccountID = account.ID
-			groups[i].AllowedModels = service.NormalizeGroupAllowedModels(groups[i].AllowedModels)
-			builder := txClient.AccountGroup.Create().
-				SetAccountID(account.ID).
-				SetGroupID(groups[i].GroupID).
-				SetPriority(groups[i].Priority)
-			if len(groups[i].AllowedModels) > 0 {
-				builder.SetAllowedModels(groups[i].AllowedModels)
-			}
-			builders = append(builders, builder)
-		}
-		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
-			return err
-		}
-	}
-	account.GroupIDs = groupIDs
-	account.AccountGroups = append([]service.AccountGroup(nil), groups...)
-	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(groupIDs)); err != nil {
-		return err
-	}
-
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
+	return r.createAccountAtomic(ctx, account, groups, true)
 }
 
 func (r *accountRepository) GetByID(ctx context.Context, id int64) (*service.Account, error) {
@@ -472,6 +396,9 @@ func (r *accountRepository) ListCRSAccountIDs(ctx context.Context) (map[string]i
 }
 
 func (r *accountRepository) Update(ctx context.Context, account *service.Account) error {
+	if account == nil {
+		return service.ErrAccountNilInput
+	}
 	return r.updateAccount(ctx, account, nil, nil, account.RateMultiplier)
 }
 
@@ -496,7 +423,10 @@ func (r *accountRepository) updateAccount(
 	explicitRateMultiplier *float64,
 ) error {
 	if account == nil {
-		return nil
+		return service.ErrAccountNilInput
+	}
+	if err := service.NormalizeClineCredentials(account.Platform, account.Type, account.Credentials); err != nil {
+		return err
 	}
 
 	baseCtx := ctx
@@ -772,6 +702,12 @@ func lockAndMergeAccountProbeExtra(
 	}
 	extra := service.MergeOpenAICodexTicketExtra(copyJSONMap(normalizeJSONMap(account.Extra)), currentExtra)
 	extra = service.MergeExcelBPS403Marker(extra, currentExtra)
+	// Preserve server-owned Cline observations and scoped cooldowns under the
+	// same row lock, not from the stale account-edit snapshot.
+	extra = service.PreserveClineStateExtra(account.Platform, currentExtra, extra)
+	if err := service.ValidateClineLocalQuotaSettings(account.Platform, extra); err != nil {
+		return nil, err
+	}
 	// Omitted cost means an unrelated edit. Keep the value under the row lock,
 	// including a probe update committed after the edit form was loaded.
 	for _, key := range []string{service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey} {
@@ -1963,11 +1899,11 @@ func (r *accountRepository) syncSchedulerAccountSnapshot(ctx context.Context, ac
 	}
 	account, err := r.GetByID(ctx, accountID)
 	if err != nil {
-		logger.LegacyPrintf("repository.account", "[Scheduler] sync account snapshot read failed: id=%d err=%v", accountID, err)
+		logSchedulerSnapshotFailure(ctx, "read", []int64{accountID}, err)
 		return
 	}
 	if err := r.schedulerCache.SetAccount(ctx, account); err != nil {
-		logger.LegacyPrintf("repository.account", "[Scheduler] sync account snapshot write failed: id=%d err=%v", accountID, err)
+		logSchedulerSnapshotFailure(ctx, "write", []int64{accountID}, err)
 	}
 }
 
@@ -1986,7 +1922,7 @@ func (r *accountRepository) deleteSchedulerAccountSnapshot(ctx context.Context, 
 		return
 	}
 	if err := r.schedulerCache.DeleteAccount(ctx, accountID); err != nil {
-		logger.LegacyPrintf("repository.account", "[Scheduler] delete account snapshot failed: id=%d err=%v", accountID, err)
+		logSchedulerSnapshotFailure(ctx, "delete", []int64{accountID}, err)
 	}
 }
 
@@ -2013,7 +1949,7 @@ func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, a
 
 	accounts, err := r.GetByIDs(ctx, uniqueIDs)
 	if err != nil {
-		logger.LegacyPrintf("repository.account", "[Scheduler] batch sync account snapshot read failed: count=%d err=%v", len(uniqueIDs), err)
+		logSchedulerSnapshotFailure(ctx, "batch_read", uniqueIDs, err)
 		return
 	}
 
@@ -2022,7 +1958,7 @@ func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, a
 			continue
 		}
 		if err := r.schedulerCache.SetAccount(ctx, account); err != nil {
-			logger.LegacyPrintf("repository.account", "[Scheduler] batch sync account snapshot write failed: id=%d err=%v", account.ID, err)
+			logSchedulerSnapshotFailure(ctx, "batch_write", []int64{account.ID}, err)
 		}
 	}
 }
@@ -2891,7 +2827,7 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(
 		ctx,
-		"UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) - 'model_rate_limits', updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+		"UPDATE accounts SET extra = CASE WHEN platform = 'cline' THEN extra ELSE COALESCE(extra, '{}'::jsonb) - 'model_rate_limits' END, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
 		id,
 	)
 	if err != nil {
@@ -3037,7 +2973,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			client = tx.Client()
 		}
 	}
-	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
+	extraExpression := "COALESCE(extra, '{}'::jsonb) || " + clineExtraUpdateSQL("$1", updates)
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}
@@ -3427,7 +3363,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			if err != nil {
 				return 0, err
 			}
-			extraExpression += " || $" + itoa(idx) + "::jsonb"
+			extraExpression += " || " + clineExtraUpdateSQL("$"+itoa(idx), updates.Extra)
 			args = append(args, payload)
 			idx++
 			if enabled, exists := updates.Extra["openai_excel_bps"].(bool); exists && !enabled {
@@ -4268,8 +4204,11 @@ const nextWeeklyResetAtExpr = `(
 // 日/周额度在周期过期时自动重置为 0 再递增。
 // 支持滚动窗口（rolling）和固定时间（fixed）两种重置模式。
 func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, amount float64) error {
-	rows, err := r.sql.QueryContext(ctx,
-		`UPDATE accounts SET extra = (
+	// Crossing any enabled dimension emits one event in the same transaction as
+	// usage. Period rollover starts at zero before this increment; repeated usage
+	// already above a limit does not generate a new crossing event.
+	_, err := clientFromContext(ctx, r.client).ExecContext(ctx,
+		`WITH changed AS (UPDATE accounts SET extra = (
 			COALESCE(extra, '{}'::jsonb)
 			-- 总额度：始终递增
 			|| jsonb_build_object('quota_used', COALESCE((extra->>'quota_used')::numeric, 0) + $1)
@@ -4309,32 +4248,19 @@ func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, am
 			ELSE '{}'::jsonb END
 		), updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
-		RETURNING
-			COALESCE((extra->>'quota_used')::numeric, 0),
-			COALESCE((extra->>'quota_limit')::numeric, 0)`,
-		amount, id)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var newUsed, limit float64
-	if rows.Next() {
-		if err := rows.Scan(&newUsed, &limit); err != nil {
-			return err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	// 任一维度配额刚超限时触发调度快照刷新
-	if limit > 0 && newUsed >= limit && (newUsed-amount) < limit {
-		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue quota exceeded failed: account=%d err=%v", id, err)
-		}
-	}
-	return nil
+        RETURNING id, extra
+    ) INSERT INTO scheduler_outbox(event_type,account_id)
+    SELECT $3,id FROM changed WHERE
+      (COALESCE((extra->>'quota_limit')::numeric,0)>0
+        AND COALESCE((extra->>'quota_used')::numeric,0)>= (extra->>'quota_limit')::numeric
+        AND COALESCE((extra->>'quota_used')::numeric,0)-$1 < (extra->>'quota_limit')::numeric)
+      OR (COALESCE((extra->>'quota_daily_limit')::numeric,0)>0
+        AND COALESCE((extra->>'quota_daily_used')::numeric,0)>= (extra->>'quota_daily_limit')::numeric
+        AND COALESCE((extra->>'quota_daily_used')::numeric,0)-$1 < (extra->>'quota_daily_limit')::numeric)
+      OR (COALESCE((extra->>'quota_weekly_limit')::numeric,0)>0
+        AND COALESCE((extra->>'quota_weekly_used')::numeric,0)>= (extra->>'quota_weekly_limit')::numeric
+        AND COALESCE((extra->>'quota_weekly_used')::numeric,0)-$1 < (extra->>'quota_weekly_limit')::numeric)`, amount, id, service.SchedulerOutboxEventAccountChanged)
+	return err
 }
 
 // ResetQuotaUsedAndClearRateLimitCooldown resets all quota dimensions and the

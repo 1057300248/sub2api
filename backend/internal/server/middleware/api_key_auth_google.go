@@ -59,6 +59,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 		}
 
 		apiKey, err := apiKeyService.GetByKey(c.Request.Context(), apiKeyString)
+		recordAPIKeyLookupDiagnostic(c, apiKey, err)
 		if err != nil {
 			if errors.Is(err, service.ErrAPIKeyNotFound) {
 				recordInvalidAuthFailure(c, apiKeyService)
@@ -224,6 +225,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 func extractAPIKeyForGoogle(c *gin.Context) string {
 	// 1) preferred: Gemini native header
 	if k := strings.TrimSpace(c.GetHeader("x-goog-api-key")); k != "" {
+		recordAPIKeyCredentialDiagnostic(c, "x_goog_api_key", k)
 		return k
 	}
 
@@ -233,6 +235,7 @@ func extractAPIKeyForGoogle(c *gin.Context) string {
 		parts := strings.SplitN(auth, " ", 2)
 		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
 			if k := strings.TrimSpace(parts[1]); k != "" {
+				recordAPIKeyCredentialDiagnostic(c, "authorization_bearer", k)
 				return k
 			}
 		}
@@ -240,12 +243,14 @@ func extractAPIKeyForGoogle(c *gin.Context) string {
 
 	// 3) x-api-key header (backward compatibility)
 	if k := strings.TrimSpace(c.GetHeader("x-api-key")); k != "" {
+		recordAPIKeyCredentialDiagnostic(c, "x_api_key", k)
 		return k
 	}
 
 	// 4) query parameter key (for specific paths)
 	if allowGoogleQueryKey(c.Request.URL.Path) {
 		if v := strings.TrimSpace(c.Query("key")); v != "" {
+			recordAPIKeyCredentialDiagnostic(c, "google_query_key", v)
 			return v
 		}
 	}

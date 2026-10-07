@@ -64,6 +64,7 @@ func Logger() gin.HandlerFunc {
 			zap.String("method", method),
 			zap.String("path", path),
 		}
+		fields = append(fields, apiKeyCredentialDiagnosticFields(c)...)
 		if rejected {
 			fields = append(fields,
 				zap.String("ingress_reject_reason", string(reason)),
