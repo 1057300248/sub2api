@@ -24,7 +24,7 @@ jobs:
           import base64,hashlib,json,os,pathlib,subprocess,urllib.request
           root=pathlib.Path.cwd();api='https://api.github.com/repos/1057300248/sub2api/git/'
           headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'}
-          sha='b5e282e10d70a0b5d6f287b6eeb18c406724e114'
+          sha='f607d1a6647024816d3c40a8cd2b04334a2ac0f1'
           with urllib.request.urlopen(urllib.request.Request(api+'blobs/'+sha,headers=headers),timeout=45) as r:blob=json.load(r)
           data=base64.b64decode(blob['content']);assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()==sha
           manifest=json.loads(data);assert manifest['base']=='c01b2ba59b218f11481b844a987739b4a75f102e'
@@ -37,7 +37,7 @@ jobs:
               after=''.join(lines).encode();assert hashlib.sha256(after).hexdigest()==row['final_sha256']
               p.write_bytes(after)
           subprocess.run(['git','add','-A'],check=True)
-          tree=subprocess.check_output(['git','write-tree']).decode().strip();assert tree==manifest['tree']=='8bb033295f41e434250204ae0e5f1a7d65ecfca4'
+          tree=subprocess.check_output(['git','write-tree']).decode().strip();assert tree==manifest['tree']=='a67f311b3855c59ae1a1e902cc09151743b60630'
           subprocess.run(['git','diff','--cached','--check'],check=True)
           out=pathlib.Path(os.environ['RUNNER_TEMP'])/'visual-source';out.mkdir();entries=[]
           for row in manifest['files']:
