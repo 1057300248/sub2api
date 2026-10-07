@@ -239,10 +239,22 @@ func TestClineReasoningToolBindingAndTerminalEvents(t *testing.T) {
 	_, err = svc.restoreClineReasoning(c, a, source, bad, "responses")
 	require.Error(t, err)
 	for name, mutate := range map[string]func([]byte) []byte{
-		"type": func(in []byte) []byte { out, _ := sjson.SetBytes(in, "messages.0.tool_calls.0.type", "custom"); return out },
-		"name": func(in []byte) []byte { out, _ := sjson.SetBytes(in, "messages.0.tool_calls.0.function.name", "g"); return out },
-		"arguments": func(in []byte) []byte { out, _ := sjson.SetBytes(in, "messages.0.tool_calls.0.function.arguments", `{"other":true}`); return out },
-		"extra": func(in []byte) []byte { out, _ := sjson.SetBytes(in, "messages.0.tool_calls.1", map[string]any{"id": "call2", "type": "function", "function": map[string]any{"name": "g", "arguments": "{}"}}); return out },
+		"type": func(in []byte) []byte {
+			out, _ := sjson.SetBytes(in, "messages.0.tool_calls.0.type", "custom")
+			return out
+		},
+		"name": func(in []byte) []byte {
+			out, _ := sjson.SetBytes(in, "messages.0.tool_calls.0.function.name", "g")
+			return out
+		},
+		"arguments": func(in []byte) []byte {
+			out, _ := sjson.SetBytes(in, "messages.0.tool_calls.0.function.arguments", `{"other":true}`)
+			return out
+		},
+		"extra": func(in []byte) []byte {
+			out, _ := sjson.SetBytes(in, "messages.0.tool_calls.1", map[string]any{"id": "call2", "type": "function", "function": map[string]any{"name": "g", "arguments": "{}"}})
+			return out
+		},
 		"missing": func(in []byte) []byte { out, _ := sjson.SetBytes(in, "messages.0.tool_calls", []any{}); return out },
 	} {
 		t.Run(name, func(t *testing.T) {
