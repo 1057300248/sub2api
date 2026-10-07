@@ -15,7 +15,10 @@
       "review_on_upstream_touch": true
     }
   ],
-  "maintenance_changed_files": [],
+  "maintenance_changed_files": [
+    "frontend/package.json",
+    "frontend/pnpm-lock.yaml"
+  ],
   "allowed_changed_files": [
     ".github/workflows/cline-only.yml",
     "Makefile",
