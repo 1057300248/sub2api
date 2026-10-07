@@ -766,6 +766,7 @@
             class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
           />
         </div>
+        <p v-if="targetSelectedPlatforms.includes('cline')" class="mt-2 text-xs text-gray-500">{{ t('clineAccount.headersHint') }}</p>
         <div v-if="enableHeaderOverride" id="bulk-edit-header-override-body" class="mt-3 space-y-3">
           <button
             type="button"
@@ -1190,6 +1191,17 @@
         </div>
       </div>
 
+      <section v-if="allClineAccounts" class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="cline-bulk-advanced">
+        <label class="flex items-center gap-2 text-sm font-medium"><input v-model="enableClineAdvanced" type="checkbox" data-testid="cline-bulk-advanced-enabled" />{{ t('clineAccount.advanced.bulkTitle') }}</label>
+        <template v-if="enableClineAdvanced">
+          <p class="text-xs text-amber-700 dark:text-amber-300">{{ t('clineAccount.advanced.bulkHint') }}</p>
+          <ClineAdvancedSettings v-model="clineAdvanced" :can-operate="false" />
+          <label class="flex items-center gap-2 text-sm"><input v-model="clearClineLimits" type="checkbox" data-testid="cline-bulk-clear-limits" />{{ t('clineAccount.advanced.bulkClearLimits') }}</label>
+          <label class="flex items-center gap-2 text-sm"><input v-model="disableClineNotifications" type="checkbox" data-testid="cline-bulk-disable-notify" />{{ t('clineAccount.advanced.bulkDisableNotify') }}</label>
+          <label class="flex items-center gap-2 text-sm"><input v-model="disableClinePolicies" type="checkbox" data-testid="cline-bulk-disable-policies" />{{ t('clineAccount.advanced.bulkDisablePolicies') }}</label>
+        </template>
+      </section>
+
       <!-- OpenAI API Key endpoint capabilities -->
       <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between gap-4">
@@ -1562,6 +1574,7 @@
 </template>
 
 <script setup lang="ts">
+import { validateClineHeaderRows } from './clineAccountSettings'
 import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier } from '@/utils/accountCost'
 
 import { ref, watch, computed } from 'vue'
@@ -1597,6 +1610,8 @@ import {
   getPresetMappingsByPlatform
 } from '@/composables/useModelWhitelist'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
+import ClineAdvancedSettings from './ClineAdvancedSettings.vue'
+import { clineAdvancedDraft, clineAdvancedPayload, ClineAdvancedError } from './clineAdvancedSettings'
 import {
   buildHeaderOverridesObject,
   isHeaderOverrideCapable,
@@ -1749,6 +1764,12 @@ const enableBaseUrl = ref(false)
 const enableModelRestriction = ref(false)
 const enableOpenAIModelAliases = ref(false)
 const openaiModelAliases = ref(true)
+const allClineAccounts = computed(() => targetSelectedPlatforms.value.length === 1 && targetSelectedPlatforms.value[0] === 'cline' && targetSelectedTypes.value.length === 1 && targetSelectedTypes.value[0] === 'apikey')
+const enableClineAdvanced = ref(false)
+const clineAdvanced = ref(clineAdvancedDraft())
+const clearClineLimits = ref(false)
+const disableClineNotifications = ref(false)
+const disableClinePolicies = ref(false)
 const enableCustomErrorCodes = ref(false)
 const enableInterceptWarmup = ref(false)
 const enableHeaderOverride = ref(false)
@@ -2215,7 +2236,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     credentialsChanged = true
   }
 
-  if (enableCustomErrorCodes.value) {
+  if (enableCustomErrorCodes.value && !(allClineAccounts.value && enableClineAdvanced.value)) {
     credentials.custom_error_codes_enabled = true
     credentials.custom_error_codes = [...selectedErrorCodes.value]
     credentialsChanged = true
@@ -2322,6 +2343,18 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     umqExtra.user_msg_queue_enabled = false  // 清理旧字段（JSONB merge）
   }
 
+  if (allClineAccounts.value && enableClineAdvanced.value) {
+    const advanced = clineAdvancedPayload(clineAdvanced.value)
+    if (clearClineLimits.value) for (const key of ['quota_limit', 'quota_daily_limit', 'quota_weekly_limit']) advanced.extra[key] = null
+    if (disableClineNotifications.value) for (const dim of ['total', 'daily', 'weekly']) advanced.extra[`quota_notify_${dim}_enabled`] = false
+    if (disableClinePolicies.value) {
+      advanced.credentials.custom_error_codes_enabled = false
+      advanced.credentials.temp_unschedulable_enabled = false
+    }
+    if (Object.keys(advanced.extra).length) Object.assign(ensureExtra(), advanced.extra)
+    if (Object.keys(advanced.credentials).length) { Object.assign(credentials, advanced.credentials); credentialsChanged = true }
+  }
+
   if (credentialsChanged) {
     updates.credentials = credentials
   }
@@ -2377,6 +2410,7 @@ const handleSubmit = async () => {
   }
 
   const hasAnyFieldEnabled =
+    (allClineAccounts.value && enableClineAdvanced.value) ||
     enableBaseUrl.value ||
     (enableExcelBPS.value && allOpenAIOAuthOnly.value) ||
     enableOpenAIPassthrough.value ||
@@ -2444,6 +2478,10 @@ const handleSubmit = async () => {
       appStore.showError(t('admin.accounts.headerOverride.bulkEmptyRows'))
       return
     }
+    if (targetSelectedPlatforms.value.includes('cline') && !validateClineHeaderRows(headerOverrideRows.value)) {
+      appStore.showError(t('clineAccount.errors.headers'))
+      return
+    }
     const headerError = validateHeaderOverrideRows(headerOverrideRows.value)
     if (headerError) {
       appStore.showError(t(`admin.accounts.headerOverride.${headerError}`))
@@ -2456,7 +2494,11 @@ const handleSubmit = async () => {
     return
   }
 
-  const built = buildUpdatePayload()
+  let built: ReturnType<typeof buildUpdatePayload>
+  try { built = buildUpdatePayload() } catch (error) {
+    appStore.showError(error instanceof ClineAdvancedError ? t(`clineAccount.advanced.errors.${error.issue}`) : t('admin.accounts.bulkEdit.failed'))
+    return
+  }
   if (!built) {
     appStore.showError(t('admin.accounts.bulkEdit.noFieldsSelected'))
     return
@@ -2549,6 +2591,11 @@ watch(
   () => props.show,
   (newShow) => {
     if (!newShow) {
+      enableClineAdvanced.value = false
+      clineAdvanced.value = clineAdvancedDraft()
+      clearClineLimits.value = false
+      disableClineNotifications.value = false
+      disableClinePolicies.value = false
       // Reset all enable flags
       enableBaseUrl.value = false
       enableModelRestriction.value = false

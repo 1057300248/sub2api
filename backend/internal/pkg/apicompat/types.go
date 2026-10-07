@@ -704,6 +704,7 @@ type ChatStreamOptions struct {
 
 // ChatMessage is a single message in the Chat Completions conversation.
 type ChatMessage struct {
+	ReasoningDetails json.RawMessage `json:"reasoning_details,omitempty"`
 	Role             string          `json:"role"` // "system" | "user" | "assistant" | "tool" | "function"
 	Content          json.RawMessage `json:"content,omitempty"`
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
@@ -844,11 +845,12 @@ type ChatChunkChoice struct {
 
 // ChatDelta carries incremental content in a streaming chunk.
 type ChatDelta struct {
-	Role             string         `json:"role,omitempty"`
-	Content          *string        `json:"content,omitempty"` // pointer: omit when not present, null vs "" matters
-	ReasoningContent *string        `json:"reasoning_content,omitempty"`
-	Reasoning        *string        `json:"reasoning,omitempty"`
-	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
+	ReasoningDetails json.RawMessage `json:"reasoning_details,omitempty"`
+	Role             string          `json:"role,omitempty"`
+	Content          *string         `json:"content,omitempty"` // pointer: omit when not present, null vs "" matters
+	ReasoningContent *string         `json:"reasoning_content,omitempty"`
+	Reasoning        *string         `json:"reasoning,omitempty"`
+	ToolCalls        []ChatToolCall  `json:"tool_calls,omitempty"`
 }
 
 func (m ChatMessage) reasoningText() string {

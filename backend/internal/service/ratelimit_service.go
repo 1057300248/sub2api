@@ -304,7 +304,13 @@ const (
 // CheckErrorPolicy 检查自定义错误码和临时不可调度规则。
 // 自定义错误码开启时覆盖后续所有逻辑（包括临时不可调度）。
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) ErrorPolicyResult {
+	if clineProtectedError(account, statusCode, responseBody) {
+		return ErrorPolicyNone
+	}
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
+	if account.IsCline() && account.ShouldHandleErrorCode(statusCode) && s.tryTempUnschedulable(ctx, account, statusCode, responseBody) {
+		return ErrorPolicyTempUnscheduled
+	}
 	if account.IsCustomErrorCodesEnabled() {
 		if account.ShouldHandleErrorCode(statusCode) {
 			return ErrorPolicyMatched
@@ -343,6 +349,12 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 // handleUpstreamErrorAfterStreakReset keeps account policy handling shared with
 // the OpenAI gateway, which resets the streak before its early-return policies.
 func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
+	if s.handleLegacyClineWrappedRateLimit(ctx, account, statusCode, headers, responseBody) {
+		return false
+	}
+	if s.handleClineScopedError(ctx, account, statusCode, headers, responseBody, firstRequestedModel(requestedModel)) {
+		return false
+	}
 	ctx = s.observeAccountOps(ctx, account, statusCode, headers, responseBody)
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
 	// Anthropic's safeguard block is scoped to this conversation. It is not
@@ -355,7 +367,7 @@ func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Conte
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
 	s.maybeHandleOpenAITeamLinkedError(ctx, account, statusCode, responseBody)
-	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled()
+	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled() && !clineProtectedError(account, statusCode, responseBody)
 
 	// 池模式默认不标记本地账号状态；但管理员显式配置的临时不可调度规则优先。
 	// 401 保留现有认证错误语义，不在这里改变池模式的认证处理。
@@ -369,7 +381,7 @@ func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Conte
 
 	// apikey 类型账号：检查自定义错误码配置
 	// 如果启用且错误码不在列表中，则不处理（不停止调度、不标记限流/过载）
-	if !account.ShouldHandleErrorCode(statusCode) {
+	if !clineProtectedError(account, statusCode, responseBody) && !account.ShouldHandleErrorCode(statusCode) {
 		slog.Info("account_error_code_skipped", "account_id", account.ID, "status_code", statusCode)
 		return false
 	}
@@ -1239,6 +1251,18 @@ func (s *RateLimitService) handle429Cooldown(ctx context.Context, account *Accou
 		s.handleOllamaCloudUsage429(ctx, account, headers)
 		return
 	}
+	// Cline exposes its free/pass reset window only in the human-readable body
+	// ("Try again in 1h25m"), so handle it before provider-specific fallbacks.
+	if resetAt, ok := parseClineRateLimitResetAt(account, responseBody, time.Now()); ok {
+		s.notifyAccountSchedulingBlocked(account, resetAt, "cline_429")
+		if err := setClineRateLimited(ctx, s.accountRepo, account.ID, resetAt); err != nil {
+			slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
+			return
+		}
+		slog.Info("cline_account_rate_limited", "account_id", account.ID, "reset_at", resetAt, "reset_in", time.Until(resetAt).Truncate(time.Second))
+		return
+	}
+
 	// 国产供应商（kimi/zhipu/deepseek）的 429 走专用可恢复路径：余额不足 → 临时停调，
 	// Coding Plan 窗口耗尽 → 冷却到快照重置点。未命中则继续默认 429 逻辑。
 	if account.IsCNProvider() || account.IsOpenCodeGo() {
@@ -2241,6 +2265,20 @@ func (s *RateLimitService) RecoverAccountAfterSuccessfulTest(ctx context.Context
 }
 
 func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID int64) error {
+	if repo, ok := s.accountRepo.(interface {
+		ClearClineTemporaryPause(context.Context, int64) (bool, error)
+	}); ok {
+		handled, err := repo.ClearClineTemporaryPause(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		if handled {
+			if s.tempUnschedCache != nil {
+				return s.tempUnschedCache.DeleteTempUnsched(ctx, accountID)
+			}
+			return nil
+		}
+	}
 	if err := s.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
 		return err
 	}
@@ -2571,7 +2609,7 @@ func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, acco
 	if s == nil || account == nil || s.accountRepo == nil {
 		return false
 	}
-	if !account.ShouldHandleErrorCode(statusCode) {
+	if !clineProtectedError(account, statusCode, responseBody) && !account.ShouldHandleErrorCode(statusCode) {
 		return false
 	}
 	var cooldown time.Duration
@@ -2707,6 +2745,9 @@ func matchTempUnschedulableRules(account *Account, statusCode int, responseBody 
 }
 
 func (s *RateLimitService) tryTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) bool {
+	if clineProtectedError(account, statusCode, responseBody) {
+		return false
+	}
 	if account == nil {
 		return false
 	}
@@ -2803,7 +2844,7 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 	// only this (account, model) pair. Authentication and model-unknown failures
 	// retain the legacy account-wide temporary-unschedulable behavior below.
 	modelKey := firstRequestedModel(requestedModel)
-	if modelKey != "" && statusCode != http.StatusUnauthorized {
+	if modelKey != "" && statusCode != http.StatusUnauthorized && !account.IsCline() {
 		if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, modelKey, until, reason); err != nil {
 			slog.Warn("temp_unsched_model_rate_limit_set_failed", "account_id", account.ID, "model", modelKey, "error", err)
 			// The rule matched, so fail over the current request even if persistence

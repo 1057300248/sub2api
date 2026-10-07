@@ -544,7 +544,7 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go' | 'typesafe' | 'composite'
+export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go' | 'cline' | 'typesafe' | 'composite'
 
 export type VideoModelPrices = Record<string, Record<string, number>>
 
@@ -943,7 +943,7 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go' | 'typesafe'
+export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go' | 'cline' | 'typesafe'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -1263,6 +1263,7 @@ export interface OpenCodeGoUsageSettings {
 }
 
 export interface Account {
+  cline_usage?: import('@/api/admin/clineMetadata').ClineMetadata
   id: number
   name: string
   notes?: string | null
@@ -1600,6 +1601,7 @@ export interface OpenAIResponsesState {
 }
 
 export interface CreateAccountRequest {
+  schedulable?: boolean // Cline create: keep setup accounts paused without a second write.
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1640,6 +1642,7 @@ export interface UpdateAccountRequest {
   load_factor?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
+  group_rate_multiplier?: number
   schedulable?: boolean
   status?: 'active' | 'inactive' | 'error'
   group_ids?: number[]

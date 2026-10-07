@@ -1,6 +1,6 @@
 <template>
   <BaseDialog
-    :show="show"
+    :show="show && !showClineCreate"
     :title="t('admin.accounts.createAccount')"
     width="wide"
     @close="handleClose"
@@ -241,6 +241,9 @@
             <PlatformIcon platform="typesafe" size="sm" />
             TypeSafe / Jev
           </button>
+          <button type="button" data-testid="create-platform-cline" :disabled="submitting"
+            class="flex min-w-[96px] flex-1 items-center justify-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+            @click="showClineCreate = true">Cline</button>
         </div>
       </div>
 
@@ -3866,12 +3869,16 @@
     @confirm="handleMixedChannelConfirm"
     @cancel="handleMixedChannelCancel"
   />
+  <ClineAccountModal v-if="show && showClineCreate" :show="true" :proxies="proxies" :groups="groups"
+    :allow-composite="!authStore.isSimpleMode" :initial="{ name: form.name, notes: form.notes || '' }"
+    show-platform-back @back="showClineCreate = false" @close="handleClose" @saved="emit('created')" />
 </template>
 
 <script setup lang="ts">
 import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier } from '@/utils/accountCost'
 
 import OpenAITwoFAImport from './OpenAITwoFAImport.vue'
+import ClineAccountModal from './ClineAccountModal.vue'
 import { createTokenGuardV2Account } from '@/api/admin/accountTokenGuardV2'
 import type { TokenGuardReloginAccount } from '@/api/admin/accountTokenGuard'
 import { ref, reactive, computed, watch } from 'vue'
@@ -4079,6 +4086,8 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const showClineCreate = ref(false)
+watch(() => props.show, () => { showClineCreate.value = false })
 const emit = defineEmits<{
   close: []
   created: []

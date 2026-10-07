@@ -67,6 +67,8 @@ vi.mock('@/api/admin', () => ({
 }))
 
 vi.mock('@/api/admin/accounts', () => ({
+  create: createAccountMock,
+  update: vi.fn(),
   getAntigravityDefaultModelMapping: vi.fn().mockResolvedValue([]),
 }))
 
@@ -82,6 +84,8 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
+vi.mock('@/api/admin/clineMetadata', () => ({ getClineMetadata: vi.fn(), refreshClineMetadata: vi.fn() }))
+import ClineAccountModal from '../ClineAccountModal.vue'
 import CreateAccountModal from '../CreateAccountModal.vue'
 import OpenAITwoFAImport from '../OpenAITwoFAImport.vue'
 
@@ -794,5 +798,54 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await flushPromises()
 
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
+  })
+})
+
+
+describe('CreateAccountModal normal Cline platform entry', () => {
+  beforeEach(() => {
+    authIsSimpleMode.value = true
+    createAccountMock.mockReset().mockResolvedValue({ id: 81, platform: 'cline', type: 'apikey' })
+    probeUpstreamBillingMock.mockClear()
+    syncUpstreamModelsMock.mockClear()
+    createCredentialOperationsMock.mockClear()
+  })
+  it('opens the real Cline editor and creates exactly one native account from the ordinary Add dialog', async () => {
+    const w = mountModal([{ id: 11, name: 'Cline-only group', platform: 'cline' }, { id: 12, name: 'Composite not offered', platform: 'composite' }])
+    await flushPromises()
+    await w.get('form#create-account-form input[type="text"]').setValue('Normal entry Cline')
+    await w.get('[data-testid="create-platform-cline"]').trigger('click'); await flushPromises()
+    expect(w.find('#create-account-form').exists()).toBe(false)
+    expect(w.getComponent(ClineAccountModal).props('allowComposite')).toBe(false)
+    expect(w.get<HTMLInputElement>('[data-testid="cline-name"]').element.value).toBe('Normal entry Cline')
+    expect(w.text()).toContain('Cline-only group'); expect(w.text()).not.toContain('Composite not offered')
+    await w.get('[data-testid="cline-key"]').setValue('native-fixture-key')
+    await w.get('[data-testid="cline-public-model"]').setValue('public')
+    await w.get('[data-testid="cline-upstream-model"]').setValue('cline-pass/model')
+    await w.get('#cline-account-form').trigger('submit'); await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0][0]).toMatchObject({ name: 'Normal entry Cline', platform: 'cline', type: 'apikey', credentials: { api_key: 'native-fixture-key', account_mode: 'pass', api_protocol: 'chat_completions', model_mapping: { public: 'cline-pass/model' } } })
+    expect(w.emitted('created')).toHaveLength(1); expect(w.emitted('close')).toHaveLength(1)
+    expect(probeUpstreamBillingMock).not.toHaveBeenCalled()
+    expect(syncUpstreamModelsMock).not.toHaveBeenCalled()
+    expect(createCredentialOperationsMock).not.toHaveBeenCalled()
+  })
+  it('does not carry credentials or models across platform changes and resets the entry on reopen', async () => {
+    const w = mountModal(); await flushPromises()
+    await selectButtonByText(w, 'OpenAI'); await selectButtonByText(w, 'API Key')
+    await w.get('form#create-account-form input[type="password"]').setValue('other-platform-secret')
+    await w.get('[data-testid="create-platform-cline"]').trigger('click'); await flushPromises()
+    expect(w.get<HTMLInputElement>('[data-testid="cline-key"]').element.value).toBe('')
+    expect(w.get<HTMLInputElement>('[data-testid="cline-public-model"]').element.value).toBe('')
+    expect(w.get<HTMLInputElement>('[data-testid="cline-upstream-model"]').element.value).toBe('')
+    await w.get('[data-testid="cline-key"]').setValue('unsaved-cline-secret')
+    await w.get('[data-testid="cline-back-platform"]').trigger('click'); await flushPromises()
+    expect(w.find('#create-account-form').exists()).toBe(true)
+    await w.get('[data-testid="create-platform-cline"]').trigger('click'); await flushPromises()
+    expect(w.get<HTMLInputElement>('[data-testid="cline-key"]').element.value).toBe('')
+    await w.setProps({ show: false }); await w.setProps({ show: true }); await flushPromises()
+    expect(w.find('#create-account-form').exists()).toBe(true)
+    expect(w.find('#cline-account-form').exists()).toBe(false)
+    expect(createAccountMock).not.toHaveBeenCalled()
   })
 })

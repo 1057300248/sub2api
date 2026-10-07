@@ -132,6 +132,7 @@ func NewAccountHandler(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
+	Schedulable             *bool          `json:"schedulable"` // Cline-only atomic preference; never bypasses quota admission.
 	Name                    string         `json:"name" binding:"required"`
 	Notes                   *string        `json:"notes"`
 	Platform                string         `json:"platform" binding:"required"`
@@ -154,6 +155,7 @@ type CreateAccountRequest struct {
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
+	Schedulable         *bool          `json:"schedulable"` // Cline-only atomic preference; never bypasses quota admission.
 	Name                string         `json:"name"`
 	Notes               *string        `json:"notes"`
 	Type                string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
@@ -1106,6 +1108,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 
 	result, err := executeAdminIdempotent(c, "admin.accounts.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		account, execErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+			Schedulable:           req.Schedulable,
 			Name:                  req.Name,
 			Notes:                 req.Notes,
 			Platform:              req.Platform,
@@ -1243,6 +1246,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
 	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
+		Schedulable:           req.Schedulable,
 		Name:                  req.Name,
 		Notes:                 req.Notes,
 		Type:                  req.Type,
@@ -2931,6 +2935,15 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
 	if err != nil {
 		response.NotFound(c, "Account not found")
+		return
+	}
+
+	if account.IsCline() {
+		models := make([]openai.Model, 0)
+		for _, id := range account.ClineModelIDs() {
+			models = append(models, openai.Model{ID: id, Object: "model", Type: "model", DisplayName: id})
+		}
+		response.Success(c, models)
 		return
 	}
 

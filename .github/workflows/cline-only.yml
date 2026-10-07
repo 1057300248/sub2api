@@ -1,0 +1,249 @@
+name: Cline-only validation
+on:
+  push:
+    branches: [codex/sub2-v2911-cline-next-20261007]
+  pull_request:
+    branches: [codex/sub2-v2911-cline-next-20261007]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cline-only-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  GOMAXPROCS: '2'
+  GOGC: '50'
+  SUB2API_TEST_POSTGRES_IMAGE: postgres:18.6-alpine
+  CLINE_TEST_DRIVER: |
+    import collections, json, os, subprocess, sys
+    from pathlib import Path
+    suite, repeat, tags, pattern, race, *packages = sys.argv[1:]
+    repeat = int(repeat)
+    cmd = ['go', 'test', '-p', '2', '-json', '-count', str(repeat), '-tags', tags, '-timeout', '12m', '-run', pattern]
+    if race == 'yes': cmd += ['-race']
+    cmd += packages
+    print('TEST_COMMAND', cmd, flush=True)
+    root = Path(os.environ['RUNNER_TEMP'])
+    passed, started = collections.Counter(), collections.Counter()
+    skipped, failed = [], []
+    tail = collections.deque(maxlen=120)
+    with (root / ('cline-' + suite + '.jsonl')).open('w') as log:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in p.stdout:
+            log.write(line)
+            tail.append(line)
+            try: e = json.loads(line)
+            except json.JSONDecodeError:
+                print(line, end='', flush=True)
+                continue
+            test, action = e.get('Test'), e.get('Action')
+            key = (e.get('Package', ''), test)
+            if test and action == 'run': started[key] += 1
+            if test and action == 'pass': passed[key] += 1
+            if action == 'skip': skipped.append(key)
+            if action == 'fail': failed.append(key)
+        code = p.wait()
+    roots = {k: n for k, n in passed.items() if '/' not in k[1]}
+    required = set()
+    if suite == 'policy':
+        required = {'TestClineWrappedRateLimitClassification', 'TestClineJSONEnvelopePreservesCompletionAndUsage', 'TestClineSSEFailurePreventsSuccessfulTerminal', 'TestClineTerminalFailurePreservesOnlyValidatedUsage'}
+        required |= {'TestClineWireCredentials', 'TestClineReasoningEnvelopeBindingAndExpiry', 'TestClineReasoningFragmentsAndBounds', 'TestClineCatalogCapabilitiesAreExplicitAndCloudIsNotEnabled', 'TestClineProviderObservationNeverInventsActual', 'TestClineProviderObservationBodyPreservesWireAndCompletion'}
+    if suite == 'service':
+        required = {'TestClineCustomParametersProtectAllProtocolFieldsAndCaseAliases', 'TestClineLegacyThreeProtocolParametersSurviveLowering', 'TestClineWrappedLimitPreservesAuditAndStopsSameAccountRetry', 'TestClineThreeProtocolHTTPForwarding', 'TestClineSuccessfulResponseSurvivesLateDeadline', 'TestClineGroupAndCompositeRequestBindings', 'TestClineThreeProtocolRequestHeaderOverrides', 'TestClineQuotaExhaustionSurvivesStalenessErrorsAndExpiry', 'TestClineMetadataWorkerBoundedConcurrencyAndModeIsolation', 'TestClineMetadataRetryAfterDoesNotBecomeInferenceCooldown', 'TestClineAccountSettingsCreateScheduling', 'TestClineAccountSettingsUpdatePreservesUneditedConfiguration', 'TestClineAccountHeaderSettingsValidationAndIsolation', 'TestClineBulkHeaderSettingsRejectBeforeAnyWrite', 'TestClineAccountSettingsHTTPBinding', 'TestClineAccountListUsesSafeCredentialBoundQuotaProjection', 'TestClineAdvancedQuotaValidationAndDelta', 'TestClineAdvancedProtectedErrorsAndTemporaryRules', 'TestClineAdvancedInvalidRulesAndFalsePreservation', 'TestClineAdvancedRuntimeOwnershipAndNotificationThreshold', 'TestClineAdvancedResetsUseIsolatedOperations'}
+        required |= {'TestClineThreeProtocolOmittedStreamAndOfficialHeaders', 'TestClineAccountTokenMetadataReauthenticationAndRecovery', 'TestClineFinalStreamModeAndForcedTools', 'TestClineReasoningThreeProtocolRoundTripAndCallerIsolation', 'TestClineAccountToken401UsesCredentialBoundReauth', 'TestClineReasoningToolBindingAndTerminalEvents'}
+    if suite == 'postgres':
+        required = {'TestClinePostgresPlatformUnionUpgrade', 'TestClinePostgresCreateOutboxFailureIsAtomic', 'TestClinePostgresCreateReusesOuterTransaction', 'TestClinePostgresMaximumFreeScopeUsesUnfingerprintedColumn', 'TestClinePostgresIdentitySwitchDoesNotReattributeOldLimits', 'TestClinePostgresSharedSubjectLimitsAndRestart', 'TestClinePostgresRefreshLeaseAndObservationOrdering', 'TestClinePostgresOutboxFailureRollsBackState', 'TestClinePostgresDirectAndBulkCredentialGuards', 'TestClinePostgresAdmissionRejectsStaleCredentials', 'TestClinePostgresConcurrentScopedCAS', 'TestClinePostgresCredentialRotationRejectsStaleObservations', 'TestClinePostgresManagedStateSurvivesAllExtraEdits', 'TestClinePostgresCreationCannotImportManagedState', 'TestClinePostgresMigrationAndQuotaSchema', 'TestClinePostgresMetadataQuotaSharedRecoveryAndStaleObservations', 'TestClinePostgresExpiredQuotaRequiresConfirmedWindow', 'TestClinePostgresHealthyMetadataCannotShortenInferenceCooldown', 'TestClinePostgresAutomaticMetadataCandidatesIncludeCoolingNotDisabled', 'TestClinePostgresAccountSettingsRoundTripAndHeaderGuards', 'TestClinePostgresHeaderGuardDatabaseContract', 'TestClinePostgresAdvancedSettingsGuardsAndBulkAtomicity', 'TestClinePostgresLocalQuotaCountersCannotBeReplayed', 'TestClinePostgresAdvancedOperationsPreservePassAndOtherBlocks', 'TestClinePostgresLocalQuotaFinalAdmissionAndResetRollback'}
+        required |= {'TestClinePostgresQuotaCrossingConcurrencyAndOutboxRollback', 'TestClinePostgresQuotaCrossingAfterRollover', 'TestClinePostgresProviderObservationOwnershipAndOfficialHeaders', 'TestClinePostgresToken401RotationAndObservationCAS', 'TestClinePostgresAllQuotaDimensionsEmitFirstCrossing'}
+    if suite == 'handler':
+        prefix = 'TestClineHTTPHandlersDurableBillingAndTermination'
+        scenarios = ('complete', 'cancel_then_usage', 'writer_stall', 'deadline', 'deadline_headers', 'success_late_deadline', 'success_late_deadline_json', 'parameters_stream', 'parameters_json', 'parameters_legacy_openai_stream', 'parameters_legacy_openai_json', 'parameters_legacy_deepseek_stream', 'parameters_legacy_deepseek_json')
+        required = {prefix + '/' + protocol + '/' + scenario for protocol in ('chat', 'responses', 'messages') for scenario in scenarios}
+        required |= {prefix + '/responses/' + scenario for scenario in ('parameters_compaction', 'parameters_legacy_openai_compaction', 'parameters_legacy_deepseek_compaction')}
+        required.add(prefix)
+    if suite == 'offline': required = {'TestClineMigrationPostgresApplyRollbackAndIdempotency'}
+    names = {name for (_, name), n in passed.items() if n == repeat}
+    missing = sorted(required - names)
+    incomplete = [str(k) for k, n in started.items() if passed[k] != n]
+    bad_repeat = [str(k) for k, n in roots.items() if n != repeat]
+    summary = {'suite': suite, 'commit': os.environ['GITHUB_SHA'], 'exit': code, 'root_tests': len(roots), 'test_pass_events': sum(passed.values()), 'repeat': repeat, 'skipped': skipped, 'failed': failed, 'missing': missing, 'incomplete': incomplete, 'bad_repeat': bad_repeat}
+    (root / ('cline-' + suite + '-summary.json')).write_text(json.dumps(summary, indent=2) + '\n')
+    print(json.dumps(summary, indent=2), flush=True)
+    if code or not roots or skipped or failed or missing or incomplete or bad_repeat:
+        print(''.join(tail), flush=True)
+        raise SystemExit('Cline tests failed, skipped, missing or incomplete')
+jobs:
+  cline-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Archive exact tracked source for reproducible validation
+        run: git archive --format=tar.gz --output="$RUNNER_TEMP/cline-source.tar.gz" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cline-source-${{ github.sha }}
+          path: ${{ runner.temp }}/cline-source.tar.gz
+          retention-days: 1
+  cline-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Exact Cline-only boundary, integrity and formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 tools/verify_cline_only.py
+          python3 tools/verify_cline_platform.py
+          git diff --check e6addfe4aff745c859f9bb50817bc468e0e1f4f7 HEAD
+          mapfile -t files < <(git diff --name-only e6addfe4aff745c859f9bb50817bc468e0e1f4f7 HEAD -- '*.go')
+          unformatted="$(gofmt -l "${files[@]}")"
+          test -z "$unformatted" || { printf '%s\n' "$unformatted"; exit 1; }
+      - name: Cline SSE, JSON and policy race tests
+        working-directory: backend
+        run: python3 -c "$CLINE_TEST_DRIVER" policy 3 unit '^Test' yes ./internal/pkg/cline
+      - name: Cline service, legacy routing, registration and offline contract tests
+        working-directory: backend
+        run: python3 -c "$CLINE_TEST_DRIVER" service 1 unit '^Test(Cline|ParseCline|SetCline|Handle429Cline)' no ./internal/service ./internal/repository ./internal/handler ./internal/handler/admin ./internal/handler/dto ./internal/clinemigration
+      - name: Bounded Cline cancellation race regressions
+        working-directory: backend
+        run: python3 -c "$CLINE_TEST_DRIVER" lifetime 3 unit '^TestCline(Deadline|WriterFailure|Drain|RequestCeiling|WriteDisconnect|MetadataWorker)' yes ./internal/service
+      - name: Build server and Cline migration CLI
+        working-directory: backend
+        run: |
+          go build -o "$RUNNER_TEMP/sub2api-cline" ./cmd/server
+          go build -o "$RUNNER_TEMP/cline-migrate" ./cmd/cline-migrate
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cline-backend-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/cline-*.jsonl
+            ${{ runner.temp }}/cline-*-summary.json
+          retention-days: 14
+  cline-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: cline_fixture
+          POSTGRES_PASSWORD: fixture_only
+          POSTGRES_DB: cline_fixture
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U cline_fixture -d cline_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Cline PostgreSQL migrations, scoped CAS and write ownership
+        working-directory: backend
+        run: |
+          docker info >/dev/null
+          python3 -c "$CLINE_TEST_DRIVER" postgres 3 integration '^TestClinePostgres' no ./internal/repository
+      - name: Forty-two HTTP handler and durable ledger cases
+        working-directory: backend
+        run: python3 -c "$CLINE_TEST_DRIVER" handler 1 integration '^TestClineHTTPHandlersDurableBillingAndTermination$' no ./internal/handler
+      - name: Cline offline migration, rollback and idempotency
+        working-directory: backend
+        env:
+          CLINE_MIGRATION_TEST_DSN: postgres://cline_fixture:fixture_only@127.0.0.1:55432/cline_fixture?sslmode=disable
+        run: |
+          python3 -c "$CLINE_TEST_DRIVER" offline 1 integration '^TestClineMigration' no ./internal/clinemigration
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cline-postgres-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/cline-*.jsonl
+            ${{ runner.temp }}/cline-*-summary.json
+          retention-days: 14
+  cline-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install pinned v2.9.11 dependency lock
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Cline frontend regression tests
+        working-directory: frontend
+        run: |
+          pnpm exec vitest run src/components/account/__tests__/ClineAccountModal.spec.ts src/components/account/__tests__/ClineMetadataPanel.spec.ts src/components/account/__tests__/clineAccountForm.spec.ts src/components/account/__tests__/clineAdvancedSettingsPayload.spec.ts src/components/account/__tests__/ClineAdvancedSettings.spec.ts src/components/account/__tests__/clineAccountSettings.spec.ts src/components/account/__tests__/ClineAccountUsageCell.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/BulkEditAccountModal.spec.ts src/components/account/__tests__/AccountTestModal.spec.ts src/components/account/__tests__/AccountUsageCell.spec.ts src/views/admin/__tests__/AccountsView.lite.spec.ts --reporter=json --outputFile="$RUNNER_TEMP/cline-frontend-tests.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          result = json.loads((Path(os.environ['RUNNER_TEMP'])/'cline-frontend-tests.json').read_text())
+          assert result['success'] and result['numTotalTests'] > 0
+          assert result['numPassedTests'] == result['numTotalTests'] and result.get('numPendingTests', 0) == 0
+          print('CLINE_FRONTEND_PASSED', result['numPassedTests'])
+          PY
+      - name: Full frontend regression and lint
+        working-directory: frontend
+        env:
+          # The unchanged upstream harvestAvailability fixture expects +08:00.
+          # Cline-selected and critical tests still run in the UTC runner zone.
+          TZ: Asia/Shanghai
+        run: |
+          pnpm run lint:check
+          pnpm exec vitest run --reporter=json --outputFile="$RUNNER_TEMP/cline-full-frontend-tests.json"
+          python3 - <<'PYFULL'
+          import json, os
+          from pathlib import Path
+          r = json.loads((Path(os.environ['RUNNER_TEMP'])/'cline-full-frontend-tests.json').read_text())
+          assert r['success'] and r['numTotalTests'] > 0 and r['numPassedTests'] == r['numTotalTests']
+          assert not r.get('numPendingTests') and not r.get('numTodoTests')
+          print('FULL_FRONTEND_PASSED', r['numPassedTests'])
+          PYFULL
+      - name: Upstream and Cline critical frontend tests
+        run: make test-frontend-critical
+      - name: Frontend typecheck and production build
+        working-directory: frontend
+        run: |
+          pnpm run typecheck
+          pnpm run build
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cline-frontend-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/cline-frontend-tests.json
+            ${{ runner.temp }}/cline-full-frontend-tests.json
+          retention-days: 14

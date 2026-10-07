@@ -88,7 +88,8 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	upstreamMsg string,
 	upstreamModel string,
 ) *UpstreamFailoverError {
-	shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
+	wrappedClineLimit := isClineWrappedRateLimit(account, resp.StatusCode, respBody)
+	shouldFailover := wrappedClineLimit || s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
 	tempUnscheduled := false
 	if c != nil && account != nil && account.Platform != PlatformGrok && !shouldFailover && !IsResponseCommitted(c) && s.rateLimitService != nil {
 		tempUnscheduled = s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, upstreamModel) == ErrorPolicyTempUnscheduled
@@ -127,14 +128,20 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	if account.Platform != PlatformGrok && !tempUnscheduled {
 		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
 	}
+	// Preserve the original status in the ops event above. Scheduling and the
+	// exhausted retry response use the verified inner quota status instead.
+	classifiedStatus := resp.StatusCode
+	if wrappedClineLimit {
+		classifiedStatus = http.StatusTooManyRequests
+	}
 	return s.newOpenAIAccountFailoverError(
 		account,
-		resp.StatusCode,
+		classifiedStatus,
 		resp.Header,
 		respBody,
 		upstreamMsg,
 		shouldDisable,
-		!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
+		!wrappedClineLimit && !shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
 	).WithGrokForbiddenPolicy(account)
 }
 
@@ -182,14 +189,49 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	userAgent string,
 	grokCacheIdentity string,
 ) (*http.Response, error) {
+	body, contractErr := normalizeClineFinalRequest(account, body, stream)
+	if contractErr != nil {
+		return nil, contractErr
+	}
+	body, headerOverrides, headerErr := extractClineHeaderOverrides(account, body)
+	if headerErr != nil {
+		return nil, headerErr
+	}
+	if err := account.ValidateClineOutboundBody(body); err != nil {
+		return nil, err
+	}
+	if err := s.checkClineAdmission(ctx, account, body); err != nil {
+		return nil, err
+	}
+	var clineModel struct {
+		Model string `json:"model"`
+	}
+	if isClineProtocolAccount(account) {
+		_ = json.Unmarshal(body, &clineModel)
+	}
+	s.configureClineReasoning(c, account, clineModel.Model)
 	// DeepSeek thinking mode 要求历史 assistant 回传 reasoning_content。
 	// Responses→CC 回退在加密-only / 缺 reasoning item 且缓存未命中时会漏掉该
 	// 字段，上游 400 "The `reasoning_content` in the thinking mode must be
 	// passed back to the API"。在共用出站点补空格占位，真实明文不覆盖。
 	body = ensureDeepSeekChatReasoningPlaceholders(account, body)
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	var lifetime *clineRequestLifetime
+	if account.IsCline() {
+		var clientContext context.Context
+		if c != nil && c.Request != nil {
+			clientContext = c.Request.Context()
+		}
+		lifetime = newClineRequestLifetime(ctx, clineDrainGrace, clineRequestCeiling, clientContext)
+		upstreamCtx, releaseUpstreamCtx = lifetime.ctx, lifetime.close
+	}
+	bodyOwnsLifetime := false
+	defer func() {
+		if !bodyOwnsLifetime {
+			releaseUpstreamCtx()
+		}
+	}()
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(body))
-	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
@@ -234,15 +276,38 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	// 账号级请求头覆写：放在所有内置默认头（含 Grok CLI 身份头）之后应用，
 	// 使配置值获得除共享传输层强制头之外的最高优先级。
 	account.ApplyHeaderOverrides(upstreamReq.Header)
+	applyClineRequestHeaders(upstreamReq.Header, headerOverrides)
 	applyOpenCodeSessionHeader(c, account, targetURL, upstreamReq.Header, body)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	guardResponse, err := s.prepareClineResponseGuard(ctx, account, body, stream)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
+		if lifetime != nil {
+			cause := context.Cause(lifetime.ctx)
+			if errors.Is(cause, ErrClineCallerDeadline) || errors.Is(cause, ErrClineDrainTimeout) {
+				// Preserve caller termination before generic transport failover/health logic.
+				return nil, cause
+			}
+		}
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+	}
+	if guardResponse != nil {
+		guardResponse(resp)
+	}
+	s.observeClineProviderResponse(ctx, account, body, stream, resp)
+	if lifetime != nil {
+		if resp == nil || resp.Body == nil {
+			return nil, fmt.Errorf("cline upstream returned no response body")
+		}
+		resp.Body = &clineLifetimeBody{source: resp.Body, lifetime: lifetime}
+		bodyOwnsLifetime = true
 	}
 	return resp, nil
 }
@@ -317,7 +382,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 		emit(&chunk)
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := clineBodyReadError(resp.Body, scanner.Err()); err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn(logPrefix+": stream read error",
 				zap.Error(err),
