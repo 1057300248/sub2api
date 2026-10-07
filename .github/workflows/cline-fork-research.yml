@@ -1,0 +1,82 @@
+name: Cline fork source research
+on:
+  push:
+    branches: [codex/sub2-v2100-cline-rebuild-20261007]
+    paths: [.github/workflows/cline-fork-research.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cline-v210-pinned-rebuild-evidence
+          run-id: 37608365625
+          github-token: ${{ github.token }}
+          path: evidence
+      - name: Inspect unique public heads without running third-party code
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import concurrent.futures,datetime,hashlib,json,pathlib,re,subprocess,urllib.error,urllib.request
+          src=pathlib.Path('evidence'); out=pathlib.Path('research');out.mkdir()
+          inventory=json.loads((src/'fork-inventory.json').read_text())
+          repos={r['full_name']:r for rows in inventory['inventories'].values() for r in rows}
+          for name in ['giscatgis-lang/sub2api-cline','onprs/sub2api','DR-lin-eng/sub2api-no2api','DR-lin-eng/sub2api','lanlingxiawu/sub2api-ek']:
+              repos.setdefault(name,{'full_name':name,'default_branch':'main'})
+          heads=[];errors=[]
+          def refs(item):
+              name,r=item
+              try:
+                  p=subprocess.run(['git','ls-remote','--heads','https://github.com/'+name+'.git'],capture_output=True,text=True,timeout=45)
+                  if p.returncode:return {'repo':name,'error':'git_ls_remote_failed','code':p.returncode}
+                  refs=[{'sha':line.split()[0],'branch':line.split()[1].removeprefix('refs/heads/')} for line in p.stdout.splitlines() if len(line.split())==2]
+                  selected=[x for x in refs if x['branch']==r['default_branch'] or re.search('cline',x['branch'],re.I)]
+                  if not selected and len(refs)==1:selected=refs
+                  return {'repo':name,'head_count':len(refs),'selected':selected,'cline_branches':[x for x in refs if re.search('cline',x['branch'],re.I)]}
+              except Exception as e:return {'repo':name,'error':type(e).__name__}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+              for row in pool.map(refs,sorted(repos.items())):
+                  heads.append(row)
+                  if row.get('error'):errors.append(row)
+          (out/'fork-heads.json').write_text(json.dumps(heads,indent=2))
+          unique={}
+          for row in heads:
+              for h in row.get('selected',[]):unique.setdefault(h['sha'],[]).append({'repo':row['repo'],'branch':h['branch']})
+          paths=['backend/internal/service/cline_platform.go','backend/internal/service/cline_ratelimit.go','backend/internal/service/openai_gateway_chat_completions_raw.go','backend/internal/service/ratelimit_service.go','backend/internal/pkg/cline/ratelimit.go']
+          pattern=re.compile(r'api\.cline\.bot|clinepass|clinePass|PlatformCline|cline_429|ClineRateLimit',re.I)
+          def inspect(item):
+              sha,owners=item;repo=owners[0]['repo'];findings=[];failures=[]
+              for path in paths:
+                  url='https://raw.githubusercontent.com/'+repo+'/'+sha+'/'+path
+                  try:
+                      req=urllib.request.Request(url,headers={'User-Agent':'sub2api-cline-source-review'})
+                      with urllib.request.urlopen(req,timeout=25) as res: data=res.read(1024*1024+1)
+                      if len(data)>1024*1024:failures.append({'path':path,'error':'size_bound'});continue
+                      text=data.decode('utf-8');matches=[n for n,line in enumerate(text.splitlines(),1) if pattern.search(line)]
+                      if not matches:continue
+                      name=sha+'-'+path.replace('/','_');(out/name).write_bytes(data)
+                      findings.append({'path':path,'matching_lines':matches,'sha256':hashlib.sha256(data).hexdigest(),'source_url':url,'saved_file':name})
+                  except urllib.error.HTTPError as e:
+                      if e.code!=404:failures.append({'path':path,'http':e.code})
+                  except Exception as e:failures.append({'path':path,'error':type(e).__name__})
+              return {'sha':sha,'owners':owners,'findings':findings,'errors':failures}
+          results=[]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+              for row in pool.map(inspect,sorted(unique.items())):results.append(row)
+          report={'observed_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'repositories_attempted':len(repos),'repositories_with_heads':sum(not r.get('error') for r in heads),'unique_selected_heads':len(unique),'source_paths':paths,'heads':results,'ref_errors':errors,'coverage':'119 ranxi direct forks and 500 newest Wei-Shaw forks from prior inventory, plus explicit candidates. Default heads and branch names containing cline; identical commit hashes deduplicated. Five source paths inspected, not a full audit of every repository or the entire fork network. No third-party source executed.'}
+          (out/'fork-source-report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+          print(json.dumps({k:report[k] for k in ['repositories_attempted','repositories_with_heads','unique_selected_heads','coverage']},ensure_ascii=False))
+          for row in results:
+              if row['findings']:print(json.dumps({'sha':row['sha'],'owners':row['owners'],'files':[f['path'] for f in row['findings']]},ensure_ascii=False))
+          print('reference_errors',len(errors),'source_errors',sum(len(x['errors']) for x in results))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cline-fork-source-research
+          path: research/
+          retention-days: 7
