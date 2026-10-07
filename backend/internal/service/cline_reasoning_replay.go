@@ -127,17 +127,7 @@ func (s *OpenAIGatewayService) restoreClineReasoning(c *gin.Context, a *Account,
 			_ = json.Unmarshal(msg["tool_calls"], &calls)
 			match := false
 			if len(envelope.Calls) > 0 {
-				ids := map[string]bool{}
-				for _, call := range calls {
-					ids[call.ID] = true
-				}
-				match = true
-				for _, id := range envelope.Calls {
-					if !ids[id] {
-						match = false
-						break
-					}
-				}
+				match = clineReasoningCallsMatch(envelope.Calls, calls)
 			} else if len(calls) == 0 {
 				match = clineTextDigest(clineChatText(msg["content"])) == envelope.TextDigest
 			}
@@ -161,6 +151,19 @@ func (s *OpenAIGatewayService) restoreClineReasoning(c *gin.Context, a *Account,
 		return nil, ErrClineRequestContract
 	}
 	return json.Marshal(out)
+}
+
+func clineReasoningCallsMatch(expected []cline.ReasoningCall, actual []apicompat.ChatToolCall) bool {
+	if len(expected) != len(actual) {
+		return false
+	}
+	for i, want := range expected {
+		got := actual[i]
+		if want.ID != got.ID || want.Type != got.Type || want.Name != got.Function.Name || want.Arguments != got.Function.Arguments {
+			return false
+		}
+	}
+	return true
 }
 func clineReasoningTokens(body []byte, protocol string) ([]string, error) {
 	var source struct {
@@ -235,7 +238,7 @@ type clineReasoningAccumulator struct {
 	context *clineReasoningContext
 	details json.RawMessage
 	text    hash.Hash
-	calls   map[int]string
+	calls   map[int]cline.ReasoningCall
 	err     error
 }
 
@@ -244,7 +247,7 @@ func newClineReasoningAccumulator(c *gin.Context) *clineReasoningAccumulator {
 	if ctx == nil {
 		return nil
 	}
-	return &clineReasoningAccumulator{context: ctx, text: sha256.New(), calls: map[int]string{}}
+	return &clineReasoningAccumulator{context: ctx, text: sha256.New(), calls: map[int]cline.ReasoningCall{}}
 }
 func (a *clineReasoningAccumulator) observe(chunk *apicompat.ChatCompletionsChunk) {
 	if a == nil || chunk == nil || a.err != nil {
@@ -266,8 +269,31 @@ func (a *clineReasoningAccumulator) observe(chunk *apicompat.ChatCompletionsChun
 				a.err = cline.ErrReasoningContext
 				return
 			}
-			if call.ID != "" {
-				a.calls[index] = call.ID
+			if call.ID != "" || call.Type != "" || call.Function.Name != "" || call.Function.Arguments != "" {
+				stored := a.calls[index]
+				if call.ID != "" {
+					if stored.ID != "" && stored.ID != call.ID {
+						a.err = cline.ErrReasoningContext
+						return
+					}
+					stored.ID = call.ID
+				}
+				if call.Type != "" {
+					if stored.Type != "" && stored.Type != call.Type {
+						a.err = cline.ErrReasoningContext
+						return
+					}
+					stored.Type = call.Type
+				}
+				if call.Function.Name != "" {
+					if stored.Name != "" && stored.Name != call.Function.Name {
+						a.err = cline.ErrReasoningContext
+						return
+					}
+					stored.Name = call.Function.Name
+				}
+				stored.Arguments += call.Function.Arguments
+				a.calls[index] = stored
 			}
 		}
 		a.details, a.err = cline.MergeReasoningDetails(a.details, choice.Delta.ReasoningDetails)
@@ -291,11 +317,11 @@ func (a *clineReasoningAccumulator) seal() (string, error) {
 		indexes = append(indexes, index)
 	}
 	sort.Ints(indexes)
-	ids := make([]string, 0, len(indexes))
+	calls := make([]cline.ReasoningCall, 0, len(indexes))
 	for _, index := range indexes {
-		ids = append(ids, a.calls[index])
+		calls = append(calls, a.calls[index])
 	}
-	token, err := a.context.codec.Seal(a.details, ids, hex.EncodeToString(a.text.Sum(nil)), time.Now().UTC())
+	token, err := a.context.codec.Seal(a.details, calls, hex.EncodeToString(a.text.Sum(nil)), time.Now().UTC())
 	if err != nil {
 		return "", ErrClineReasoningUnavailable
 	}
@@ -317,11 +343,11 @@ func sealClineBufferedReasoning(c *gin.Context, response *apicompat.ChatCompleti
 	if state.codec == nil {
 		return "", ErrClineReasoningUnavailable
 	}
-	ids := make([]string, 0, len(message.ToolCalls))
+	calls := make([]cline.ReasoningCall, 0, len(message.ToolCalls))
 	for _, call := range message.ToolCalls {
-		ids = append(ids, call.ID)
+		calls = append(calls, cline.ReasoningCall{ID: call.ID, Type: call.Type, Name: call.Function.Name, Arguments: call.Function.Arguments})
 	}
-	token, err := state.codec.Seal(details, ids, clineTextDigest(clineChatText(message.Content)), time.Now().UTC())
+	token, err := state.codec.Seal(details, calls, clineTextDigest(clineChatText(message.Content)), time.Now().UTC())
 	if err != nil {
 		return "", ErrClineReasoningUnavailable
 	}

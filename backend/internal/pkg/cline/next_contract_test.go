@@ -45,7 +45,7 @@ func TestClineReasoningEnvelopeBindingAndExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := codec.Seal(details, []string{"call-1"}, digest, now)
+	token, err := codec.Seal(details, []ReasoningCall{{ID: "call-1", Type: "function", Name: "lookup", Arguments: `{"id":1}`}}, digest, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestClineReasoningEnvelopeBindingAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	canonical, _ := MergeReasoningDetails(nil, details)
-	if !bytes.Equal(opened.Details, canonical) || len(opened.Calls) != 1 || opened.Calls[0] != "call-1" {
+	if !bytes.Equal(opened.Details, canonical) || len(opened.Calls) != 1 || opened.Calls[0].ID != "call-1" || opened.Calls[0].Name != "lookup" {
 		t.Fatalf("lost payload: %+v", opened)
 	}
 	other, _ := NewReasoningCodec(strings.Repeat("x", 32), "other/key/subject/model")
@@ -78,7 +78,7 @@ func TestClineReasoningEnvelopeBindingAndExpiry(t *testing.T) {
 	if _, e := codec.Open("foreign-native-ciphertext", now); e == nil {
 		t.Fatal("foreign ciphertext accepted")
 	}
-	if _, e := codec.Seal(details, []string{"same", "same"}, digest, now); e == nil {
+	if _, e := codec.Seal(details, []ReasoningCall{{ID: "same"}, {ID: "same"}}, digest, now); e == nil {
 		t.Fatal("duplicate calls accepted")
 	}
 	if _, e := NewReasoningCodec("weak", "tenant"); e == nil {

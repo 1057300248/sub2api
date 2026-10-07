@@ -228,7 +228,7 @@ func TestClineReasoningToolBindingAndTerminalEvents(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Set("api_key", &APIKey{ID: 1, UserID: 2})
 	state := svc.configureClineReasoning(c, a, "cline-pass/model")
-	token, err := state.codec.Seal([]byte(`[{"type":"reasoning.encrypted","data":"opaque"}]`), []string{"call1"}, clineTextDigest(""), time.Now())
+	token, err := state.codec.Seal([]byte(`[{"type":"reasoning.encrypted","data":"opaque"}]`), []cline.ReasoningCall{{ID: "call1", Type: "function", Name: "f", Arguments: "{}"}}, clineTextDigest(""), time.Now())
 	require.NoError(t, err)
 	source, _ := json.Marshal(map[string]any{"input": []any{map[string]any{"type": "reasoning", "encrypted_content": token}}})
 	body := []byte(`{"model":"cline-pass/model","messages":[{"role":"assistant","tool_calls":[{"id":"call1","type":"function","function":{"name":"f","arguments":"{}"}}]}]}`)
@@ -238,6 +238,18 @@ func TestClineReasoningToolBindingAndTerminalEvents(t *testing.T) {
 	bad, _ := sjson.SetBytes(body, "messages.0.tool_calls.0.id", "other")
 	_, err = svc.restoreClineReasoning(c, a, source, bad, "responses")
 	require.Error(t, err)
+	for name, mutate := range map[string]func([]byte) []byte{
+		"type": func(in []byte) []byte { out, _ := sjson.SetBytes(in, "messages.0.tool_calls.0.type", "custom"); return out },
+		"name": func(in []byte) []byte { out, _ := sjson.SetBytes(in, "messages.0.tool_calls.0.function.name", "g"); return out },
+		"arguments": func(in []byte) []byte { out, _ := sjson.SetBytes(in, "messages.0.tool_calls.0.function.arguments", `{"other":true}`); return out },
+		"extra": func(in []byte) []byte { out, _ := sjson.SetBytes(in, "messages.0.tool_calls.1", map[string]any{"id": "call2", "type": "function", "function": map[string]any{"name": "g", "arguments": "{}"}}); return out },
+		"missing": func(in []byte) []byte { out, _ := sjson.SetBytes(in, "messages.0.tool_calls", []any{}); return out },
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := svc.restoreClineReasoning(c, a, source, mutate(body), "responses")
+			require.ErrorIs(t, err, ErrClineRequestContract)
+		})
+	}
 	events := attachClineResponsesReasoningEvents([]apicompat.ResponsesStreamEvent{{Type: "response.completed", SequenceNumber: 4, Response: &apicompat.ResponsesResponse{Status: "completed"}}}, token)
 	require.Len(t, events, 3)
 	require.Equal(t, "response.output_item.added", events[0].Type)

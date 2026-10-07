@@ -30,10 +30,22 @@ var ErrReasoningContext = errors.New("cline reasoning context is invalid, expire
 // and model. The original provider's opaque JSON is never interpreted as text.
 type ReasoningEnvelope struct {
 	Details    json.RawMessage `json:"details"`
-	Calls      []string        `json:"calls,omitempty"`
+	Calls      []ReasoningCall `json:"calls,omitempty"`
 	TextDigest string          `json:"text_digest"`
 	IssuedAt   int64           `json:"issued_at"`
 	ExpiresAt  int64           `json:"expires_at"`
+}
+
+// ReasoningCall is the exact tool-call material that is needed to bind an
+// opaque reasoning continuation to the assistant turn that produced it.
+// Keeping the function name and arguments in the envelope prevents a caller
+// from reusing valid reasoning details with a different tool invocation that
+// happens to reuse the same provider-generated ID.
+type ReasoningCall struct {
+	ID        string `json:"id"`
+	Type      string `json:"type,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments"`
 }
 
 type ReasoningCodec struct {
@@ -57,7 +69,7 @@ func NewReasoningCodec(secret, binding string) (*ReasoningCodec, error) {
 	}
 	return &ReasoningCodec{aead: aead, binding: []byte(binding)}, nil
 }
-func (c *ReasoningCodec) Seal(details json.RawMessage, calls []string, textDigest string, now time.Time) (string, error) {
+func (c *ReasoningCodec) Seal(details json.RawMessage, calls []ReasoningCall, textDigest string, now time.Time) (string, error) {
 	if c == nil {
 		return "", ErrReasoningContext
 	}
@@ -114,10 +126,13 @@ func validReasoningEnvelope(v *ReasoningEnvelope) bool {
 	}
 	seen := map[string]bool{}
 	for _, id := range v.Calls {
-		if id == "" || len(id) > 256 || seen[id] || strings.ContainsAny(id, "\r\n\x00") {
+		if id.ID == "" || len(id.ID) > 256 || seen[id.ID] || strings.ContainsAny(id.ID, "\r\n\x00") {
 			return false
 		}
-		seen[id] = true
+		if len(id.Type) > 128 || len(id.Name) > 256 || len(id.Arguments) > MaxReasoningBytes || strings.ContainsAny(id.Type, "\r\n\x00") || strings.ContainsAny(id.Name, "\r\n\x00") {
+			return false
+		}
+		seen[id.ID] = true
 	}
 	_, err := MergeReasoningDetails(nil, v.Details)
 	return err == nil && len(v.Details) > 0
