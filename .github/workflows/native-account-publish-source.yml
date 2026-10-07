@@ -1,0 +1,92 @@
+name: Prepare native account reviewed source
+on:
+  push:
+    branches: [codex/cline-native-account-flow-20261007]
+    paths: [.github/workflows/native-account-publish-source.yml]
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 19d83b8bf17d1b9ce75e4c5b220176ba11b8480b
+          persist-credentials: false
+      - name: Apply individually hashed edits and verify the complete tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,os,pathlib,subprocess,urllib.request
+          base='https://api.github.com/repos/1057300248/sub2api/git/blobs/'
+          parts=['26165fe0f70204b26db562a129198e62448c315a','7f85d4b72e42496704cec87e85c07ba912d84808','511f41a35a320d7ca802ff8a5fd9a1cca1bfcbd7']
+          packed=b''
+          for sha in parts:
+              req=urllib.request.Request(base+sha,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(req,timeout=45) as res: blob=json.load(res)
+              part=base64.b64decode(blob['content'])
+              assert hashlib.sha1(b'blob '+str(len(part)).encode()+b'\0'+part).hexdigest()==sha
+              packed+=part
+          data=lzma.decompress(packed)
+          assert hashlib.sha256(data).hexdigest()=='7240fab2117e31343bb1d64408ce771a011402cdafd08ef3dc2eb5d87de9b363'
+          manifest=json.loads(data)
+          assert subprocess.check_output(['git','rev-parse','HEAD']).decode().strip()==manifest['base']
+          root=pathlib.Path.cwd()
+          for row in manifest['files']:
+              p=(root/row['path']).resolve();assert p.is_relative_to(root) and '.git' not in p.relative_to(root).parts
+              before=p.read_bytes() if p.exists() else b''
+              assert hashlib.sha256(before).hexdigest()==row['base_sha256'],row['path']
+              if row['status']=='D':p.unlink();continue
+              lines=before.decode().splitlines(keepends=True)
+              for e in reversed(row['edits']):lines[e['start']:e['end']]=e['text'].splitlines(keepends=True)
+              after=''.join(lines).encode()
+              assert hashlib.sha256(after).hexdigest()==row['final_sha256'],row['path']
+              p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(after)
+          subprocess.run(['git','add','-A'],check=True)
+          for row in manifest['files']:
+              if row['status']!='D':subprocess.run(['git','add','-f','--',row['path']],check=True)
+          tree=subprocess.check_output(['git','write-tree']).decode().strip()
+          assert tree=='2f8321c14d6db9d19c84afd1a452cdab07b8cb2b'==manifest['tree'],tree
+          out=pathlib.Path(os.environ['RUNNER_TEMP'])/'native-source';out.mkdir()
+          (out/'edit-manifest.json').write_bytes(data)
+          subprocess.run(['git','diff','--check','--cached'],check=True)
+          subprocess.run(['git','archive','--format=tar.gz','--output='+str(out/'reviewed-source.tar.gz'),tree],check=True)
+          print('verified_tree',tree,'changed_paths',len(manifest['files']))
+          PY
+          git fetch --depth=1 --no-tags https://github.com/ranxi2001/sub2api.git 5ca3cca21eeaf4ca8a694a7f2f8f0ecd9575c549
+          python3 tools/verify_cline_only.py
+          python3 tools/verify_cline_platform.py
+      - name: Publish source blobs only; no commits or ref updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64,json,os,pathlib,subprocess,time,urllib.request
+          out=pathlib.Path(os.environ['RUNNER_TEMP'])/'native-source'
+          manifest=json.loads((out/'edit-manifest.json').read_text());entries=[]
+          for row in manifest['files']:
+              entry={'path':row['path'],'mode':'100644','type':'blob','sha':None}
+              if row['status']!='D':
+                  data=pathlib.Path(row['path']).read_bytes()
+                  sha=subprocess.check_output(['git','hash-object','--',row['path']]).decode().strip()
+                  req=urllib.request.Request('https://api.github.com/repos/1057300248/sub2api/git/blobs',data=json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode(),headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'},method='POST')
+                  with urllib.request.urlopen(req,timeout=45) as res: result=json.load(res)
+                  assert result['sha']==sha
+                  entry['sha']=sha
+                  time.sleep(0.3)
+              entries.append(entry)
+              (out/'tree-entries.json').write_text(json.dumps(entries,indent=2))
+          report={'base':manifest['base'],'tree':manifest['tree'],'changed_paths':len(entries),'refs_updated':False,'commits_created':False,'production_changes':False}
+          (out/'result.json').write_text(json.dumps(report,indent=2));print(json.dumps(report));print(json.dumps(entries))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-account-reviewed-source
+          path: ${{ runner.temp }}/native-source/
+          retention-days: 7
