@@ -34,7 +34,7 @@
     "vue-draggable-plus": "^0.6.1",
     "vue-i18n": "^9.14.5",
     "vue-router": "^4.2.5",
-    "xlsx": "npm:@e965/xlsx@0.20.3"
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@intlify/message-compiler": "9.14.5",
