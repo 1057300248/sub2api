@@ -212,6 +212,9 @@ func (a *Account) IsSchedulable() bool {
 		return false
 	}
 	now := time.Now()
+	if a.IsCline() && ClineQuotaAdmission(a, now) != nil {
+		return false
+	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
 		return false
 	}
@@ -344,7 +347,7 @@ func (a *Account) IsCNProvider() bool {
 // openai/grok 原生走 OpenAI 网关；国产供应商同为 OpenAI Chat Completions
 // 兼容上游，也经 OpenAI 网关转发。OpenCode 同样经 OpenAI 网关按模型分流。
 func (a *Account) IsOpenAICompatible() bool {
-	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.IsCNProvider() || a.IsOpenCodeGo())
+	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.IsCNProvider() || a.IsOpenCodeGo() || a.IsCline())
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -948,6 +951,9 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 		}
 	}
 
+	if a.IsCline() {
+		return a.IsClineModelSupported(requestedModel)
+	}
 	// 透传模式仅替换认证、模型语义完全交由上游决定，因此放行所有模型。
 	// 该短路必须在 model_mapping 判定之前：账号从"白名单模式"切换到透传后，
 	// credentials 里常残留旧的非空 model_mapping，若不在此放行，透传账号会被
@@ -1080,6 +1086,9 @@ func (a *Account) ResolveCompactMappedModel(requestedModel string) (mappedModel 
 }
 
 func (a *Account) GetBaseURL() string {
+	if a.IsCline() {
+		return a.GetClineBaseURL()
+	}
 	if a.Type != AccountTypeAPIKey {
 		return ""
 	}
@@ -1220,6 +1229,9 @@ func (a *Account) IsCustomErrorCodesEnabled() bool {
 // IsPoolMode 检查 API Key 账号是否启用池模式。
 // 池模式下，上游错误不标记本地账号状态，而是在同一账号上重试。
 func (a *Account) IsPoolMode() bool {
+	if a.IsCline() {
+		return false
+	}
 	if !a.IsAPIKeyOrBedrock() || a.Credentials == nil {
 		return false
 	}
@@ -1383,6 +1395,9 @@ func (a *Account) GetCustomErrorCodes() []int {
 }
 
 func (a *Account) ShouldHandleErrorCode(statusCode int) bool {
+	if a.IsCline() && (statusCode == 401 || statusCode == 402 || statusCode == 403 || statusCode == 429) {
+		return true
+	}
 	if !a.IsCustomErrorCodesEnabled() {
 		return true
 	}
@@ -1484,6 +1499,9 @@ func (a *Account) IsOpenAIApiKey() bool {
 // 适用 openai、国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）与 OpenCode Go；
 // grok 走 GetGrokBaseURL，此处对 grok 返回 "" 以保持原有行为。
 func (a *Account) GetOpenAIBaseURL() string {
+	if a.IsCline() {
+		return a.GetClineBaseURL()
+	}
 	if !a.IsOpenAI() && !a.IsCNProvider() && !a.IsOpenCodeGo() {
 		return ""
 	}
@@ -1887,6 +1905,9 @@ func (a *Account) GetOpenAIApiKey() string {
 // 注意 IsOpenAIApiKey 语义上仅指 openai 平台账号，调度倍率/WS 能力门控
 // 继续以其为准，不受本方法影响。
 func (a *Account) GetOpenAIProtocolAPIKey() string {
+	if a.IsCline() && a.Type == AccountTypeAPIKey {
+		return a.GetClineWireCredential()
+	}
 	if a == nil {
 		return ""
 	}
@@ -1959,6 +1980,9 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if a == nil {
 		return false
 	}
+	if a.IsCline() {
+		return a.SupportsClineEndpointCapability(capability)
+	}
 	if capability == OpenAIEndpointCapabilitySeedance {
 		configured, _ := a.openAIEndpointCapabilitySet()
 		return configured["seedance"] && a.Platform == PlatformOpenAI && a.Type == AccountTypeAPIKey &&
@@ -2007,9 +2031,11 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 		// 与 OpenAIEndpointCapabilityResponses 的唯一区别：DeepSeek 语义上游的压缩
 		// 回合由 chat 桥承接（改写为普通 CC 请求 + 回程合成 compaction item，见
 		// shouldForwardDeepSeekResponsesCompactViaChatCompletions），因此不要求
-		// openai_responses_supported；其余账号保持原 Responses 判定。
+		// openai_responses_supported。旧 Cline 官方 API-key 账号也由同一 chat
+		// 桥改写 native v2 压缩；不因此开放原生 Responses/生图能力。
+		// 其余账号保持原 Responses 判定，且仍执行下方 chat 能力集校验。
 		if a.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(a.Extra) &&
-			!isDeepSeekSemanticsAccount(a) {
+			!isDeepSeekSemanticsAccount(a) && !isLegacyClineAccount(a) {
 			return false
 		}
 		capability = OpenAIEndpointCapabilityChatCompletions

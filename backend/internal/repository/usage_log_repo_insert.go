@@ -12,7 +12,6 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -119,6 +118,9 @@ type usageLogBestEffortRequest struct {
 }
 
 type usageLogInsertPrepared struct {
+	userID         int64
+	apiKeyID       int64
+	accountID      int64
 	createdAt      time.Time
 	requestID      string
 	rateMultiplier float64
@@ -607,11 +609,11 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 
 	query, args := buildUsageLogBestEffortInsertQuery(preparedList)
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {
-		logger.LegacyPrintf("repository.usage_log", "best-effort batch insert failed: %v", err)
+		logUsageLogBatchFailure(ctx, len(preparedList), err)
 		for _, group := range groupOrder {
 			singleErr := execUsageLogInsertNoResult(ctx, db, group.prepared)
 			if singleErr != nil {
-				logger.LegacyPrintf("repository.usage_log", "best-effort single fallback insert failed: %v", singleErr)
+				logPreparedUsageFailure(ctx, group.prepared, "batch_single_fallback", singleErr)
 			} else if group.prepared.requestID != "" && r != nil && r.bestEffortRecent != nil {
 				r.bestEffortRecent.SetDefault(group.key, struct{}{})
 			}
@@ -1300,6 +1302,9 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 	}
 
 	return usageLogInsertPrepared{
+		userID:         log.UserID,
+		apiKeyID:       log.APIKeyID,
+		accountID:      log.AccountID,
 		createdAt:      createdAt,
 		requestID:      requestID,
 		rateMultiplier: rateMultiplier,

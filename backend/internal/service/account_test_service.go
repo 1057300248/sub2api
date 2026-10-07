@@ -377,6 +377,11 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
+	// Route Cline through its guarded CC path, never the default Anthropic probe.
+	if account.IsCline() {
+		return s.testClineAccountConnection(c, account, modelID, prompt, mode)
+	}
+
 	if options, ok := pelicanTestOptionsFromContext(ctx); ok {
 		if options.testChannel == "bps" {
 			model := strings.TrimSpace(modelID)

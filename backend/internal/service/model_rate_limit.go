@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cline"
 	"strings"
 	"time"
 
@@ -78,6 +79,10 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 
 	keys := []string{modelKey}
 	switch a.Platform {
+	case PlatformCline:
+		for _, scope := range cline.RateLimitKeys(a.GetClineMode(), modelKey) {
+			keys = append(keys, ClineRateLimitScope(a, scope))
+		}
 	case PlatformAntigravity:
 		if isAntigravityGeminiModel(modelKey) && modelKey != antigravityGeminiModelRateLimitKey {
 			keys = append(keys, antigravityGeminiModelRateLimitKey)

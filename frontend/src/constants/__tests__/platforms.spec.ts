@@ -12,6 +12,7 @@ const concretePlatforms = [
   'deepseek',
   'minimax',
   'opencode_go',
+  'cline',
   'typesafe'
 ]
 

@@ -210,7 +210,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			Platform:            acc.Platform,
 			Type:                acc.Type,
 			Credentials:         acc.Credentials,
-			Extra:               service.RedactOpenAICodexTicketExtra(acc.Extra),
+			Extra:               portableClineExtra(acc.Platform, service.RedactOpenAICodexTicketExtra(acc.Extra)),
 			ProxyKey:            proxyKey,
 			Concurrency:         acc.Concurrency,
 			Priority:            acc.Priority,
@@ -704,6 +704,9 @@ func validateDataProxy(item DataProxy) error {
 }
 
 func validateDataAccount(item DataAccount) error {
+	if err := validateClineDataAccount(item); err != nil {
+		return err
+	}
 	if strings.TrimSpace(item.Name) == "" {
 		return errors.New("account name is required")
 	}

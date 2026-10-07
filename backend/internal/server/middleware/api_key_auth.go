@@ -61,18 +61,21 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// 尝试从Authorization header中提取API key (Bearer scheme)
 		authHeader := c.GetHeader("Authorization")
 		var apiKeyString string
+		credentialSource := "none"
 
 		if authHeader != "" {
 			// 验证Bearer scheme
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
 				apiKeyString = strings.TrimSpace(parts[1])
+				credentialSource = "authorization_bearer"
 			}
 		}
 
 		// 如果Authorization header中没有，尝试从x-api-key header中提取
 		if apiKeyString == "" {
 			apiKeyString = c.GetHeader("x-api-key")
+			credentialSource = "x_api_key"
 		}
 		if len(apiKeyString) > service.MaxAPIKeyCredentialBytes {
 			recordInvalidAuthFailure(c, apiKeyService)
@@ -84,7 +87,10 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// 如果x-api-key header中没有，尝试从x-goog-api-key header中提取（Gemini CLI兼容）
 		if apiKeyString == "" {
 			apiKeyString = c.GetHeader("x-goog-api-key")
+			credentialSource = "x_goog_api_key"
 		}
+
+		recordAPIKeyCredentialDiagnostic(c, credentialSource, apiKeyString)
 
 		// 如果所有header都没有API key
 		if apiKeyString == "" {
@@ -101,6 +107,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// ── 2. 验证 Key 存在 ─────────────────────────────────────────
 
 		apiKey, err := apiKeyService.GetByKey(c.Request.Context(), apiKeyString)
+		recordAPIKeyLookupDiagnostic(c, apiKey, err)
 		if err != nil {
 			if errors.Is(err, service.ErrAPIKeyNotFound) {
 				recordInvalidAuthFailure(c, apiKeyService)
