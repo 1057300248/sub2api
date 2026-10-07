@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cline"
+	"github.com/stretchr/testify/require"
 )
 
 type clineGuardLimitObservation struct {
@@ -190,4 +192,23 @@ func TestClineResponseGuardStreamingJSONAndIsolation(t *testing.T) {
 	if _, err := s.prepareClineResponseGuard(context.Background(), a, []byte(`{"model":"cline-pass/model"}`), true); err == nil {
 		t.Fatal("unfreezable identity accepted")
 	}
+}
+
+func TestClineResponseGuardNormalizesLegacyClineEnvelope(t *testing.T) {
+	account := clineTestAccount(cline.ModePass)
+	account.Platform = PlatformDeepseek
+	account.Credentials["base_url"] = cline.BaseURL
+
+	service := &OpenAIGatewayService{}
+	guard, err := service.prepareClineResponseGuard(context.Background(), account, []byte(`{"model":"cline-pass/model"}`), false)
+	require.NoError(t, err)
+	require.NotNil(t, guard)
+
+	body, err := clineGuardResponse(t, guard, "application/json", `{"success":true,"data":{"id":"legacy-1","model":"cline-pass/model","choices":[{"message":{"role":"assistant","content":"ok"}}]}}`)
+	require.NoError(t, err)
+	var normalized map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &normalized))
+	require.Contains(t, normalized, "choices")
+	require.NotContains(t, normalized, "success")
+	require.NotContains(t, normalized, "data")
 }

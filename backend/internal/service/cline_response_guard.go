@@ -21,7 +21,7 @@ const clineLimitPersistTimeout = 5 * time.Second
 // CAS, even if an operator rotates a key while the response is being read.
 // The returned guard never replays a request or changes another platform.
 func (s *OpenAIGatewayService) prepareClineResponseGuard(ctx context.Context, account *Account, requestBody []byte, stream bool) (func(*http.Response), error) {
-	if !account.IsCline() {
+	if !isClineProtocolAccount(account) {
 		return nil, nil
 	}
 	credentials, err := json.Marshal(account.Credentials)
