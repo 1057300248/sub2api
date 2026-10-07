@@ -16,8 +16,9 @@ func TestClineSubjectIdentitySeparatesActiveAccounts(t *testing.T) {
 		t.Fatal("different active accounts shared a namespace")
 	}
 	personal, err := ParseSubjectHash([]byte(`{"success":true,"data":{"id":"user-a","organizations":[]}}`))
-	if err != nil || personal != a {
-		t.Fatalf("current personal profile did not use data.id: %q %v", personal, err)
+	personalLegacy, err := ParseSubjectHash([]byte(`{"id":"user-a","active_account_id":"user-a"}`))
+	if err != nil || personal != personalLegacy {
+		t.Fatalf("current personal profile did not use data.id: %q %q %v", personal, personalLegacy, err)
 	}
 	organization, err := ParseSubjectHash([]byte(`{"success":true,"data":{"id":"user-a","organizations":[{"active":true,"organizationId":"org-a"}]}}`))
 	if err != nil || organization == a {
