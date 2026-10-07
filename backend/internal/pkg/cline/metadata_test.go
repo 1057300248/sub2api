@@ -15,7 +15,19 @@ func TestClineSubjectIdentitySeparatesActiveAccounts(t *testing.T) {
 	if err != nil || a == c {
 		t.Fatal("different active accounts shared a namespace")
 	}
-	for _, body := range []string{`{}`, `null`, `{"id":"user-a"}`, `{"id":"user-a","active_account_id":null}`, `{"id":"user-a","active_account_id":" a "}`, `{"success":true,"data":{"id":"a","active_account_id":"b"}}`} {
+	personal, err := ParseSubjectHash([]byte(`{"success":true,"data":{"id":"user-a","organizations":[]}}`))
+	if err != nil || personal != a {
+		t.Fatalf("current personal profile did not use data.id: %q %v", personal, err)
+	}
+	organization, err := ParseSubjectHash([]byte(`{"success":true,"data":{"id":"user-a","organizations":[{"active":true,"organizationId":"org-a"}]}}`))
+	if err != nil || organization == a {
+		t.Fatalf("active organization did not get its own namespace: %q %v", organization, err)
+	}
+	legacyOrganization, err := ParseSubjectHash([]byte(`{"id":"user-a","active_account_id":"org-a"}`))
+	if err != nil || organization != legacyOrganization {
+		t.Fatalf("current and legacy organization identities diverged: %q %q %v", organization, legacyOrganization, err)
+	}
+	for _, body := range []string{`{}`, `null`, `{"id":"user-a"}`, `{"id":"user-a","active_account_id":null}`, `{"id":"user-a","active_account_id":" a "}`, `{"success":false,"data":{"id":"a"}}`, `{"success":true,"data":{}}`, `{"success":true,"data":{"id":"a","organizations":[{"active":true,"organizationId":" "}]}}`, `{"success":true,"data":{"id":"a","organizations":[{"active":true,"organizationId":"org-a"},{"active":true,"organizationId":"org-b"}]}}`} {
 		if _, err := ParseSubjectHash([]byte(body)); err == nil {
 			t.Fatalf("unverified identity accepted: %s", body)
 		}

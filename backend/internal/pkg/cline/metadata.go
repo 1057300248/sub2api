@@ -21,11 +21,60 @@ func ParseSubjectHash(body []byte) (string, error) {
 	var p struct {
 		ID              string `json:"id"`
 		ActiveAccountID string `json:"active_account_id"`
+		Success         *bool  `json:"success"`
+		Data            *struct {
+			ID              string `json:"id"`
+			ActiveAccountID string `json:"active_account_id"`
+			Organizations   []struct {
+				Active         bool   `json:"active"`
+				OrganizationID string `json:"organizationId"`
+			} `json:"organizations"`
+		} `json:"data"`
 	}
-	if json.Unmarshal(body, &p) != nil || !validSubjectID(p.ID) || !validSubjectID(p.ActiveAccountID) {
+	if json.Unmarshal(body, &p) != nil {
 		return "", errors.New("unrecognized cline account identity")
 	}
-	sum := sha256.Sum256([]byte(BaseURL + "\x00account\x00" + p.ActiveAccountID))
+
+	// Older profile responses exposed the active account at the top level.
+	subject := ""
+	if p.ID != "" || p.ActiveAccountID != "" {
+		if !validSubjectID(p.ID) || !validSubjectID(p.ActiveAccountID) {
+			return "", errors.New("unrecognized cline account identity")
+		}
+		subject = p.ActiveAccountID
+	} else {
+		// The current API wraps /users/me in {success,data}. Personal accounts
+		// use data.id; an active organization is the billing subject when one
+		// is selected. Ambiguous active organizations fail closed.
+		if p.Data == nil || p.Success == nil || !*p.Success || !validSubjectID(p.Data.ID) {
+			return "", errors.New("unrecognized cline account identity")
+		}
+		subject = p.Data.ID
+		if p.Data.ActiveAccountID != "" {
+			if !validSubjectID(p.Data.ActiveAccountID) {
+				return "", errors.New("unrecognized cline account identity")
+			}
+			subject = p.Data.ActiveAccountID
+		} else {
+			activeOrganization := ""
+			for _, organization := range p.Data.Organizations {
+				if !organization.Active {
+					continue
+				}
+				if activeOrganization != "" || !validSubjectID(organization.OrganizationID) {
+					return "", errors.New("unrecognized cline account identity")
+				}
+				activeOrganization = organization.OrganizationID
+			}
+			if activeOrganization != "" {
+				subject = activeOrganization
+			}
+		}
+	}
+	if !validSubjectID(subject) {
+		return "", errors.New("unrecognized cline account identity")
+	}
+	sum := sha256.Sum256([]byte(BaseURL + "\x00account\x00" + subject))
 	return hex.EncodeToString(sum[:]), nil
 }
 
