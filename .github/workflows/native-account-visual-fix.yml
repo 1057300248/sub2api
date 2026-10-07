@@ -1,0 +1,57 @@
+name: Prepare native form visual correction
+on:
+  push:
+    branches: [codex/cline-native-account-flow-20261007]
+    paths: [.github/workflows/native-account-visual-fix.yml]
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: c01b2ba59b218f11481b844a987739b4a75f102e
+          persist-credentials: false
+      - name: Validate before and after hashes; publish source objects only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,json,os,pathlib,subprocess,urllib.request
+          root=pathlib.Path.cwd();api='https://api.github.com/repos/1057300248/sub2api/git/'
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'}
+          sha='b5e282e10d70a0b5d6f287b6eeb18c406724e114'
+          with urllib.request.urlopen(urllib.request.Request(api+'blobs/'+sha,headers=headers),timeout=45) as r:blob=json.load(r)
+          data=base64.b64decode(blob['content']);assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()==sha
+          manifest=json.loads(data);assert manifest['base']=='c01b2ba59b218f11481b844a987739b4a75f102e'
+          assert subprocess.check_output(['git','rev-parse','HEAD']).decode().strip()==manifest['base']
+          for row in manifest['files']:
+              p=(root/row['path']).resolve();assert p.is_relative_to(root) and '.git' not in p.relative_to(root).parts
+              before=p.read_bytes();assert hashlib.sha256(before).hexdigest()==row['base_sha256']
+              lines=before.decode().splitlines(keepends=True)
+              for e in reversed(row['edits']):lines[e['start']:e['end']]=e['text'].splitlines(keepends=True)
+              after=''.join(lines).encode();assert hashlib.sha256(after).hexdigest()==row['final_sha256']
+              p.write_bytes(after)
+          subprocess.run(['git','add','-A'],check=True)
+          tree=subprocess.check_output(['git','write-tree']).decode().strip();assert tree==manifest['tree']=='8bb033295f41e434250204ae0e5f1a7d65ecfca4'
+          subprocess.run(['git','diff','--cached','--check'],check=True)
+          out=pathlib.Path(os.environ['RUNNER_TEMP'])/'visual-source';out.mkdir();entries=[]
+          for row in manifest['files']:
+              data=pathlib.Path(row['path']).read_bytes()
+              expected=subprocess.check_output(['git','hash-object','--',row['path']]).decode().strip()
+              req=urllib.request.Request(api+'blobs',headers=headers,data=json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode(),method='POST')
+              with urllib.request.urlopen(req,timeout=45) as r:result=json.load(r)
+              assert result['sha']==expected
+              entries.append({'path':row['path'],'mode':'100644','type':'blob','sha':expected})
+          report={'base':manifest['base'],'tree':tree,'entries':entries,'refs_updated':False,'commits_created':False,'production_changes':False}
+          (out/'result.json').write_text(json.dumps(report,indent=2));print(json.dumps(report))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-account-visual-correction
+          path: ${{ runner.temp }}/visual-source/
+          retention-days: 7
