@@ -24,7 +24,7 @@ func ErrorClass(err error) (kind, state string) {
 	var sqlErr interface{ SQLState() string }
 	if errors.As(err, &sqlErr) {
 		value := sqlErr.SQLState()
-		if len(value) == 5 && strings.IndexFunc(value, func(r rune) bool { return !(r >= '0' && r <= '9' || r >= 'A' && r <= 'Z') }) < 0 {
+		if len(value) == 5 && strings.IndexFunc(value, func(r rune) bool { return (r < '0' || r > '9') && (r < 'A' || r > 'Z') }) < 0 {
 			state = value
 		}
 	}

@@ -48,6 +48,6 @@ Native Cline migration remains explicit/offline via the existing migration CLI, 
 
 ## Model catalog warning
 
-The ClinePass documentation observed on 2026-10-07 marks DeepSeek V4 Flash deprecated and lists V4.1 Flash. This is a separate compatibility risk, not proof of the reported 503 root cause. Verify the actual catalog and entitlement for the saved credential. Never silently remap `deepseek/deepseek-v4-flash` to a different model or to usage-based billing.
+Correction: rechecking the official ClinePass page on 2026-10-07 still lists `cline-pass/deepseek-v4-flash`. The earlier claim that V4 Flash was deprecated and replaced by V4.1 is withdrawn: the retrieved evidence does not establish that. Public documentation alone also cannot prove availability for a saved credential. Verify the live catalog and entitlement for that credential, distinguishing Pass model slugs from usage-billing/free slugs. Never silently remap `deepseek/deepseek-v4-flash` to another model or to usage-based billing.
 
 Primary reference: https://docs.cline.bot/getting-started/clinepass
