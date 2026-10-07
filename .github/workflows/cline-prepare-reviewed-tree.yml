@@ -1,0 +1,93 @@
+name: Prepare reviewed Cline v2.10 source tree
+on:
+  push:
+    branches: [codex/sub2-v2100-cline-rebuild-20261007]
+    paths: [.github/workflows/cline-prepare-reviewed-tree.yml, '.github/cline-rebuild/**']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Reconstruct the reviewed source, verify exact tree, never update any ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,lzma,os,pathlib
+          p=pathlib.Path('.github/cline-rebuild')
+          packed=b''.join((p/f'incident.part{i}.xz').read_bytes() for i in (1,2,3))
+          patch=lzma.decompress(packed)
+          assert len(patch)==78888
+          assert hashlib.sha256(patch).hexdigest()=='e121dfbc77081fd4c7765bc3c0055eeb970556bc30b76a5402421a55e7ea4f88'
+          (pathlib.Path(os.environ['RUNNER_TEMP'])/'cline-incident.patch').write_bytes(patch)
+          PY
+          git fetch --depth=1 --no-tags https://github.com/1057300248/sub2api.git c0fd7815108a5dd59b171a3e89b4cbbf61781a7f e6addfe4aff745c859f9bb50817bc468e0e1f4f7
+          git fetch --depth=1 --no-tags https://github.com/ranxi2001/sub2api.git 5ca3cca21eeaf4ca8a694a7f2f8f0ecd9575c549
+          git checkout --detach 5ca3cca21eeaf4ca8a694a7f2f8f0ecd9575c549
+          git diff --binary e6addfe4aff745c859f9bb50817bc468e0e1f4f7 c0fd7815108a5dd59b171a3e89b4cbbf61781a7f -- . ':!frontend/package.json' ':!frontend/pnpm-lock.yaml' > "$RUNNER_TEMP/cline-reviewed-overlay.patch"
+          git apply --3way --index "$RUNNER_TEMP/cline-reviewed-overlay.patch"
+          git apply --index "$RUNNER_TEMP/cline-incident.patch"
+          test "$(git write-tree)" = b593d04193d120817464ee1bdbb61829b130c2f6
+          python3 tools/verify_cline_only.py
+          python3 tools/verify_cline_platform.py
+          mkdir -p "$RUNNER_TEMP/reviewed-cline-result"
+          git diff --cached --stat > "$RUNNER_TEMP/reviewed-cline-result/source-stat.txt"
+          git diff --cached --binary --full-index > "$RUNNER_TEMP/reviewed-cline-result/full-v210-overlay.patch"
+          cp "$RUNNER_TEMP/cline-incident.patch" "$RUNNER_TEMP/reviewed-cline-result/"
+          git archive --format=tar.gz --output="$RUNNER_TEMP/reviewed-cline-result/reviewed-source.tar.gz" b593d04193d120817464ee1bdbb61829b130c2f6
+      - name: Publish Git objects only, without committing or changing branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,json,os,pathlib,subprocess,urllib.request
+          repo='1057300248/sub2api';base='5ca3cca21eeaf4ca8a694a7f2f8f0ecd9575c549';expected='b593d04193d120817464ee1bdbb61829b130c2f6'
+          def git(*args):return subprocess.check_output(['git',*args])
+          def tree(ref):
+              out={}
+              for line in git('ls-tree','-r','-z',ref).split(b'\0'):
+                  if not line:continue
+                  meta,path=line.split(b'\t',1);mode,kind,sha=meta.decode().split()
+                  assert kind=='blob'
+                  out[path.decode()]={'mode':mode,'type':kind,'sha':sha}
+              return out
+          def post(endpoint,payload):
+              req=urllib.request.Request('https://api.github.com/repos/'+repo+'/git/'+endpoint,data=json.dumps(payload).encode(),headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'},method='POST')
+              with urllib.request.urlopen(req,timeout=45) as res:return json.load(res)
+          assert git('write-tree').decode().strip()==expected
+          original=tree(base);final=tree(expected);known={x['sha'] for x in original.values()}
+          for pin in ['c0fd7815108a5dd59b171a3e89b4cbbf61781a7f','e6addfe4aff745c859f9bb50817bc468e0e1f4f7']:
+              known.update(x['sha'] for x in tree(pin).values())
+          changes=[];uploaded=[]
+          for path in sorted(set(original)|set(final)):
+              before=original.get(path);after=final.get(path)
+              if before==after:continue
+              if after is None:
+                  changes.append({'path':path,'mode':before['mode'],'type':'blob','sha':None});continue
+              sha=after['sha']
+              if sha not in known:
+                  data=git('cat-file','blob',sha);assert len(data)<2*1024*1024
+                  result=post('blobs',{'encoding':'base64','content':base64.b64encode(data).decode()})
+                  assert result['sha']==sha
+                  known.add(sha);uploaded.append({'path':path,'sha':sha,'bytes':len(data)})
+              changes.append({'path':path,**after})
+          result=post('trees',{'base_tree':git('rev-parse',base+'^{tree}').decode().strip(),'tree':changes})
+          assert result['sha']==expected,result
+          report={'upstream':base,'expected_tree':expected,'published_tree':result['sha'],'changed_paths':len(changes),'uploaded_blobs':uploaded,'refs_updated':False,'commits_created':False,'production_changes':False}
+          out=pathlib.Path(os.environ['RUNNER_TEMP'])/'reviewed-cline-result';(out/'published-tree.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cline-v210-reviewed-tree
+          path: ${{ runner.temp }}/reviewed-cline-result/
+          retention-days: 7
