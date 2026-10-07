@@ -1,0 +1,78 @@
+name: Prepare final native account review objects
+on:
+  push:
+    branches: [codex/cline-native-final-review-prep-20261008]
+    paths: [.github/workflows/native-account-final-prepare.yml]
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 0555048e3d087398ede25a59e90c4c1df10c9f91
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reconstruct exact reviewed tree and publish Git objects only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,gzip,hashlib,json,os,pathlib,subprocess,urllib.request
+          base='0555048e3d087398ede25a59e90c4c1df10c9f91'
+          base_tree='a67f311b3855c59ae1a1e902cc09151743b60630'
+          expected='505e61f3c3efd8fb5b481257f640cbdd5f0d1c80'
+          api='https://api.github.com/repos/1057300248/sub2api/git/'
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'}
+          def call(path,payload=None):
+              req=urllib.request.Request(api+path,headers=headers,data=None if payload is None else json.dumps(payload).encode(),method='GET' if payload is None else 'POST')
+              with urllib.request.urlopen(req,timeout=45) as res:return json.load(res)
+          def git(*args):return subprocess.check_output(['git',*args])
+          assert git('rev-parse','HEAD').decode().strip()==base
+          blob=call('blobs/d99c03413c32333d18fd909b8dbd9e38173df003')
+          encoded=''.join(blob['content'].split())
+          # Restore the single truncated transport fragment, then require the
+          # original compressed Git hash AND the original uncompressed SHA-256.
+          fragment='HAxertfvK6ACjhSAG'
+          original='HAxertfvK6jwAVqinJBoFYHNLNFCrbKowkXVX5Gq/Rs8L6ACjhSAG'
+          assert encoded.count(fragment)==1
+          packed=base64.b64decode(encoded.replace(fragment,original),validate=True)
+          assert hashlib.sha1(b'blob '+str(len(packed)).encode()+b'\0'+packed).hexdigest()=='2b8ddf5c63fd1455309be519adc1893418e30303'
+          patch=gzip.decompress(packed)
+          assert len(patch)==23397
+          assert hashlib.sha256(patch).hexdigest()=='82494a7f30df3d84d77b8279f33c3db08082685fb86e01067d2eb0042789b965'
+          subprocess.run(['git','apply','--index','-'],input=patch,check=True)
+          assert git('write-tree').decode().strip()==expected
+          subprocess.run(['git','diff','--cached','--check'],check=True)
+          subprocess.run(['python3','tools/verify_cline_only.py'],check=True)
+          subprocess.run(['python3','tools/verify_cline_platform.py'],check=True)
+          entries=[]
+          changed=git('diff','--cached','--name-only','-z').decode().split('\0')
+          for path in filter(None,changed):
+              assert not path.startswith('.github/')
+              data=git('show',':'+path)
+              sha=git('rev-parse',':'+path).decode().strip()
+              result=call('blobs',{'encoding':'base64','content':base64.b64encode(data).decode()})
+              assert result['sha']==sha
+              entries.append({'path':path,'mode':'100644','type':'blob','sha':sha})
+          assert len(entries)==10
+          report={'base':base,'base_tree':base_tree,'tree':expected,'patch_sha256':hashlib.sha256(patch).hexdigest(),'entries':entries,'refs_updated':False,'commits_created':False,'production_changes':False}
+          out=pathlib.Path(os.environ['RUNNER_TEMP'])/'native-final-review';out.mkdir()
+          (out/'source-objects.json').write_text(json.dumps(report,indent=2))
+          (out/'native-final-review.patch').write_bytes(patch)
+          result=call('trees',{'base_tree':base_tree,'tree':entries})
+          assert result['sha']==expected
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-account-final-review-objects
+          path: ${{ runner.temp }}/native-final-review/
+          retention-days: 7
