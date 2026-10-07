@@ -37,11 +37,12 @@ type GroupMove struct {
 	To   int64 `json:"to_group_id"`
 }
 type Spec struct {
-	AccountID    int64             `json:"account_id"`
-	Mode         string            `json:"mode"`
-	AuthType     string            `json:"auth_type"`
-	ModelMapping map[string]string `json:"model_mapping"`
-	GroupMoves   []GroupMove       `json:"group_moves"`
+	AccountID      int64             `json:"account_id"`
+	Mode           string            `json:"mode"`
+	AuthType       string            `json:"auth_type"`
+	ModelMapping   map[string]string `json:"model_mapping"`
+	ExcludedModels []string          `json:"excluded_models,omitempty"`
+	GroupMoves     []GroupMove       `json:"group_moves"`
 }
 type Plan struct {
 	Version      int    `json:"version"`
@@ -82,7 +83,7 @@ func digest(v any) (string, error) {
 func planDigest(plan Plan) (string, error) { plan.Approval = ""; return digest(plan) }
 
 func validateSpec(spec Spec) error {
-	if spec.AccountID <= 0 || len(spec.ModelMapping) == 0 || len(spec.ModelMapping) > 1000 || len(spec.GroupMoves) > 1000 {
+	if spec.AccountID <= 0 || len(spec.ModelMapping) == 0 || len(spec.ModelMapping) > 1000 || len(spec.ExcludedModels) > 1000 || len(spec.GroupMoves) > 1000 {
 		return ErrSpecification
 	}
 	if spec.Mode != cline.ModePass && spec.Mode != cline.ModePayG && spec.Mode != cline.ModeFree {
@@ -98,6 +99,16 @@ func validateSpec(spec Spec) error {
 		if spec.Mode != cline.ModeFree && cline.ValidateUpstreamModel(spec.Mode, upstream) != nil {
 			return ErrSpecification
 		}
+	}
+	excluded := map[string]bool{}
+	for _, public := range spec.ExcludedModels {
+		if spec.Mode != cline.ModePass || !cline.ValidModelID(public) || excluded[public] {
+			return ErrSpecification
+		}
+		if _, kept := spec.ModelMapping[public]; kept {
+			return ErrSpecification
+		}
+		excluded[public] = true
 	}
 	from, to := map[int64]bool{}, map[int64]bool{}
 	for _, move := range spec.GroupMoves {
@@ -127,11 +138,22 @@ func targetCredentials(before *snapshot, spec Spec) (map[string]any, error) {
 		return nil, ErrSpecification
 	}
 	var original map[string]string
-	if json.Unmarshal(body, &original) != nil || len(original) != len(spec.ModelMapping) {
+	if json.Unmarshal(body, &original) != nil || len(original) != len(spec.ModelMapping)+len(spec.ExcludedModels) {
 		return nil, ErrSpecification
 	}
+	// Exclusions are explicit in the approved plan. Only incompatible legacy
+	// aliases may be removed from Pass; the journal retains the full original.
+	excluded := map[string]bool{}
+	for _, key := range spec.ExcludedModels {
+		upstream, exists := original[key]
+		if !exists || spec.Mode != cline.ModePass || excluded[key] || !cline.ValidModelID(upstream) || cline.ValidateUpstreamModel(cline.ModePass, upstream) == nil {
+			return nil, ErrSpecification
+		}
+		excluded[key] = true
+	}
 	for key := range original {
-		if _, ok := spec.ModelMapping[key]; !ok || !cline.ValidModelID(key) {
+		_, kept := spec.ModelMapping[key]
+		if !cline.ValidModelID(key) || (kept == excluded[key]) {
 			return nil, ErrSpecification
 		}
 	}

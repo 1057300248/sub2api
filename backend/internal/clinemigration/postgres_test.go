@@ -56,7 +56,7 @@ func migrationDB(t *testing.T) (*sql.DB, Spec) {
  CREATE TABLE scheduler_outbox(id BIGSERIAL,event_type TEXT,account_id BIGINT);
  CREATE TABLE usage_logs(id BIGINT PRIMARY KEY,account_id BIGINT,cost NUMERIC);`)
 	require.NoError(t, err)
-	for _, name := range []string{"265_cline_credential_write_guard.sql", "266_cline_offline_migration_journal.sql", "268_cline_header_settings_guard.sql", "269_cline_advanced_settings_guard.sql", "270_cline_official_application_headers.sql"} {
+	for _, name := range []string{"265_cline_credential_write_guard.sql", "266_cline_offline_migration_journal.sql", "268_cline_header_settings_guard.sql", "269_cline_advanced_settings_guard.sql", "270_cline_official_application_headers.sql", "271_cline_legacy_application_headers.sql"} {
 		body, err := os.ReadFile("../../migrations/" + name)
 		require.NoError(t, err)
 		_, err = db.ExecContext(ctx, string(body))
@@ -177,4 +177,22 @@ func TestClineMigrationPostgresRequiresQuiescenceAndKeepsCooldown(t *testing.T) 
 	require.NoError(t, db.QueryRowContext(ctx, "SELECT rate_limit_reset_at FROM accounts WHERE id=1").Scan(&reset))
 	require.True(t, reset.Equal(until))
 	require.NotContains(t, strings.ToLower(plan.Warning), "automatic")
+}
+
+func TestClineMigrationPostgresMixedPassMappingsRollback(t *testing.T) {
+	db, spec := migrationDB(t)
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `UPDATE accounts SET credentials=credentials||'{"model_mapping":{"alias":"cline-pass/model","free":"vmc/free-model"},"header_override_enabled":true,"header_overrides":{"x-client-type":"cline-cli"}}'::jsonb WHERE id=1`)
+	require.NoError(t, err)
+	spec.ExcludedModels = []string{"free"}
+	plan, err := Preview(ctx, db, spec)
+	require.NoError(t, err)
+	require.NoError(t, Apply(ctx, db, *plan, plan.Approval, MaintenanceAcknowledgement))
+	var mapping, headers string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT (credentials->'model_mapping')::text,(credentials->'header_overrides')::text FROM accounts WHERE id=1`).Scan(&mapping, &headers))
+	require.JSONEq(t, `{"alias":"cline-pass/model"}`, mapping)
+	require.JSONEq(t, `{"x-client-type":"cline-cli"}`, headers)
+	require.NoError(t, Rollback(ctx, db, *plan, plan.Approval, MaintenanceAcknowledgement))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT (credentials->'model_mapping')::text FROM accounts WHERE id=1`).Scan(&mapping))
+	require.JSONEq(t, `{"alias":"cline-pass/model","free":"vmc/free-model"}`, mapping)
 }
