@@ -1047,6 +1047,8 @@ describe('CreateAccountModal native Cline workflow', () => {
   it('keeps one original form and common widgets and creates through the original API once', async () => {
     const w = await openCline()
     expect(w.findAll('#create-account-form')).toHaveLength(1)
+    expect(w.get('#create-account-form input[type="password"]').attributes('placeholder')).toBe('Cline API Key')
+    expect(w.text()).toContain('clineAccount.requiredModels')
     expect(w.find('#cline-account-form').exists()).toBe(false)
     expect(w.get('[data-testid="create-platform-cline"]').attributes('aria-pressed')).toBe('true')
     expect(w.findComponent({ name: 'ProxySelector' }).exists()).toBe(true)

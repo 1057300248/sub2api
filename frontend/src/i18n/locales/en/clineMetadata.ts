@@ -61,7 +61,7 @@ export default {
   identityUnknown: 'Active-account identity is unverified or stale. This does not prove that the account has no quota restrictions.',
   costNotice: 'Subscription reference token prices are not additional Pass charges. Existing downstream pricing is unchanged; incremental upstream cost is not inferred from this metadata.',
   catalog: 'Model suggestions for the selected mode',
-  catalogNotice: 'Adding a model is explicit and does not grant entitlement. Saving still validates the full whitelist; refreshing never changes it.',
+  catalogNotice: 'The public model catalog does not establish account entitlement, remaining quota or Free API access. Check the selected mode and models before saving the whitelist.',
   staleCatalog: 'The catalog is a last-valid cached observation, not a current availability guarantee.',
   add: 'Add explicitly'
 }

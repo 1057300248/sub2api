@@ -248,7 +248,7 @@
           <p class="input-hint mt-2">{{ t('admin.accounts.cnProviders.zhipuTeam.hint') }}</p>
         </div>
         <div>
-          <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
+          <label class="input-label">{{ account.platform === 'cline' ? t('clineAccount.replaceKey') : t('admin.accounts.apiKey') }}</label>
           <input
             v-model="editApiKey"
             type="password"
@@ -274,7 +274,7 @@
 
         <!-- Model Restriction Section (不适用于 Antigravity) -->
         <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-          <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
+          <label class="input-label">{{ account.platform === 'cline' ? t('clineAccount.requiredModels') : t('admin.accounts.modelRestriction') }}</label>
 
           <div
             v-if="isOpenAIModelRestrictionDisabled"

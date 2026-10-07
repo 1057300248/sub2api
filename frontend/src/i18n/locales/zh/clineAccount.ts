@@ -1,4 +1,5 @@
 export default {
+  requiredModels: '模型限制（必填）',
   nativeHint: 'Cline 使用通用账号设置；Chat、Responses、Messages 通过现有网关适配到 Chat Completions。模型必须明确指定，切换用量模式不会自动改写模型或启用付费回退。',
   poolUnavailable: 'Cline 按账号真实额度冷却，不启用池模式的同账号自动重试，避免重复消耗或撞限。',
   "advanced": {

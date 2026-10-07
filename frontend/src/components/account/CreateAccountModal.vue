@@ -1451,7 +1451,7 @@
           :plan="openCodeAccountMode"
         />
         <div>
-          <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
+          <label class="input-label">{{ form.platform === 'cline' ? `${t('clineAccount.key')} *` : t('admin.accounts.apiKeyRequired') }}</label>
           <input
             v-model="apiKeyValue"
             type="password"
@@ -1491,7 +1491,7 @@
 
         <!-- Model Restriction Section (Antigravity 已在上层条件排除) -->
         <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-          <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
+          <label class="input-label">{{ form.platform === 'cline' ? t('clineAccount.requiredModels') : t('admin.accounts.modelRestriction') }}</label>
 
           <div
             v-if="isOpenAIModelRestrictionDisabled"
@@ -4105,6 +4105,8 @@ const apiKeyValuePlaceholder = computed(() => {
     case 'minimax':
     case 'opencode_go':
       return 'sk-...'
+    case 'cline':
+      return clineAuthType.value === 'account_token' ? 'Account Token' : 'Cline API Key'
     case 'typesafe':
       return 'ts-...'
     default:
