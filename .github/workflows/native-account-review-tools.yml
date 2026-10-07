@@ -1,0 +1,43 @@
+name: Native account offline review dependencies
+on:
+  push:
+    branches: [codex/cline-native-account-flow-20261007]
+    paths: [.github/workflows/native-account-review-tools.yml]
+permissions:
+  contents: read
+jobs:
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 19d83b8bf17d1b9ce75e4c5b220176ba11b8480b
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Download pinned public dependencies only
+        run: |
+          set -euo pipefail
+          (cd frontend && pnpm install --frozen-lockfile)
+          (cd backend && go mod download)
+          mkdir -p "$RUNNER_TEMP/review-deps"
+          git ls-tree -r HEAD > "$RUNNER_TEMP/review-deps/source-tree.txt"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/review-deps/source-identity.txt"
+          tar -czf "$RUNNER_TEMP/review-deps/frontend-node-modules.tar.gz" -C frontend node_modules
+          tar -czf "$RUNNER_TEMP/review-deps/go-toolchain.tar.gz" -C "$(go env GOROOT)" .
+          tar -czf "$RUNNER_TEMP/review-deps/go-modules.tar.gz" -C "$(go env GOMODCACHE)" .
+          sha256sum "$RUNNER_TEMP/review-deps/"*.tar.gz > "$RUNNER_TEMP/review-deps/checksums.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-account-offline-review-deps
+          path: ${{ runner.temp }}/review-deps/
+          retention-days: 1
