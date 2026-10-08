@@ -16,6 +16,7 @@ const props = withDefaults(defineProps<{
   weeklyResetDay: number | null
   weeklyResetHour: number | null
   resetTimezone: string | null
+  embedded?: boolean
   quotaNotifyGlobalEnabled?: boolean
   quotaNotifyDailyEnabled?: boolean | null
   quotaNotifyDailyThreshold?: number | null
@@ -27,6 +28,7 @@ const props = withDefaults(defineProps<{
   quotaNotifyTotalThreshold?: number | null
   quotaNotifyTotalThresholdType?: QuotaThresholdType | null
 }>(), {
+  embedded: false,
   quotaNotifyGlobalEnabled: false,
   quotaNotifyDailyEnabled: null,
   quotaNotifyDailyThreshold: null,
@@ -76,7 +78,7 @@ watch(enabled, (val) => {
 
 // When toggle is turned off, clear all values and expand
 watch(localEnabled, (val) => {
-  if (!val) {
+  if (!val && !props.embedded) {
     collapsed.value = false
     emit('update:totalLimit', null)
     emit('update:dailyLimit', null)
@@ -139,7 +141,7 @@ const dailyFixedHint = computed(() =>
 <template>
   <div class="rounded-lg border border-gray-200 dark:border-dark-600">
       <!-- Header: toggle + collapse -->
-      <div class="flex items-center justify-between p-4" :class="{ 'pb-0': localEnabled && !collapsed }">
+      <div v-if="!embedded" class="flex items-center justify-between p-4" :class="{ 'pb-0': localEnabled && !collapsed }">
         <div class="flex items-center gap-2 flex-1 cursor-pointer" @click="localEnabled && (collapsed = !collapsed)">
           <svg v-if="localEnabled" class="h-4 w-4 text-gray-400 transition-transform" :class="{ '-rotate-90': collapsed }" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
@@ -169,7 +171,7 @@ const dailyFixedHint = computed(() =>
       </div>
 
       <!-- Collapsible content -->
-      <div v-if="localEnabled && !collapsed" class="space-y-2 p-4 pt-3">
+      <div v-if="embedded || (localEnabled && !collapsed)" class="space-y-2 p-4 pt-3">
         <!-- Daily quota -->
         <QuotaDimensionRow
           dim="daily"

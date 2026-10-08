@@ -2504,6 +2504,42 @@ describe('EditAccountModal native Cline workflow', () => {
     return { ...buildAccount(), name: 'Saved Cline', platform: 'cline', credentials: { api_key: 'never-render-this-secret', base_url: 'https://api.cline.bot/api/v1', account_mode: 'pass', cline_auth_type: 'api_key', model_mapping: { public: 'cline-pass/model' }, header_override_enabled: true, header_overrides: { 'user-agent': 'fixture/1' } }, group_ids: [11], groups: [{ id: 11, name: 'Saved Cline group', platform: 'cline' }], schedulable: false, proxy_id: 9, proxy_fallback_origin_id: 3, extra: { quota_limit: 100, quota_used: 15, quota_daily_used: 4, cline_state: { quota_status: 'exhausted' }, model_rate_limits: { provider: 42 }, cost_multiplier: 0.8, quota_notify_daily_enabled: false } }
   }
   beforeEach(() => { updateAccountMock.mockReset().mockResolvedValue(clineAccount()) })
+  it('reenables a saved pause policy through the native edit form with its original rules', async () => {
+    const account = clineAccount()
+    const rules = [{ error_code: 503, keywords: ['unavailable'], duration_minutes: 10, description: 'saved policy' }]
+    Object.assign(account.credentials, { temp_unschedulable_enabled: false, temp_unschedulable_rules: rules })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.findAll('button').find(button =>
+      button.element.parentElement?.textContent?.includes('admin.accounts.tempUnschedulable.hint'))!.trigger('click')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0][1].credentials).toMatchObject({
+      temp_unschedulable_enabled: true, temp_unschedulable_rules: rules
+    })
+  })
+  it.each([true, false])('preserves saved pause rules when disabled (initial enabled=%s)', async (initialEnabled) => {
+    const account = clineAccount()
+    Object.assign(account.credentials, {
+      temp_unschedulable_enabled: initialEnabled,
+      temp_unschedulable_rules: [{ error_code: 503, keywords: ['unavailable'], duration_minutes: 10, description: 'saved policy' }]
+    })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    if (initialEnabled) {
+      const toggle = wrapper.findAll('button').find(button =>
+        button.element.parentElement?.textContent?.includes('admin.accounts.tempUnschedulable.hint'))
+      expect(toggle).toBeDefined()
+      await toggle!.trigger('click')
+    }
+    await wrapper.get('textarea').setValue('updated notes')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const payload = updateAccountMock.mock.calls[0][1]
+    expect(payload.credentials.temp_unschedulable_enabled).toBe(false)
+    expect(payload.credentials).not.toHaveProperty('temp_unschedulable_rules')
+  })
   it('edits the same account through the original API without replaying runtime snapshots or a stored secret', async () => {
     const a = clineAccount(); const w = mountModal(a); await flushPromises()
     expect(w.findAll('#edit-account-form')).toHaveLength(1)
