@@ -269,3 +269,89 @@ describe('ModelWhitelistSelector', () => {
     expect(syncButton?.exists()).toBe(true)
   })
 })
+
+
+describe('native model sync with Cline provider', () => {
+  beforeEach(()=>{ syncUpstreamModels.mockReset(); syncUpstreamModelsPreview.mockReset(); showError.mockReset() })
+  const syncButton = (w: ReturnType<typeof mountSelector>) => w.findAll('button').find(b=>b.text()==='admin.accounts.syncUpstreamModels')!
+  it('uses the original preview endpoint with mode and credential kind, retaining prior selections', async () => {
+    const credentials={platform:'cline',type:'apikey',api_key:'fixture',account_mode:'pass',cline_auth_type:'account_token',base_url:'https://api.cline.bot/api/v1'}
+    syncUpstreamModelsPreview.mockResolvedValue({models:['cline-pass/model'],warnings:[{code:'cline_public_catalog'}]})
+    const w=mountSelector({platform:'cline',modelValue:['stale/model'],syncCredentials:credentials})
+    await syncButton(w).trigger('click'); await flushPromises()
+    expect(syncUpstreamModelsPreview).toHaveBeenCalledWith(credentials)
+    expect(w.emitted('update:modelValue')).toEqual([[['stale/model','cline-pass/model']]])
+    expect(syncUpstreamModels).not.toHaveBeenCalled(); w.unmount()
+  })
+  it('uses the saved account ID without resending its secret', async () => {
+    syncUpstreamModels.mockResolvedValue({models:['cline-pass/model']})
+    const w=mountSelector({platform:'cline',accountId:41})
+    await syncButton(w).trigger('click'); await flushPromises()
+    expect(syncUpstreamModels).toHaveBeenCalledWith(41); expect(syncUpstreamModelsPreview).not.toHaveBeenCalled(); w.unmount()
+  })
+  it('ignores a late discovery result after the draft mode changes', async () => {
+    let finish!: (v:any)=>void; syncUpstreamModelsPreview.mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+    const credentials={platform:'cline',type:'apikey',api_key:'fixture',account_mode:'pass'}
+    const w=mountSelector({platform:'cline',syncCredentials:credentials})
+    await syncButton(w).trigger('click')
+    await w.setProps({syncCredentials:{...credentials,account_mode:'payg'}})
+    finish({models:['cline-pass/model']}); await flushPromises()
+    expect(w.emitted('update:modelValue')).toBeUndefined(); w.unmount()
+  })
+  it('disables saved-credential sync for an unsaved connection and rejects its in-flight response', async () => {
+    let finish!: (v:any)=>void; syncUpstreamModels.mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+    const w=mountSelector({platform:'cline',accountId:41}); await syncButton(w).trigger('click')
+    await w.setProps({syncDisabled:true}); finish({models:['cline-pass/model']}); await flushPromises()
+    expect(syncButton(w)).toBeUndefined(); expect(w.emitted('update:modelValue')).toBeUndefined(); w.unmount()
+  })
+})
+
+
+describe('native model discovery preserves the latest administrator edit', () => {
+  beforeEach(() => {
+    syncUpstreamModels.mockReset()
+    syncUpstreamModelsPreview.mockReset()
+    showInfo.mockReset()
+    showError.mockReset()
+  })
+  const button = (w: ReturnType<typeof mountSelector>, label: string) =>
+    w.findAll('button').find(b => b.text() === label)!
+
+  it('does not add a second identity entry over an existing alias or invalid mapping row', async () => {
+    const mappings = [{ from: 'cline-pass/alias', to: 'cline-pass/actual' }, { from: 'stale-model', to: '' }]
+    syncUpstreamModels.mockResolvedValue({ models: ['cline-pass/alias', 'stale-model', 'cline-pass/new'] })
+    const w = mountSelector({ platform: 'cline', accountId: 41, modelValue: ['cline-pass/kept'], modelMappings: mappings })
+    await button(w, 'admin.accounts.syncUpstreamModels').trigger('click')
+    await flushPromises()
+    expect(w.emitted('update:modelValue')).toEqual([[['cline-pass/kept', 'cline-pass/new']]])
+    expect(mappings).toEqual([{ from: 'cline-pass/alias', to: 'cline-pass/actual' }, { from: 'stale-model', to: '' }])
+    expect(showInfo).toHaveBeenCalledWith(expect.stringContaining('cline-pass/alias → cline-pass/actual'))
+    w.unmount()
+  })
+
+  it.each(['clear', 'remove'])('does not refill a whitelist after a later %s action', async action => {
+    let finish!: (value: unknown) => void
+    syncUpstreamModels.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const w = mountSelector({ platform: 'cline', accountId: 41, modelValue: ['cline-pass/kept'] })
+    await button(w, 'admin.accounts.syncUpstreamModels').trigger('click')
+    if (action === 'clear') await button(w, 'admin.accounts.clearAllModels').trigger('click')
+    else (w.vm as any).$.setupState.removeModel('cline-pass/kept')
+    await flushPromises()
+    finish({ models: ['cline-pass/kept', 'cline-pass/new'] })
+    await flushPromises()
+    expect(w.emitted('update:modelValue')).toEqual([[[]]])
+    w.unmount()
+  })
+
+  it('discards discovery after the shared selector platform set changes', async () => {
+    let finish!: (value: unknown) => void
+    syncUpstreamModels.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const w = mountSelector({ accountId: 41, platforms: ['cline'] })
+    await button(w, 'admin.accounts.syncUpstreamModels').trigger('click')
+    await w.setProps({ platforms: ['openai'] })
+    finish({ models: ['cline-pass/old'] })
+    await flushPromises()
+    expect(w.emitted('update:modelValue')).toBeUndefined()
+    w.unmount()
+  })
+})

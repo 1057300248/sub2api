@@ -1,116 +1,117 @@
-import type { Account, CreateAccountRequest, UpdateAccountRequest } from '@/types'
-import { clineAccountSettings, clineAccountSettingsPayload, clineAccountHeaderCredentials, type ClineAccountSettings } from './clineAccountSettings'
+// Provider policy only. Creating/updating accounts, common form state, model
+// widgets, proxy/group selectors and quotas belong to the native account forms.
+import type { Account } from '@/types'
+import type { HeaderOverrideRow } from './credentialsBuilder'
+import type { GroupAllowedModels } from './groupAllowedModels'
+import type { ModelMappingEntry } from '@/composables/useModelWhitelist'
 
 export const CLINE_BASE_URL = 'https://api.cline.bot/api/v1'
 export type ClineMode = 'pass' | 'free' | 'payg' | 'unknown'
 export type ClineAuthType = 'api_key' | 'account_token'
-export interface ClineModelRow { publicID: string; upstreamID: string }
-
-export interface ClineAccountDraft extends ClineAccountSettings {
-  name: string
-  notes: string
-  mode: ClineMode
-  authType: ClineAuthType | ''
-  apiKey: string
-  baseURL: string
-  models: ClineModelRow[]
-  concurrency: number
-  priority: number
-  groupIDs: number[]
-  schedulable: boolean
-}
-export type ClineFormIssue = 'name' | 'key' | 'authType' | 'baseURL' | 'models' | 'duplicateModel' | 'passModel' | 'paygModel' | 'concurrency' | 'priority' | 'groups' | 'platform'
-export class ClineFormError extends Error {
-  constructor(public readonly issue: ClineFormIssue) { super(issue) }
-}
+export const clineModeOptions = [
+  { value: 'pass', label: 'Cline Pass' },
+  { value: 'payg', label: 'Cline PAYG' },
+  { value: 'free', label: 'Cline Free' },
+  { value: 'unknown', label: 'Cline · ?' }
+]
+export const clineAuthOptions = [
+  { value: 'api_key', label: 'API Key' },
+  { value: 'account_token', label: 'Account Token' }
+]
 export function clineMode(value: unknown): ClineMode {
   return value === 'pass' || value === 'free' || value === 'payg' ? value : 'unknown'
 }
 export function clineModeLabel(value: unknown): string {
-  return { pass: 'Cline Pass', free: 'Cline Free', payg: 'Cline PAYG', unknown: 'Cline · ?' }[clineMode(value)]
+  return clineModeOptions.find(option => option.value === clineMode(value))!.label
 }
-export function clineAccountDraft(account?: Account | null): ClineAccountDraft {
-  if (account && account.platform !== 'cline') throw new ClineFormError('platform')
-  const credentials = account?.credentials ?? {}
-  const mapping = credentials.model_mapping
-  // Keep invalid legacy rows visible and unsavable until the operator fixes
-  // them. Do not drop a stale whitelist entry or substitute paid model IDs.
-  const models = mapping && typeof mapping === 'object' && !Array.isArray(mapping)
-    ? Object.entries(mapping).map(([publicID, upstreamID]) => ({ publicID, upstreamID: typeof upstreamID === 'string' ? upstreamID : '' }))
-    : []
-  const authType = credentials.cline_auth_type
-  return {
-    ...clineAccountSettings(account),
-    name: account?.name ?? '', notes: account?.notes ?? '',
-    mode: account ? clineMode(credentials.account_mode) : 'pass',
-    authType: !account ? 'api_key' : authType === 'api_key' || authType === 'account_token' ? authType : '',
-    // Never put an existing secret/redacted placeholder into the form DOM.
-    apiKey: '', baseURL: typeof credentials.base_url === 'string' ? credentials.base_url : CLINE_BASE_URL,
-    models: models.length ? models : [{ publicID: '', upstreamID: '' }],
-    concurrency: account?.concurrency ?? 1, priority: account?.priority ?? 1,
-    groupIDs: [...(account?.group_ids ?? [])], schedulable: account?.schedulable ?? true
-  }
-}
-function validID(value: string): boolean {
-  return value.length > 0 && new TextEncoder().encode(value).length <= 256 && !value.includes("\0") && !/[\s*\\]/u.test(value)
-}
-function checkedCredentials(draft: ClineAccountDraft, editing: boolean): Record<string, unknown> {
-  if (!editing && !draft.apiKey.trim()) throw new ClineFormError('key')
-  if (draft.authType !== 'api_key' && draft.authType !== 'account_token') throw new ClineFormError('authType')
-  let baseURL = draft.baseURL.trim() || CLINE_BASE_URL
-  try {
-    const u = new URL(baseURL)
-    if (u.protocol !== 'https:' || !u.hostname || u.username || u.password || u.search || u.hash || /\/(chat\/completions|responses|messages)\/?$/.test(u.pathname)) throw new Error('base')
-    if (u.hostname.toLowerCase() === 'api.cline.bot') {
-      if (u.port && u.port !== '443') throw new Error('port')
-      if (!['', '/api', '/api/v1'].includes(u.pathname.replace(/\/+$/, ''))) throw new Error('path')
-      baseURL = CLINE_BASE_URL
-    }
-  } catch { throw new ClineFormError('baseURL') }
-  if (!draft.models.length) throw new ClineFormError('models')
+const bytes = (value: string) => new TextEncoder().encode(value).length
+const validID = (value: string) => value.length > 0 && bytes(value) <= 256 && !value.includes('\0') && !/[\s*\\]/u.test(value)
+
+// Validate BEFORE the shared mapping builder, which intentionally drops invalid
+// general-provider rows. An invalid/stale Cline whitelist must remain visible.
+export function clineModelError(mode: ClineMode, allowed: string[], mappings: ModelMappingEntry[]): string | null {
+  if (!allowed.length && !mappings.length) return 'models'
   const seen = new Set<string>()
-  const entries = draft.models.map(row => {
-    const id = row.publicID.trim(), model = row.upstreamID.trim()
-    if (!validID(id) || !validID(model)) throw new ClineFormError('models')
-    if (seen.has(id)) throw new ClineFormError('duplicateModel')
+  for (const { from, to } of [...allowed.map(id => ({ from: id, to: id })), ...mappings]) {
+    const id = from.trim(), model = to.trim()
+    if (!validID(id) || !validID(model)) return 'models'
+    if (seen.has(id)) return 'duplicateModel'
     seen.add(id)
-    if (draft.mode === 'pass' && (!model.startsWith('cline-pass/') || model === 'cline-pass/')) throw new ClineFormError('passModel')
-    if (draft.mode === 'payg' && model.startsWith('cline-pass/')) throw new ClineFormError('paygModel')
-    return [id, model]
-  })
-  const result: Record<string, unknown> = {
-    account_mode: clineMode(draft.mode), cline_auth_type: draft.authType,
-    base_url: baseURL, api_protocol: 'chat_completions', model_mapping: Object.fromEntries(entries),
-    pool_mode: false, cline_paid_fallback: false, cline_free_api_enabled: false, openai_passthrough: false
+    if (mode === 'pass' && (!model.startsWith('cline-pass/') || model === 'cline-pass/')) return 'passModel'
+    if (mode === 'payg' && model.startsWith('cline-pass/')) return 'paygModel'
   }
-  if (draft.apiKey.trim()) result.api_key = draft.apiKey.trim()
-  return result
+  return null
 }
-export function buildClineAccountPayload(draft: ClineAccountDraft, account?: Account | null): CreateAccountRequest | UpdateAccountRequest {
-  if (account && account.platform !== 'cline') throw new ClineFormError('platform')
-  if (!draft.name.trim()) throw new ClineFormError('name')
-  if (!Number.isInteger(draft.concurrency) || draft.concurrency < 1 || draft.concurrency > 1000) throw new ClineFormError('concurrency')
-  if (!Number.isInteger(draft.priority) || draft.priority < 0 || draft.priority > 10000) throw new ClineFormError('priority')
-  if (draft.groupIDs.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new ClineFormError('groups')
-  const common = {
-    name: draft.name.trim(), notes: draft.notes, credentials: checkedCredentials(draft, !!account),
-    ...clineAccountSettingsPayload(draft, draft.groupIDs, account),
-    concurrency: draft.concurrency, priority: draft.priority
+
+// Reuse the native per-group widget/serializer, but do not let its generic empty
+// list normalization broaden an explicitly selected Cline group whitelist.
+export function clineGroupModelError(groupIDs: number[], limits: GroupAllowedModels): boolean {
+  return groupIDs.some(id => id in limits && (!limits[id].length || limits[id].some(model => !validID(model.trim()))))
+}
+
+export function applyClineCredentialFields(credentials: Record<string, unknown>, mode: ClineMode, auth: ClineAuthType): string | null {
+  if (auth !== 'api_key' && auth !== 'account_token') return 'authType'
+  let base = typeof credentials.base_url === 'string' ? credentials.base_url.trim() : ''
+  base ||= CLINE_BASE_URL
+  try {
+    const url = new URL(base)
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || /\/(chat\/completions|responses|messages)\/?$/.test(url.pathname)) return 'baseURL'
+    if (url.hostname.toLowerCase() === 'api.cline.bot') {
+      if (url.port && url.port !== '443') return 'baseURL'
+      if (!['', '/api', '/api/v1'].includes(url.pathname.replace(/\/+$/, ''))) return 'baseURL'
+      base = CLINE_BASE_URL
+    }
+  } catch { return 'baseURL' }
+  Object.assign(credentials, {
+    base_url: base, account_mode: clineMode(mode), cline_auth_type: auth,
+    api_protocol: 'chat_completions', pool_mode: false,
+    cline_paid_fallback: false, cline_free_api_enabled: false, openai_passthrough: false
+  })
+  delete credentials.api_base_urls
+  delete credentials.pool_mode_retry_count
+  delete credentials.pool_mode_retry_status_codes
+  return null
+}
+
+// The native HeaderOverrideEditor and serializer are reused; Cline's smaller
+// upstream allowlist/bounds remain a provider validation hook, not another UI.
+export function validateClineHeaderRows(rows: HeaderOverrideRow[]): boolean {
+  const seen = new Set<string>()
+  let total = 0
+  for (const { name: rawName, value } of rows) {
+    const name = rawName.trim(), lower = name.toLowerCase()
+    if (!name && !value) continue
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || bytes(name) > 128 ||
+      !(['user-agent', 'accept-language', 'x-request-id', 'x-client-name', 'x-client-version', 'http-referer', 'x-title'].includes(lower) || lower.startsWith('x-metadata-')) ||
+      seen.has(lower) || bytes(value) > 2048 || [...value].some(c => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)) return false
+    seen.add(lower)
+    total += bytes(name) + bytes(value)
   }
-  const groupIDs = [...new Set(draft.groupIDs)]
-  const originalHeaders = clineAccountSettings(account)
-  if (draft.headerOverrideEnabled || originalHeaders.headerOverrideEnabled || JSON.stringify(draft.headerOverrideRows) !== JSON.stringify(originalHeaders.headerOverrideRows)) {
-    Object.assign(common.credentials, clineAccountHeaderCredentials(draft))
+  const encoded = Object.fromEntries(rows.filter(row => row.name.trim()).map(row => [row.name.trim().toLowerCase(), row.value.trim()]))
+  return seen.size <= 16 && total <= 8192 && bytes(JSON.stringify(encoded)) <= 16384
+}
+
+export const CLINE_QUOTA_CONFIG_KEYS = [
+  'quota_limit', 'quota_daily_limit', 'quota_weekly_limit',
+  'quota_daily_reset_mode', 'quota_daily_reset_hour', 'quota_weekly_reset_mode',
+  'quota_weekly_reset_day', 'quota_weekly_reset_hour', 'quota_reset_timezone',
+  ...['total', 'daily', 'weekly'].flatMap(dim => ['enabled', 'threshold', 'threshold_type'].map(suffix => `quota_notify_${dim}_${suffix}`))
+]
+// Preserve the already-deployed Cline delta API contract while using the native
+// quota/notification serializer. Never send a stale runtime/probe snapshot.
+export function clineExtraDelta(next: Record<string, unknown>, before: Record<string, unknown>): Record<string, unknown> {
+  const delta: Record<string, unknown> = {}
+  for (const key of CLINE_QUOTA_CONFIG_KEYS) {
+    if (JSON.stringify(next[key] ?? null) !== JSON.stringify(before[key] ?? null)) delta[key] = next[key] ?? null
   }
-  if (!account) return { ...common, platform: 'cline', type: 'apikey', group_ids: groupIDs, schedulable: (draft.mode === 'pass' || draft.mode === 'payg') && draft.schedulable }
-  const update: UpdateAccountRequest = {
-    ...common, schedulable: (draft.mode === 'pass' || draft.mode === 'payg') && draft.schedulable
+  // Native cost serializer intentionally omits an unchanged probed cost.
+  for (const key of ['cost_multiplier', 'cost_multiplier_auto_sync']) {
+    if (key in next && next[key] !== before[key]) delta[key] = next[key]
   }
-  const before = [...(account.group_ids ?? [])].sort((a, b) => a - b)
-  if (JSON.stringify(before) !== JSON.stringify([...groupIDs].sort((a, b) => a - b))) update.group_ids = groupIDs
-  // Send only explicitly changed cost Extra keys, never runtime/probe state,
-  // a platform conversion or unchanged common settings/group bindings.
-  return update
+  if ((next.upstream_request_id_header ?? '') !== (before.upstream_request_id_header ?? '')) {
+    delta.upstream_request_id_header = next.upstream_request_id_header ?? ''
+  }
+  return delta
 }
 
 export function clineTestModelAllowed(account: Account | null | undefined, id: string): boolean {

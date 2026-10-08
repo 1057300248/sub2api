@@ -3,11 +3,14 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
@@ -38,12 +41,16 @@ func setupAvailableModelsRouter(adminSvc service.AdminService) *gin.Engine {
 }
 
 type syncUpstreamHTTPUpstream struct {
-	resp      *http.Response
-	responses []*http.Response
-	err       error
+	lastReq      *http.Request
+	lastProxyURL string
+	resp         *http.Response
+	responses    []*http.Response
+	err          error
 }
 
 func (u *syncUpstreamHTTPUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	u.lastReq = req
+	u.lastProxyURL = proxyURL
 	if u.err != nil {
 		return nil, u.err
 	}
@@ -72,6 +79,9 @@ func setupSyncUpstreamModelsRouter(adminSvc service.AdminService, upstream servi
 		&config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
 		nil,
 	)
+	accountTestSvc.SetOpenAIGatewayService(service.NewOpenAIGatewayService(
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil,
+	))
 	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, accountTestSvc, nil, nil, nil, nil, nil)
 	router.POST("/api/v1/admin/accounts/:id/models/sync-upstream", handler.SyncUpstreamModels)
 	router.POST("/api/v1/admin/accounts/models/sync-upstream-preview", handler.SyncUpstreamModelsPreview)
@@ -557,5 +567,114 @@ func TestAccountHandlerGetAvailableModels_TypeSafeOnlyReturnsJev(t *testing.T) {
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 		require.Len(t, resp.Data, 1)
 		require.Equal(t, "jev-latest", resp.Data[0].ID)
+	}
+}
+
+func TestClineNativeModelSyncPreviewUsesOriginalEndpoint(t *testing.T) {
+	for _, tc := range []struct{ mode, auth, want string }{
+		{"pass", "account_token", "cline-pass/model"}, {"payg", "api_key", "vendor/paid"}, {"free", "api_key", "vendor/free"},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			upstream := &syncUpstreamHTTPUpstream{resp: &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"clinePass":[{"id":"cline-pass/model"}],"recommended":[{"id":"vendor/paid"}],"free":[{"id":"vendor/free"}]}`))}}
+			router := setupSyncUpstreamModelsRouter(nil, upstream)
+			body := fmt.Sprintf(`{"platform":"cline","type":"apikey","api_key":"fixture-secret","account_mode":%q,"cline_auth_type":%q}`, tc.mode, tc.auth)
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/models/sync-upstream-preview", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, req)
+			require.Equal(t, 200, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), tc.want)
+			require.NotContains(t, recorder.Body.String(), "fixture-secret")
+			require.NotNil(t, upstream.lastReq)
+			require.Empty(t, upstream.lastReq.Header.Get("Authorization"))
+		})
+	}
+}
+
+type nativeModelPreviewProxyService struct {
+	service.AdminService
+	proxy   *service.Proxy
+	err     error
+	lookups []int64
+}
+
+func (s *nativeModelPreviewProxyService) GetProxy(_ context.Context, id int64) (*service.Proxy, error) {
+	s.lookups = append(s.lookups, id)
+	return s.proxy, s.err
+}
+
+func TestClineNativeModelSyncPreviewHonorsSelectedProxy(t *testing.T) {
+	for _, platform := range []string{"cline", "openai"} {
+		t.Run(platform, func(t *testing.T) {
+			proxy := &service.Proxy{ID: 9, Protocol: "http", Host: "proxy.example.test", Port: 8080, Username: "proxy-user", Password: "proxy-secret", Status: service.StatusActive}
+			admin := &nativeModelPreviewProxyService{proxy: proxy}
+			body := `{"data":[{"id":"custom-model"}]}`
+			if platform == "cline" {
+				body = `{"clinePass":[{"id":"cline-pass/model"}]}`
+			}
+			upstream := &syncUpstreamHTTPUpstream{resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}}
+			router := setupSyncUpstreamModelsRouter(admin, upstream)
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/models/sync-upstream-preview", strings.NewReader(fmt.Sprintf(`{"platform":%q,"type":"apikey","api_key":"fixture-secret","account_mode":"pass","base_url":"https://api.cline.bot/api/v1","proxy_id":9}`, platform)))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, req)
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			require.Equal(t, []int64{9}, admin.lookups)
+			require.NotNil(t, upstream.lastReq)
+			require.Equal(t, proxy.URL(), upstream.lastProxyURL)
+			require.NotContains(t, recorder.Body.String(), "proxy-secret")
+			require.NotContains(t, recorder.Body.String(), "fixture-secret")
+			if platform == "cline" {
+				require.Empty(t, upstream.lastReq.Header.Get("Authorization"))
+			}
+		})
+	}
+}
+
+func TestClineNativeModelSyncPreviewNeverFallsBackFromInvalidProxy(t *testing.T) {
+	past := time.Now().Add(-time.Hour)
+	for _, tc := range []struct {
+		name, proxyJSON string
+		admin           service.AdminService
+		want            int
+	}{
+		{"missing", "9", &nativeModelPreviewProxyService{err: service.ErrProxyNotFound}, http.StatusBadRequest},
+		{"nil_proxy", "9", &nativeModelPreviewProxyService{}, http.StatusBadRequest},
+		{"disabled", "9", &nativeModelPreviewProxyService{proxy: &service.Proxy{ID: 9, Status: "disabled"}}, http.StatusBadRequest},
+		{"expired", "9", &nativeModelPreviewProxyService{proxy: &service.Proxy{ID: 9, Status: service.StatusActive, ExpiresAt: &past}}, http.StatusBadRequest},
+		{"lookup_error", "9", &nativeModelPreviewProxyService{err: errors.New("database proxy-secret")}, http.StatusInternalServerError},
+		{"no_service", "9", nil, http.StatusInternalServerError},
+		{"negative", "-1", nil, http.StatusBadRequest},
+		{"fractional", "1.5", nil, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &syncUpstreamHTTPUpstream{resp: &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"clinePass":[{"id":"cline-pass/model"}]}`))}}
+			router := setupSyncUpstreamModelsRouter(tc.admin, upstream)
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/models/sync-upstream-preview", strings.NewReader(`{"platform":"cline","type":"apikey","api_key":"fixture-secret","account_mode":"pass","proxy_id":`+tc.proxyJSON+`}`))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, req)
+			require.Equal(t, tc.want, recorder.Code, recorder.Body.String())
+			require.Nil(t, upstream.lastReq, "a failed explicit proxy must never become a direct request")
+			require.NotContains(t, recorder.Body.String(), "proxy-secret")
+			require.NotContains(t, recorder.Body.String(), "fixture-secret")
+		})
+	}
+}
+
+func TestClineNativeModelSyncPreviewExplicitDirectNeedsNoProxyLookup(t *testing.T) {
+	for _, value := range []string{"0", "null"} {
+		t.Run(value, func(t *testing.T) {
+			admin := &nativeModelPreviewProxyService{err: errors.New("unexpected lookup")}
+			upstream := &syncUpstreamHTTPUpstream{resp: &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"clinePass":[{"id":"cline-pass/model"}]}`))}}
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/models/sync-upstream-preview", strings.NewReader(`{"platform":"cline","type":"apikey","api_key":"fixture","account_mode":"pass","proxy_id":`+value+`}`))
+			req.Header.Set("Content-Type", "application/json")
+			setupSyncUpstreamModelsRouter(admin, upstream).ServeHTTP(recorder, req)
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			require.Empty(t, admin.lookups)
+			require.NotNil(t, upstream.lastReq)
+			require.Empty(t, upstream.lastProxyURL)
+		})
 	}
 }

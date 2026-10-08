@@ -475,6 +475,7 @@ export function getModelsByPlatform(platform: string): string[] {
       'qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-plus',
       'hy4-preview', 'hy3', 'omen-alpha'
     ]
+    case 'cline': return [] // Live, mode-scoped catalog only; never infer a static entitlement.
     case 'typesafe': return ['jev-latest']
     case 'doubao': return doubaoModels
     case 'minimax': return minimaxModels
@@ -517,7 +518,8 @@ export interface ModelMappingEntry {
 }
 
 export function splitModelMappingObject(
-  modelMapping?: Record<string, unknown> | null
+  modelMapping?: Record<string, unknown> | null,
+  preserveInvalid = false
 ): { allowedModels: string[]; modelMappings: ModelMappingEntry[] } {
   const allowedModels: string[] = []
   const modelMappings: ModelMappingEntry[] = []
@@ -527,6 +529,10 @@ export function splitModelMappingObject(
   }
 
   for (const [rawFrom, rawTo] of Object.entries(modelMapping)) {
+    if (preserveInvalid && (typeof rawTo !== 'string' || !rawFrom.trim() || !rawTo.trim())) {
+      modelMappings.push({ from: rawFrom, to: typeof rawTo === 'string' ? rawTo : '' })
+      continue
+    }
     if (typeof rawTo !== 'string') continue
     const from = rawFrom.trim()
     const to = rawTo.trim()

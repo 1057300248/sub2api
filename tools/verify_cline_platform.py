@@ -7,11 +7,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
-    'frontend/src/components/account/ClineAccountModal.vue': ['buildClineAccountPayload', 'accountsAPI.create', 'accountsAPI.update', 'draft.apiKey ='],
-    'frontend/src/components/account/clineAccountForm.ts': ['cline_auth_type', 'cline_free_api_enabled: false', 'model_mapping: Object.fromEntries(entries)', 'before ='],
-    'frontend/src/views/admin/AccountsView.vue': ['<ClineAccountModal', 'showCline', 'clineModeLabel'],
+    'frontend/src/components/account/CreateAccountModal.vue': ['id="create-account-form"', 'createAccountAndFinish(form.platform, form.type, credentials, extra)', 'adminAPI.accounts.create', 'selectClinePlatform'],
+    'frontend/src/components/account/clineAccountForm.ts': ['cline_auth_type', 'cline_free_api_enabled: false', 'clineModelError', 'applyClineCredentialFields', 'clineExtraDelta'],
+    'frontend/src/views/admin/AccountsView.vue': ['<CreateAccountModal', '<EditAccountModal', 'clineModeLabel'],
     'frontend/src/constants/platforms.ts': ["value: 'cline'"],
-    'Makefile': ['ClineAccountModal.spec.ts', 'clineAccountForm.spec.ts'],
+    'Makefile': ['CreateAccountModal.spec.ts', 'EditAccountModal.spec.ts', 'clineAccountForm.spec.ts', 'ModelWhitelistSelector.spec.ts'],
     'backend/internal/domain/cline.go': ['PlatformCline = "cline"'],
     'backend/internal/pkg/cline/contract.go': ['func ValidateUpstreamModel(', 'ErrFreeAPIUnsupported', 'func ParseUsage(', 'func ParseCatalog('],
     'backend/internal/pkg/cline/ratelimit.go': ['func Classify(', 'func RateLimitKeys('],
@@ -48,7 +48,7 @@ REQUIRED = {
     'backend/internal/handler/admin/account_cline_registration_test.go': ['TestClineGroupAndCompositeRequestBindings'],
 }
 
-for _name, _anchors in {'backend/internal/service/cline_metadata.go': ['RefreshClineMetadata(', 'WithHTTPUpstreamRedirectsDisabled', 'ClineMetadataForAccount('], 'backend/internal/service/openai_gateway_cc_pipeline.go': ['s.checkClineAdmission(ctx, account, body)'], 'backend/internal/repository/cline_metadata_repository.go': ['CheckClineAdmission(', 'cline_shared_limits', 'ClaimClineMetadataRefresh('], 'backend/internal/server/routes/admin.go': ['registerClineAccountRoutes(accounts, h)'], 'backend/internal/server/routes/cline_admin.go': ['GetClineMetadata', 'RefreshClineMetadata'], 'backend/internal/handler/admin/account_data.go': ['validateClineDataAccount(item)', 'portableClineExtra(acc.Platform'], 'backend/internal/clinemigration/migration.go': ['func Preview(', 'func Apply(', 'func Rollback(', 'pg_try_advisory_xact_lock', 'ALL_WORKERS_STOPPED'], 'backend/migrations/265_cline_credential_write_guard.sql': ['wanchuan_cline_guard_credentials'], 'frontend/src/components/account/ClineAccountModal.vue': ['ClineMetadataPanel']}.items():
+for _name, _anchors in {'backend/internal/service/cline_metadata.go': ['RefreshClineMetadata(', 'WithHTTPUpstreamRedirectsDisabled', 'ClineMetadataForAccount('], 'backend/internal/service/openai_gateway_cc_pipeline.go': ['s.checkClineAdmission(ctx, account, body)'], 'backend/internal/repository/cline_metadata_repository.go': ['CheckClineAdmission(', 'cline_shared_limits', 'ClaimClineMetadataRefresh('], 'backend/internal/server/routes/admin.go': ['registerClineAccountRoutes(accounts, h)'], 'backend/internal/server/routes/cline_admin.go': ['GetClineMetadata', 'RefreshClineMetadata'], 'backend/internal/handler/admin/account_data.go': ['validateClineDataAccount(item)', 'portableClineExtra(acc.Platform'], 'backend/internal/clinemigration/migration.go': ['func Preview(', 'func Apply(', 'func Rollback(', 'pg_try_advisory_xact_lock', 'ALL_WORKERS_STOPPED'], 'backend/migrations/265_cline_credential_write_guard.sql': ['wanchuan_cline_guard_credentials'], 'frontend/src/components/account/EditAccountModal.vue': ['ClineMetadataPanel']}.items():
     REQUIRED.setdefault(_name, []).extend(_anchors)
 
 for name, anchors in {
@@ -65,9 +65,9 @@ for name, anchors in {
 # Visible entry and common-setting anchors must survive upstream transplants.
 # Actual rendered component/API assertions live in the required CI suites.
 for name, anchors in {
-    'frontend/src/components/account/CreateAccountModal.vue': ['data-testid="create-platform-cline"', '<ClineAccountModal', '@saved="emit(\'created\')"'],
-    'frontend/src/components/account/ClineAccountModal.vue': ['HeaderOverrideEditor', 'AccountGroupModelLimits', 'cline-proxy', 'cline-cost', 'cline-expiry'],
-    'frontend/src/components/account/clineAccountSettings.ts': ['proxy_fallback_origin_id', 'group_allowed_models', 'cost_multiplier', 'validateClineHeaderRows'],
+    'frontend/src/components/account/CreateAccountModal.vue': ['data-testid="create-platform-cline"', '<ModelWhitelistSelector', '<QuotaLimitCard', '<HeaderOverrideEditor'],
+    'frontend/src/components/account/EditAccountModal.vue': ['HeaderOverrideEditor', 'AccountGroupModelLimits', '<ProxySelector', '<GroupSelector', 'submitUpdateAccount', 'clineGroupModelError'],
+    'frontend/src/components/account/clineAccountForm.ts': ['clineExtraDelta', 'cost_multiplier', 'validateClineHeaderRows'],
     'frontend/src/components/account/AccountUsageCell.vue': ['ClineAccountUsageCell'],
     'backend/internal/service/cline_account_settings.go': ['mergeClineAccountCredentials', 'applyClineSchedulingSettings', 'validateClineAccountHeaderSettings'],
     'backend/migrations/268_cline_header_settings_guard.sql': ['cline_guard_header_settings', 'cardinality(seen)', 'encoded_bytes>16384'],
@@ -76,11 +76,25 @@ for name, anchors in {
     REQUIRED.setdefault(name, []).extend(anchors)
 
 for name, anchors in {
-    'frontend/src/components/account/ClineAccountModal.vue': ['ClineAdvancedSettings', 'clineAdvancedPayload', 'operationRunning'],
-    'frontend/src/components/account/BulkEditAccountModal.vue': ['cline-bulk-advanced', 'clineAdvancedPayload'],
+    'frontend/src/components/account/BulkEditAccountModal.vue': ['adminAPI.accounts.bulkUpdate', '<HeaderOverrideEditor', 'validateClineHeaderRows'],
     'backend/internal/service/cline_advanced_settings.go': ['ValidateClineLocalQuotaSettings', 'clineProtectedError', 'PreserveClineLocalQuotaRuntime', 'isClineScopedError('],
     'backend/internal/repository/cline_advanced_operations.go': ['ResetClineLocalQuota', 'ClearClineTemporaryPause', 'INSERT INTO scheduler_outbox'],
     'backend/migrations/269_cline_advanced_settings_guard.sql': ['cline_guard_advanced_settings', 'reset_changed', 'custom_error_codes'],
+}.items():
+    REQUIRED.setdefault(name, []).extend(anchors)
+
+# A future upgrade must not silently reintroduce the parallel account UI.
+for filename in ('ClineAccountModal.vue', 'ClineAdvancedSettings.vue', 'clineAccountSettings.ts', 'clineAdvancedSettings.ts'):
+    assert not (ROOT/'frontend/src/components/account'/filename).exists(), f'Retired duplicate: {filename}'
+for filename in ('CreateAccountModal.vue', 'EditAccountModal.vue', 'BulkEditAccountModal.vue'):
+    text = (ROOT/'frontend/src/components/account'/filename).read_text()
+    assert 'ClineAccountModal' not in text and 'ClineAdvancedSettings' not in text, filename
+assert 'create-cline-account' not in (ROOT/'frontend/src/views/admin/AccountsView.vue').read_text()
+assert 'accountsAPI' not in (ROOT/'frontend/src/components/account/clineAccountForm.ts').read_text()
+for name, anchors in {
+    'backend/internal/service/upstream_models.go': ['s.syncClineUpstreamModelCatalog(ctx, account)'],
+    'backend/internal/service/cline_upstream_models.go': ['fetchClineMetadata(ctx, account, cline.CatalogURL, false)', 'cline.ParseCatalog', 'catalog.Models(mode)'],
+    'frontend/src/components/account/ModelWhitelistSelector.vue': ['syncEpoch', 'syncDisabled', 'accountsAPI.syncUpstreamModelsPreview'],
 }.items():
     REQUIRED.setdefault(name, []).extend(anchors)
 

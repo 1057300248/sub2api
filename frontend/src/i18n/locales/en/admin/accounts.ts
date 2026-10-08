@@ -522,6 +522,9 @@ export default {
       quotaLimitAmount: 'Total Limit',
       quotaLimitAmountHint: 'Cumulative spending limit. Does not auto-reset.',
       quotaNotify: {
+        daily: 'Daily quota alert',
+        weekly: 'Weekly quota alert',
+        total: 'Total quota alert',
         alert: 'Alert',
         enabled: 'Enable Alert',
         threshold: 'Alert Amount',
@@ -561,6 +564,15 @@ export default {
         partialSuccess: 'Partially completed: {success} succeeded, {failed} failed'
       },
       bulkEdit: {
+        quotaPatchHint: 'Only edited quota and reset fields are updated. Untouched fields stay unchanged. Enter 0 or clear an edited field to remove its limit; usage is not reset.',
+        clearQuotaLimits: 'Clear total, daily and weekly spending limits',
+        notifyPatchHint: 'Only checked notification dimensions are updated. Email delivery still requires global quota notifications and recipients.',
+        disableKeepRules: 'Disable and keep saved rules',
+        enableSavedRules: 'Enable saved rules',
+        replaceRules: 'Replace rules and enable',
+        tempRulesHint: 'Enabling or disabling keeps rules, current pauses, official cooldowns and usage. Replacing overwrites all rules on selected accounts.',
+        moveRuleUp: 'Move rule up',
+        moveRuleDown: 'Move rule down',
         title: 'Bulk Edit Accounts',
         selectionInfo:
           '{count} account(s) selected. Only checked or filled fields will be updated; others stay unchanged.',

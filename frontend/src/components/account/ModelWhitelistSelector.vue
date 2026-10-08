@@ -95,6 +95,7 @@
     <!-- Quick Actions -->
     <div class="mb-4 flex flex-wrap gap-2">
       <button
+        v-if="availableOptions.length > 0"
         type="button"
         @click="fillRelated"
         class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
@@ -145,7 +146,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { accountsAPI } from '@/api/admin/accounts'
@@ -163,12 +164,8 @@ const props = defineProps<{
   platform?: string
   platforms?: string[]
   accountId?: number
-  syncCredentials?: {
-    platform: string
-    type: string
-    base_url?: string
-    api_key: string
-  }
+  syncCredentials?: SyncUpstreamPreviewParams
+  syncDisabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -184,6 +181,7 @@ const searchQuery = ref('')
 const customModel = ref('')
 const isComposing = ref(false)
 const isSyncingUpstream = ref(false)
+let syncEpoch = 0
 const normalizedPlatforms = computed(() => {
   const rawPlatforms =
     props.platforms && props.platforms.length > 0
@@ -211,9 +209,11 @@ const upstreamSyncPlatforms = new Set([
   'zhipu',
   'deepseek',
   'minimax',
-  'opencode_go'
+  'opencode_go',
+  'cline'
 ])
 const canSyncUpstream = computed(() => {
+  if (props.syncDisabled) return false
   if (props.accountId) {
     if (normalizedPlatforms.value.length === 0) return true
     return normalizedPlatforms.value.some(platform => upstreamSyncPlatforms.has(platform.toLowerCase()))
@@ -253,6 +253,7 @@ const toggleDropdown = () => {
 }
 
 const removeModel = (model: string) => {
+  syncEpoch += 1
   emit('update:modelValue', props.modelValue.filter(m => m !== model))
 }
 
@@ -260,6 +261,7 @@ const toggleModel = (model: string) => {
   if (props.modelValue.includes(model)) {
     removeModel(model)
   } else {
+    syncEpoch += 1
     emit('update:modelValue', [...props.modelValue, model])
   }
 }
@@ -280,6 +282,7 @@ const addCustom = () => {
     appStore.showInfo(t('admin.accounts.modelMappingConflict', { from: model, to: conflict.to.trim() }))
     return
   }
+  syncEpoch += 1
   emit('update:modelValue', [...props.modelValue, model])
   customModel.value = ''
 }
@@ -289,6 +292,7 @@ const handleEnter = () => {
 }
 
 const fillRelated = () => {
+  syncEpoch += 1
   const newModels = [...props.modelValue]
   for (const platform of normalizedPlatforms.value) {
     for (const model of getModelsByPlatform(platform)) {
@@ -300,11 +304,14 @@ const fillRelated = () => {
   emit('update:modelValue', newModels)
 }
 
+watch(() => [props.accountId, props.platform, props.platforms, props.syncCredentials, props.syncDisabled], () => { syncEpoch += 1 }, { deep: true, flush: 'sync' })
+onBeforeUnmount(() => { syncEpoch += 1 })
 const syncUpstreamModels = async () => {
-  if (isSyncingUpstream.value) return
+  if (isSyncingUpstream.value || props.syncDisabled) return
   if (!props.accountId && !props.syncCredentials) return
 
   isSyncingUpstream.value = true
+  const epoch = syncEpoch
   try {
     let result
     if (props.accountId) {
@@ -315,6 +322,7 @@ const syncUpstreamModels = async () => {
       return
     }
 
+    if (epoch !== syncEpoch) return
     const upstreamModels = result.models.map(model => model.trim()).filter(Boolean)
     if (upstreamModels.length === 0) {
       appStore.showInfo(t('admin.accounts.syncUpstreamModelsEmpty'))
@@ -327,7 +335,15 @@ const syncUpstreamModels = async () => {
 
     const newModels = [...props.modelValue]
     let addedCount = 0
+    let firstConflict: { from: string; to: string } | undefined
     for (const model of upstreamModels) {
+      // Discovery only appends unconfigured models. Do not create an identity
+      // entry that collides with a saved alias or silently repairs an invalid row.
+      const mapping = props.modelMappings?.find(row => row.from.trim() === model)
+      if (mapping) {
+        if (mapping.to.trim() !== model) firstConflict ??= mapping
+        continue
+      }
       if (!newModels.includes(model)) {
         newModels.push(model)
         addedCount += 1
@@ -335,6 +351,11 @@ const syncUpstreamModels = async () => {
     }
 
     emit('update:modelValue', newModels)
+    if (firstConflict) {
+      appStore.showInfo(t('admin.accounts.modelMappingConflict', {
+        from: firstConflict.from.trim(), to: firstConflict.to.trim()
+      }))
+    }
     const warnings = result.warnings ?? []
     const hasPartialMetadata = warnings.some(
       warning => warning.code === 'upstream_model_metadata_partial'
@@ -342,6 +363,9 @@ const syncUpstreamModels = async () => {
     const hasIncompleteMetadata = warnings.some(
       warning => warning.code === 'upstream_model_metadata_incomplete'
     )
+    if (warnings.some(warning => warning.code === 'cline_public_catalog')) {
+      appStore.showWarning(t('clineMetadata.catalogNotice'))
+    }
     if (hasIncompleteMetadata) {
       appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataIncomplete'))
       return
@@ -355,6 +379,7 @@ const syncUpstreamModels = async () => {
       appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataPartial'))
     }
   } catch (error) {
+    if (epoch !== syncEpoch) return
     const message = error instanceof Error ? error.message : t('admin.accounts.syncUpstreamModelsFailed')
     appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
   } finally {
@@ -363,6 +388,8 @@ const syncUpstreamModels = async () => {
 }
 
 const clearAll = () => {
+  // A later explicit clear wins over an earlier model discovery request.
+  syncEpoch += 1
   emit('update:modelValue', [])
 }
 

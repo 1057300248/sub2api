@@ -56,6 +56,21 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
+        <div v-if="account.platform === 'cline'" class="space-y-3" data-testid="cline-provider-fields">
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label class="input-label">{{ t('clineAccount.mode') }}</label>
+              <Select v-model="editClineMode" :options="clineModeOptions" data-testid="cline-mode" />
+            </div>
+            <div>
+              <label class="input-label">{{ t('clineAccount.authType') }}</label>
+              <Select v-model="editClineAuth" :options="clineAuthOptions" data-testid="cline-auth" />
+            </div>
+          </div>
+          <p class="input-hint">{{ t('clineAccount.nativeHint') }}</p>
+          <p v-if="editClineAuth === 'account_token'" class="input-hint">{{ t('clineAccount.manualTokenNotice') }}</p>
+          <p v-if="editClineMode === 'free' || editClineMode === 'unknown'" role="status" class="text-sm text-amber-700 dark:text-amber-300">{{ t(editClineMode === 'free' ? 'clineAccount.freeNotice' : 'clineAccount.unknownNotice') }}</p>
+        </div>
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
@@ -63,7 +78,7 @@
             type="text"
             class="input"
             :placeholder="
-              account.platform === 'openai'
+              account.platform === 'cline' ? CLINE_BASE_URL : account.platform === 'openai'
                 ? 'https://api.openai.com'
                 : account.platform === 'gemini'
                   ? 'https://generativelanguage.googleapis.com'
@@ -233,7 +248,7 @@
           <p class="input-hint mt-2">{{ t('admin.accounts.cnProviders.zhipuTeam.hint') }}</p>
         </div>
         <div>
-          <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
+          <label class="input-label">{{ account.platform === 'cline' ? t('clineAccount.replaceKey') : t('admin.accounts.apiKey') }}</label>
           <input
             v-model="editApiKey"
             type="password"
@@ -243,7 +258,7 @@
             data-lpignore="true"
             data-bwignore="true"
             :placeholder="
-              account.platform === 'openai'
+              account.platform === 'cline' ? t('admin.accounts.leaveEmptyToKeep') : account.platform === 'openai'
                 ? 'sk-proj-...'
                 : account.platform === 'gemini'
                   ? 'AIza...'
@@ -259,7 +274,7 @@
 
         <!-- Model Restriction Section (不适用于 Antigravity) -->
         <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-          <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
+          <label class="input-label">{{ account.platform === 'cline' ? t('clineAccount.requiredModels') : t('admin.accounts.modelRestriction') }}</label>
 
           <div
             v-if="isOpenAIModelRestrictionDisabled"
@@ -327,10 +342,10 @@
 
             <!-- Whitelist Mode -->
             <div v-if="modelRestrictionMode === 'whitelist'">
-              <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
+              <ModelWhitelistSelector v-model="allowedModels" :model-mappings="modelMappings" :platform="account?.platform || 'anthropic'" :account-id="account?.id" :sync-disabled="clineDiscoveryDraftChanged" />
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-                <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
+                <span v-if="account.platform !== 'cline' && allowedModels.length === 0 && modelMappings.length === 0">{{
                   t('admin.accounts.supportsAllModels')
                 }}</span>
               </p>
@@ -449,11 +464,12 @@
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.poolModeHint') }}
+                {{ t(account.platform === 'cline' ? 'clineAccount.poolUnavailable' : 'admin.accounts.poolModeHint') }}
               </p>
             </div>
             <button
               type="button"
+              :disabled="account.platform === 'cline'"
               @click="poolModeEnabled = !poolModeEnabled"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -1302,11 +1318,12 @@
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.poolModeHint') }}
+                {{ t(account.platform === 'cline' ? 'clineAccount.poolUnavailable' : 'admin.accounts.poolModeHint') }}
               </p>
             </div>
             <button
               type="button"
+              :disabled="account.platform === 'cline'"
               @click="poolModeEnabled = !poolModeEnabled"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -1503,126 +1520,7 @@
           </button>
         </div>
 
-        <div v-if="tempUnschedEnabled" class="space-y-3">
-          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-            <p class="text-xs text-blue-700 dark:text-blue-400">
-              <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
-              {{ t('admin.accounts.tempUnschedulable.notice') }}
-            </p>
-          </div>
-
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-for="preset in tempUnschedPresets"
-              :key="preset.label"
-              type="button"
-              @click="addTempUnschedRule(preset.rule)"
-              class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500"
-            >
-              + {{ preset.label }}
-            </button>
-          </div>
-
-          <div v-if="tempUnschedRules.length > 0" class="space-y-3">
-            <div
-              v-for="(rule, index) in tempUnschedRules"
-              :key="getTempUnschedRuleKey(rule)"
-              class="rounded-lg border border-gray-200 p-3 dark:border-dark-600"
-            >
-              <div class="mb-2 flex items-center justify-between">
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                  {{ t('admin.accounts.tempUnschedulable.ruleIndex', { index: index + 1 }) }}
-                </span>
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    :disabled="index === 0"
-                    @click="moveTempUnschedRule(index, -1)"
-                    class="rounded p-1 text-gray-400 transition-colors hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-gray-200"
-                  >
-                    <Icon name="chevronUp" size="sm" :stroke-width="2" />
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="index === tempUnschedRules.length - 1"
-                    @click="moveTempUnschedRule(index, 1)"
-                    class="rounded p-1 text-gray-400 transition-colors hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-gray-200"
-                  >
-                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    @click="removeTempUnschedRule(index)"
-                    class="rounded p-1 text-red-500 transition-colors hover:text-red-600"
-                  >
-                    <Icon name="x" size="sm" :stroke-width="2" />
-                  </button>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.errorCode') }}</label>
-                  <input
-                    v-model.number="rule.error_code"
-                    type="number"
-                    min="100"
-                    max="599"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.errorCodePlaceholder')"
-                  />
-                </div>
-                <div>
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.durationMinutes') }}</label>
-                  <input
-                    v-model.number="rule.duration_minutes"
-                    type="number"
-                    min="1"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.durationPlaceholder')"
-                  />
-                </div>
-                <div class="sm:col-span-2">
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.keywords') }}</label>
-                  <input
-                    v-model="rule.keywords"
-                    type="text"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.keywordsPlaceholder')"
-                  />
-                  <p class="input-hint">{{ t('admin.accounts.tempUnschedulable.keywordsHint') }}</p>
-                </div>
-                <div class="sm:col-span-2">
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.description') }}</label>
-                  <input
-                    v-model="rule.description"
-                    type="text"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.descriptionPlaceholder')"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            @click="addTempUnschedRule()"
-            class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-          >
-            <svg
-              class="mr-1 inline h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            {{ t('admin.accounts.tempUnschedulable.addRule') }}
-          </button>
-        </div>
+        <TempUnschedRulesEditor v-if="tempUnschedEnabled" v-model="tempUnschedRules" />
       </div>
 
 
@@ -3247,8 +3145,13 @@
         :groups="groupsForModelLimits"
         :platform="account?.platform"
         :account-id="account?.id"
+        :sync-disabled="clineDiscoveryDraftChanged"
       />
 
+      <section v-if="account.platform === 'cline'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <button type="button" class="btn btn-secondary" :disabled="submitting" @click="showClineMetadata = !showClineMetadata">{{ t('clineMetadata.open') }}</button>
+        <ClineMetadataPanel v-if="showClineMetadata" :account-id="account.id" :mode="clineMode(account.credentials?.account_mode)" :readonly-catalog="true" />
+      </section>
     </form>
 
     <template #footer>
@@ -3303,6 +3206,10 @@
 </template>
 
 <script setup lang="ts">
+import TempUnschedRulesEditor from './TempUnschedRulesEditor.vue'
+import { buildTempUnschedRules, type TempUnschedRuleForm } from './tempUnschedulableRules'
+import { CLINE_BASE_URL, clineMode, clineModeOptions, clineAuthOptions, clineModelError, clineGroupModelError, applyClineCredentialFields, clineExtraDelta, type ClineMode, type ClineAuthType } from './clineAccountForm'
+import ClineMetadataPanel from './ClineMetadataPanel.vue'
 import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier, readAccountCostMultiplier } from '@/utils/accountCost'
 
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
@@ -3442,6 +3349,9 @@ const selectableGroups = computed(() => {
     if (assignedIds.has(group.id) && !groups.has(group.id)) {
       groups.set(group.id, group)
     }
+  }
+  for (const id of assignedIds) {
+    if (!groups.has(id)) groups.set(id, { id, name: `#${id}`, platform: props.account?.platform } as Group)
   }
   return Array.from(groups.values())
 })
@@ -3591,15 +3501,21 @@ interface ModelMapping {
   to: string
 }
 
-interface TempUnschedRuleForm {
-  error_code: number | null
-  keywords: string
-  duration_minutes: number | null
-  description: string
-}
 
 // State
 const submitting = ref(false)
+const editClineMode = ref<ClineMode>('unknown')
+const editClineAuth = ref<ClineAuthType>('api_key')
+const showClineMetadata = ref(false)
+// The saved-account discovery route must not query a different credential/mode
+// than the draft currently being edited. No secret is sent for an unchanged key.
+const clineDiscoveryDraftChanged = computed(() => props.account?.platform === 'cline' && (
+  !!editApiKey.value.trim() || editClineMode.value !== clineMode(props.account.credentials?.account_mode) ||
+  editClineAuth.value !== (props.account.credentials?.cline_auth_type || 'api_key') ||
+  editBaseUrl.value.trim() !== (props.account.credentials?.base_url || CLINE_BASE_URL) ||
+  (form.proxy_id ?? 0) !== (props.account.proxy_fallback_origin_id ?? props.account.proxy_id ?? 0)
+))
+watch(() => [props.show, props.account?.id], () => { showClineMetadata.value = false })
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
 const prismBrowserEnabled = ref(false)
@@ -3900,7 +3816,6 @@ const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-model-mapping')
 const getOpenAICompactModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-openai-compact-model-mapping')
 const getAntigravityModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-antigravity-model-mapping')
-const getTempUnschedRuleKey = createStableObjectKeyResolver<TempUnschedRuleForm>('edit-temp-unsched-rule')
 
 const showMixedChannelWarning = ref(false)
 const mixedChannelWarningDetails = ref<{ groupName: string; currentPlatform: string; otherPlatform: string } | null>(
@@ -4253,38 +4168,10 @@ const openAICompactStatusKey = computed(() => {
 
 // Computed: current preset mappings based on platform
 const presetMappings = computed(() => getPresetMappingsByPlatform(props.account?.platform || 'anthropic'))
-const tempUnschedPresets = computed(() => [
-  {
-    label: t('admin.accounts.tempUnschedulable.presets.overloadLabel'),
-    rule: {
-      error_code: 529,
-      keywords: 'overloaded, too many',
-      duration_minutes: 60,
-      description: t('admin.accounts.tempUnschedulable.presets.overloadDesc')
-    }
-  },
-  {
-    label: t('admin.accounts.tempUnschedulable.presets.rateLimitLabel'),
-    rule: {
-      error_code: 429,
-      keywords: 'rate limit, too many requests',
-      duration_minutes: 10,
-      description: t('admin.accounts.tempUnschedulable.presets.rateLimitDesc')
-    }
-  },
-  {
-    label: t('admin.accounts.tempUnschedulable.presets.unavailableLabel'),
-    rule: {
-      error_code: 503,
-      keywords: 'unavailable, maintenance',
-      duration_minutes: 30,
-      description: t('admin.accounts.tempUnschedulable.presets.unavailableDesc')
-    }
-  }
-])
 
 // Computed: default base URL based on platform
 const defaultBaseUrl = computed(() => {
+  if (props.account?.platform === 'cline') return CLINE_BASE_URL
   if (props.account?.platform === 'openai') return 'https://api.openai.com'
   if (props.account?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
   if (props.account?.platform === 'grok') return 'https://api.x.ai/v1'
@@ -4374,7 +4261,7 @@ const normalizePoolModeRetryCount = (value: number) => {
 }
 
 const loadModelRestrictionFromMapping = (rawMapping?: Record<string, unknown>) => {
-  const parsed = splitModelMappingObject(rawMapping)
+  const parsed = splitModelMappingObject(rawMapping, props.account?.platform === 'cline')
   allowedModels.value = parsed.allowedModels
   modelMappings.value = parsed.modelMappings
   modelRestrictionMode.value =
@@ -4415,6 +4302,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   if (!newAccount) {
     return
   }
+  editClineMode.value = clineMode(newAccount.credentials?.account_mode)
+  editClineAuth.value = newAccount.credentials?.cline_auth_type === 'account_token' ? 'account_token' : 'api_key'
   openaiModelAliases.value = newAccount.credentials?.model_mapping_mode === 'aliases'
   // 进入回填窗口：抑制 CN 模式/协议 watcher 联动重置 base_url（见 syncingForm 注释）。
   syncingForm.value = true
@@ -4428,7 +4317,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningAction.value = null
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
-  form.proxy_id = newAccount.proxy_id
+  form.proxy_id = newAccount.proxy_fallback_origin_id ?? newAccount.proxy_id
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
@@ -4791,6 +4680,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       }
     }
     const platformDefaultUrl =
+      newAccount.platform === 'cline' ? CLINE_BASE_URL :
       newAccount.platform === 'openai'
         ? 'https://api.openai.com'
         : newAccount.platform === 'gemini'
@@ -4871,6 +4761,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined)
   } else {
     const platformDefaultUrl =
+      newAccount.platform === 'cline' ? CLINE_BASE_URL :
       newAccount.platform === 'openai'
         ? 'https://api.openai.com'
         : newAccount.platform === 'gemini'
@@ -5063,64 +4954,6 @@ const removeErrorCode = (code: number) => {
   if (index !== -1) {
     selectedErrorCodes.value.splice(index, 1)
   }
-}
-
-const addTempUnschedRule = (preset?: TempUnschedRuleForm) => {
-  if (preset) {
-    tempUnschedRules.value.push({ ...preset })
-    return
-  }
-  tempUnschedRules.value.push({
-    error_code: null,
-    keywords: '',
-    duration_minutes: 30,
-    description: ''
-  })
-}
-
-const removeTempUnschedRule = (index: number) => {
-  tempUnschedRules.value.splice(index, 1)
-}
-
-const moveTempUnschedRule = (index: number, direction: number) => {
-  const target = index + direction
-  if (target < 0 || target >= tempUnschedRules.value.length) return
-  const rules = tempUnschedRules.value
-  const current = rules[index]
-  rules[index] = rules[target]
-  rules[target] = current
-}
-
-const buildTempUnschedRules = (rules: TempUnschedRuleForm[]) => {
-  const out: Array<{
-    error_code: number
-    keywords: string[]
-    duration_minutes: number
-    description: string
-  }> = []
-
-  for (const rule of rules) {
-    const errorCode = Number(rule.error_code)
-    const duration = Number(rule.duration_minutes)
-    const keywords = splitTempUnschedKeywords(rule.keywords)
-    if (!Number.isFinite(errorCode) || errorCode < 100 || errorCode > 599) {
-      continue
-    }
-    if (!Number.isFinite(duration) || duration <= 0) {
-      continue
-    }
-    if (keywords.length === 0) {
-      continue
-    }
-    out.push({
-      error_code: Math.trunc(errorCode),
-      keywords,
-      duration_minutes: Math.trunc(duration),
-      description: rule.description.trim()
-    })
-  }
-
-  return out
 }
 
 const applyTempUnschedConfig = (credentials: Record<string, unknown>) => {
@@ -5326,12 +5159,6 @@ function formatTempUnschedKeywords(value: unknown) {
   return ''
 }
 
-const splitTempUnschedKeywords = (value: string) => {
-  return value
-    .split(/[,;]/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
-}
 
 function toPositiveNumber(value: unknown) {
   const num = Number(value)
@@ -5503,6 +5330,7 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 }
 
 const handleSubmit = async () => {
+  if (submitting.value) return
   if (bpsDefaults.loading.value) return
   if (!props.account) return
   const accountID = props.account.id
@@ -5536,6 +5364,13 @@ const handleSubmit = async () => {
 		}
 	}
 
+  if (props.account.platform === 'cline') {
+    if (clineGroupModelError(form.group_ids, groupAllowedModels.value)) {
+      appStore.showError(t('clineAccount.errors.groupModels')); return
+    }
+    const issue = clineModelError(editClineMode.value, allowedModels.value, modelMappings.value)
+    if (issue) { appStore.showError(t(`clineAccount.errors.${issue}`)); return }
+  }
   const updatePayload: Record<string, unknown> = { ...form }
   try {
     if (authStore.isObserver) {
@@ -5672,7 +5507,7 @@ const handleSubmit = async () => {
       // Add header override if enabled for this API-key platform
       if (isHeaderOverrideCapable(props.account.platform, 'apikey')) {
         if (headerOverrideEnabled.value) {
-          const headerError = validateHeaderOverrideRows(headerOverrideRows.value)
+          const headerError = validateHeaderOverrideRows(headerOverrideRows.value, props.account.platform)
           if (headerError) {
             appStore.showError(t(`admin.accounts.headerOverride.${headerError}`))
             return
@@ -5688,6 +5523,21 @@ const handleSubmit = async () => {
         return
       }
 
+      if (props.account.platform === 'cline') {
+        const issue = applyClineCredentialFields(newCredentials, editClineMode.value, editClineAuth.value)
+        if (issue) { appStore.showError(t(`clineAccount.errors.${issue}`)); return }
+        // Legacy Cline API clients use credential deltas. Explicit false/[] clears
+        // the same native switches without replaying credentials from the DOM.
+        newCredentials.custom_error_codes_enabled = customErrorCodesEnabled.value
+        newCredentials.custom_error_codes = customErrorCodesEnabled.value ? [...selectedErrorCodes.value] : []
+        newCredentials.temp_unschedulable_enabled = tempUnschedEnabled.value
+        // Disabled means preserve the saved policy. Omission uses the existing
+        // credential-delta merge, including when only unrelated fields changed.
+        newCredentials.header_override_enabled = headerOverrideEnabled.value
+        newCredentials.header_overrides = headerOverrideEnabled.value ? newCredentials.header_overrides : {}
+        newCredentials.intercept_warmup_requests = interceptWarmupRequests.value
+        if (!editApiKey.value.trim()) delete newCredentials.api_key
+      }
       updatePayload.credentials = newCredentials
     } else if (props.account.type === 'upstream') {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
@@ -5874,7 +5724,7 @@ const handleSubmit = async () => {
       }
 
       if (headerOverrideEnabled.value) {
-        const headerError = validateHeaderOverrideRows(headerOverrideRows.value)
+        const headerError = validateHeaderOverrideRows(headerOverrideRows.value, props.account.platform)
         if (headerError) {
           appStore.showError(t(`admin.accounts.headerOverride.${headerError}`))
           return
@@ -6364,7 +6214,9 @@ const handleSubmit = async () => {
     } else {
       delete costExtra.cost_multiplier_auto_sync
     }
-    updatePayload.extra = costExtra
+    updatePayload.extra = props.account.platform === 'cline'
+      ? clineExtraDelta(costExtra, props.account.extra ?? {})
+      : costExtra
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
       await submitUpdateAccount(accountID, updatePayload)

@@ -1,4 +1,7 @@
 export default {
+  requiredModels: 'Model restrictions (required)',
+  nativeHint: 'Cline uses the standard account settings. Chat, Responses and Messages use the shared Chat Completions bridge. Choose explicit models; changing usage mode never remaps models or enables paid fallback.',
+  poolUnavailable: 'Pool-mode same-account retries are unavailable for Cline; account quota cooldown and failure protections remain enforced.',
   "advanced": {
   "title": "Advanced settings (optional)",
   "localHint": "These amounts are local metered-use limits, not a Cline Pass invoice or provider remaining allowance. Blank or zero means unlimited. Official five-hour, weekly and monthly limits remain independent.",

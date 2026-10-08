@@ -2497,3 +2497,130 @@ describe('Excel BPS default template integration', () => {
 
 
 })
+
+
+describe('EditAccountModal native Cline workflow', () => {
+  function clineAccount() {
+    return { ...buildAccount(), name: 'Saved Cline', platform: 'cline', credentials: { api_key: 'never-render-this-secret', base_url: 'https://api.cline.bot/api/v1', account_mode: 'pass', cline_auth_type: 'api_key', model_mapping: { public: 'cline-pass/model' }, header_override_enabled: true, header_overrides: { 'user-agent': 'fixture/1' } }, group_ids: [11], groups: [{ id: 11, name: 'Saved Cline group', platform: 'cline' }], schedulable: false, proxy_id: 9, proxy_fallback_origin_id: 3, extra: { quota_limit: 100, quota_used: 15, quota_daily_used: 4, cline_state: { quota_status: 'exhausted' }, model_rate_limits: { provider: 42 }, cost_multiplier: 0.8, quota_notify_daily_enabled: false } }
+  }
+  beforeEach(() => { updateAccountMock.mockReset().mockResolvedValue(clineAccount()) })
+  it('reenables a saved pause policy through the native edit form with its original rules', async () => {
+    const account = clineAccount()
+    const rules = [{ error_code: 503, keywords: ['unavailable'], duration_minutes: 10, description: 'saved policy' }]
+    Object.assign(account.credentials, { temp_unschedulable_enabled: false, temp_unschedulable_rules: rules })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.findAll('button').find(button =>
+      button.element.parentElement?.textContent?.includes('admin.accounts.tempUnschedulable.hint'))!.trigger('click')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0][1].credentials).toMatchObject({
+      temp_unschedulable_enabled: true, temp_unschedulable_rules: rules
+    })
+  })
+  it.each([true, false])('preserves saved pause rules when disabled (initial enabled=%s)', async (initialEnabled) => {
+    const account = clineAccount()
+    Object.assign(account.credentials, {
+      temp_unschedulable_enabled: initialEnabled,
+      temp_unschedulable_rules: [{ error_code: 503, keywords: ['unavailable'], duration_minutes: 10, description: 'saved policy' }]
+    })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    if (initialEnabled) {
+      const toggle = wrapper.findAll('button').find(button =>
+        button.element.parentElement?.textContent?.includes('admin.accounts.tempUnschedulable.hint'))
+      expect(toggle).toBeDefined()
+      await toggle!.trigger('click')
+    }
+    await wrapper.get('textarea').setValue('updated notes')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const payload = updateAccountMock.mock.calls[0][1]
+    expect(payload.credentials.temp_unschedulable_enabled).toBe(false)
+    expect(payload.credentials).not.toHaveProperty('temp_unschedulable_rules')
+  })
+  it('edits the same account through the original API without replaying runtime snapshots or a stored secret', async () => {
+    const a = clineAccount(); const w = mountModal(a); await flushPromises()
+    expect(w.findAll('#edit-account-form')).toHaveLength(1)
+    expect(w.find('#cline-account-form').exists()).toBe(false)
+    expect(w.html()).not.toContain('never-render-this-secret')
+    expect(w.findComponent({ name: 'QuotaLimitCard' }).exists()).toBe(true)
+    const state = (w.vm as any).$.setupState
+    expect(state.form.proxy_id).toBe(3)
+    state.form.notes = 'native updated'
+    await w.get('#edit-account-form').trigger('submit.prevent'); await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const [id, payload] = updateAccountMock.mock.calls[0]
+    expect(id).toBe(a.id)
+    expect(payload).toMatchObject({ notes: 'native updated', group_ids: [11], proxy_id: 3 })
+    expect(payload).not.toHaveProperty('schedulable')
+    expect(payload.credentials).not.toHaveProperty('api_key')
+    expect(payload.credentials.model_mapping).toEqual({ public: 'cline-pass/model' })
+    for (const key of ['quota_used', 'quota_daily_used', 'cline_state', 'model_rate_limits', 'cost_multiplier', 'quota_notify_daily_enabled']) expect(payload.extra).not.toHaveProperty(key)
+  })
+  it('clears disabled local configuration explicitly while leaving official Cline limits untouched', async () => {
+    const w = mountModal(clineAccount()); await flushPromises(); const state = (w.vm as any).$.setupState
+    state.editQuotaLimit = null; state.headerOverrideEnabled = false; state.form.proxy_id = null; state.form.expires_at = null; state.form.load_factor = null
+    state.editApiKey = 'replacement'; state.costMultiplier = 0.7
+    await w.get('#edit-account-form').trigger('submit.prevent'); await flushPromises()
+    expect(updateAccountMock.mock.calls[0][1]).toMatchObject({ proxy_id: 0, expires_at: 0, load_factor: 0, credentials: { api_key: 'replacement', header_override_enabled: false, header_overrides: {} }, extra: { quota_limit: null, cost_multiplier: 0.7 } })
+  })
+  it('retains a malformed saved model row and blocks save until explicitly repaired', async () => {
+    const a = clineAccount(); a.credentials.model_mapping = { public: null } as any
+    const w = mountModal(a); await flushPromises(); const state = (w.vm as any).$.setupState
+    expect(state.modelMappings).toEqual([{ from: 'public', to: '' }])
+    await w.get('#edit-account-form').trigger('submit.prevent'); await flushPromises(); expect(updateAccountMock).not.toHaveBeenCalled()
+    state.modelMappings[0].to = 'cline-pass/fixed'
+    await w.get('#edit-account-form').trigger('submit.prevent'); await flushPromises()
+    expect(updateAccountMock.mock.calls[0][1].credentials.model_mapping).toEqual({ public: 'cline-pass/fixed' })
+  })
+  it('never changes model targets when switching Pass to PAYG', async () => {
+    const w = mountModal(clineAccount()); await flushPromises()
+    await w.get('[data-testid="cline-mode"]').setValue('payg')
+    await w.get('#edit-account-form').trigger('submit.prevent'); await flushPromises()
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect((w.vm as any).$.setupState.modelMappings).toEqual([{ from: 'public', to: 'cline-pass/model' }])
+  })
+  it('uses the shared header editor but retains the Cline protected-header policy', async () => {
+    const w = mountModal(clineAccount()); await flushPromises(); const state = (w.vm as any).$.setupState
+    state.headerOverrideEnabled = true; state.headerOverrideRows = [{ name: 'X-Tenant-ID', value: 'blocked' }]
+    await w.get('#edit-account-form').trigger('submit.prevent'); await flushPromises(); expect(updateAccountMock).not.toHaveBeenCalled()
+    state.headerOverrideRows = [{ name: 'X-Title', value: 'client' }]
+    await w.get('#edit-account-form').trigger('submit.prevent'); await flushPromises()
+    expect(updateAccountMock.mock.calls[0][1].credentials.header_overrides).toEqual({ 'x-title': 'client' })
+  })
+})
+
+it('native Cline group limits cannot become unrestricted by clearing a selected whitelist', async () => {
+  const a={ ...buildAccount(), platform:'cline',group_ids:[11],credentials:{account_mode:'pass',api_key:'fixture',model_mapping:{public:'cline-pass/model'}} }
+  updateAccountMock.mockReset().mockResolvedValue(a)
+  const w=mountModal(a);await flushPromises();const state=(w.vm as any).$.setupState
+  state.groupAllowedModels={11:[]}
+  await w.get('#edit-account-form').trigger('submit.prevent');await flushPromises();expect(updateAccountMock).not.toHaveBeenCalled()
+  state.groupAllowedModels={11:['public']}
+  await w.get('#edit-account-form').trigger('submit.prevent');await flushPromises()
+  expect(updateAccountMock.mock.calls[0][1].group_allowed_models).toEqual({11:['public']})
+  w.unmount()
+})
+
+
+it('native Cline saved-model sync stops when the configured proxy changes in the draft', async () => {
+  const account = { ...buildAccount(), platform: 'cline', proxy_id: 9, proxy_fallback_origin_id: 3,
+    credentials: { api_key: 'fixture', base_url: 'https://api.cline.bot/api/v1', account_mode: 'pass',
+      cline_auth_type: 'api_key', model_mapping: { public: 'cline-pass/model' } } }
+  const wrapper = mountModal(account)
+  await flushPromises()
+  const state = (wrapper.vm as any).$.setupState
+  expect(state.clineDiscoveryDraftChanged).toBe(false)
+  state.form.proxy_id = 8
+  await flushPromises()
+  expect(state.clineDiscoveryDraftChanged).toBe(true)
+  state.form.proxy_id = null
+  await flushPromises()
+  expect(state.clineDiscoveryDraftChanged).toBe(true)
+  state.form.proxy_id = 3
+  await flushPromises()
+  expect(state.clineDiscoveryDraftChanged).toBe(false)
+  wrapper.unmount()
+})

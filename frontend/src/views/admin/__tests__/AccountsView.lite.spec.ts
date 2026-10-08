@@ -5,7 +5,9 @@ import { defineComponent } from 'vue'
 import AccountsView from '../AccountsView.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
-import ClineAccountModal from '@/components/account/ClineAccountModal.vue'
+import CreateAccountModal from '@/components/account/CreateAccountModal.vue'
+import EditAccountModal from '@/components/account/EditAccountModal.vue'
+import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 
 const {
   listAccounts,
@@ -114,7 +116,7 @@ function mountView(stubActionMenu = true) {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
         DataTable: DataTableStub,
-        AccountTableActions: { template: '<div><slot name="after" /></div>' },
+        AccountTableActions: { name: 'AccountTableActions', emits: ['create'], template: '<div><button data-test="native-create" @click="$emit(\'create\')">create</button><slot name="after" /></div>' },
         AccountTableFilters: true,
         AccountBulkActionsBar: true,
         Pagination: true,
@@ -131,7 +133,6 @@ function mountView(stubActionMenu = true) {
         TLSFingerprintProfilesModal: true,
         CreateAccountModal: true,
         EditAccountModal: EditAccountModalStub,
-        ClineAccountModal: { props: ['show', 'account', 'proxies', 'groups'], emits: ['close', 'saved'], template: '<div v-if="show" data-test="cline-modal"><button data-test="cline-close" @click="$emit(\'close\')">close</button></div>' },
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
         AccountCapacityCell: false,
@@ -379,22 +380,22 @@ describe('admin AccountsView lite account list', () => {
     consoleError.mockRestore()
     wrapper.unmount()
   })
-  it('wires the standalone Cline add entry to proxies/groups and pauses automatic list refresh until closing', async () => {
+  it('wires the single native account add entry to proxies/groups and pauses automatic list refresh until closing', async () => {
     vi.useFakeTimers()
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
     const proxies = [{ id: 9, name: 'fixture-proxy', status: 'active' }]
     getAllProxies.mockResolvedValue(proxies)
     const w = mountView(); await flushPromises()
-    await w.get('[data-testid="create-cline-account"]').trigger('click'); await flushPromises()
-    const modal = w.getComponent(ClineAccountModal)
+    expect(w.find('[data-testid="create-cline-account"]').exists()).toBe(false)
+    w.getComponent(AccountTableActions).vm.$emit('create'); await flushPromises()
+    const modal = w.getComponent(CreateAccountModal)
     expect(modal.props('show')).toBe(true)
     expect(modal.props('proxies')).toEqual(proxies)
-    expect(modal.props('account')).toBeNull()
     listWithEtag.mockClear()
     await vi.advanceTimersByTimeAsync(20000); await flushPromises()
     expect(listWithEtag).not.toHaveBeenCalled()
-    await w.get('[data-test="cline-close"]').trigger('click'); await flushPromises()
+    modal.vm.$emit('close'); await flushPromises()
     await vi.advanceTimersByTimeAsync(20000); await flushPromises()
     expect(listWithEtag).toHaveBeenCalled()
     w.unmount()
@@ -408,9 +409,9 @@ describe('admin AccountsView lite account list', () => {
     const edit = w.findAll('button').find(b => b.text().includes('common.edit'))!
     await edit.trigger('click'); await flushPromises()
     expect(getById).toHaveBeenCalledWith(row.id)
-    expect(w.getComponent(ClineAccountModal).props('account')).toMatchObject(full)
-    expect(w.getComponent(ClineAccountModal).props('show')).toBe(true)
-    expect(w.get('[data-test="edit-account"]').text()).toBe('')
+    expect(w.getComponent(EditAccountModal).props('account')).toMatchObject(full)
+    expect(w.getComponent(EditAccountModal).props('show')).toBe(true)
+    expect(w.get('[data-test="edit-account"]').text()).toBe(full.name)
     w.unmount()
   })
 

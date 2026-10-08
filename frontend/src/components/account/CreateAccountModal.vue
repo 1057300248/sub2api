@@ -1,6 +1,6 @@
 <template>
   <BaseDialog
-    :show="show && !showClineCreate"
+    :show="show"
     :title="t('admin.accounts.createAccount')"
     width="wide"
     @close="handleClose"
@@ -242,8 +242,9 @@
             TypeSafe / Jev
           </button>
           <button type="button" data-testid="create-platform-cline" :disabled="submitting"
-            class="flex min-w-[96px] flex-1 items-center justify-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
-            @click="showClineCreate = true">Cline</button>
+            :class="['flex min-w-[96px] flex-1 items-center justify-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-all', form.platform === 'cline' ? 'bg-white text-primary-600 shadow-sm dark:bg-dark-600 dark:text-primary-400' : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200']"
+            :aria-pressed="form.platform === 'cline'"
+            @click="selectClinePlatform()"><PlatformIcon platform="cline" size="sm" />Cline</button>
         </div>
       </div>
 
@@ -1386,6 +1387,21 @@
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
+        <div v-if="form.platform === 'cline'" class="space-y-3" data-testid="cline-provider-fields">
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label class="input-label">{{ t('clineAccount.mode') }}</label>
+              <Select v-model="clineAccountMode" :options="clineModeOptions" data-testid="cline-mode" />
+            </div>
+            <div>
+              <label class="input-label">{{ t('clineAccount.authType') }}</label>
+              <Select v-model="clineAuthType" :options="clineAuthOptions" data-testid="cline-auth" />
+            </div>
+          </div>
+          <p class="input-hint">{{ t('clineAccount.nativeHint') }}</p>
+          <p v-if="clineAuthType === 'account_token'" class="input-hint">{{ t('clineAccount.manualTokenNotice') }}</p>
+          <p v-if="clineAccountMode === 'free' || clineAccountMode === 'unknown'" role="status" class="text-sm text-amber-700 dark:text-amber-300">{{ t(clineAccountMode === 'free' ? 'clineAccount.freeNotice' : 'clineAccount.unknownNotice') }}</p>
+        </div>
         <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
@@ -1435,7 +1451,7 @@
           :plan="openCodeAccountMode"
         />
         <div>
-          <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
+          <label class="input-label">{{ form.platform === 'cline' ? `${t('clineAccount.key')} *` : t('admin.accounts.apiKeyRequired') }}</label>
           <input
             v-model="apiKeyValue"
             type="password"
@@ -1475,7 +1491,7 @@
 
         <!-- Model Restriction Section (Antigravity 已在上层条件排除) -->
         <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-          <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
+          <label class="input-label">{{ form.platform === 'cline' ? t('clineAccount.requiredModels') : t('admin.accounts.modelRestriction') }}</label>
 
           <div
             v-if="isOpenAIModelRestrictionDisabled"
@@ -1552,7 +1568,7 @@
               />
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-                <span v-if="allowedModels.length === 0">{{
+                <span v-if="allowedModels.length === 0 && form.platform !== 'cline'">{{
                   t('admin.accounts.supportsAllModels')
                 }}</span>
               </p>
@@ -1671,11 +1687,12 @@
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.poolModeHint') }}
+                {{ t(form.platform === 'cline' ? 'clineAccount.poolUnavailable' : 'admin.accounts.poolModeHint') }}
               </p>
             </div>
             <button
               type="button"
+              :disabled="form.platform === 'cline'"
               @click="poolModeEnabled = !poolModeEnabled"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -2494,126 +2511,7 @@
           </button>
         </div>
 
-        <div v-if="tempUnschedEnabled" class="space-y-3">
-          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-              <p class="text-xs text-blue-700 dark:text-blue-400">
-                <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
-                {{ t('admin.accounts.tempUnschedulable.notice') }}
-              </p>
-            </div>
-
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-for="preset in tempUnschedPresets"
-              :key="preset.label"
-              type="button"
-              @click="addTempUnschedRule(preset.rule)"
-              class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500"
-            >
-              + {{ preset.label }}
-            </button>
-          </div>
-
-          <div v-if="tempUnschedRules.length > 0" class="space-y-3">
-            <div
-              v-for="(rule, index) in tempUnschedRules"
-              :key="getTempUnschedRuleKey(rule)"
-              class="rounded-lg border border-gray-200 p-3 dark:border-dark-600"
-            >
-              <div class="mb-2 flex items-center justify-between">
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                  {{ t('admin.accounts.tempUnschedulable.ruleIndex', { index: index + 1 }) }}
-                </span>
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    :disabled="index === 0"
-                    @click="moveTempUnschedRule(index, -1)"
-                    class="rounded p-1 text-gray-400 transition-colors hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-gray-200"
-                  >
-                    <Icon name="chevronUp" size="sm" :stroke-width="2" />
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="index === tempUnschedRules.length - 1"
-                    @click="moveTempUnschedRule(index, 1)"
-                    class="rounded p-1 text-gray-400 transition-colors hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-gray-200"
-                  >
-                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    @click="removeTempUnschedRule(index)"
-                    class="rounded p-1 text-red-500 transition-colors hover:text-red-600"
-                  >
-                    <Icon name="x" size="sm" :stroke-width="2" />
-                  </button>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.errorCode') }}</label>
-                  <input
-                    v-model.number="rule.error_code"
-                    type="number"
-                    min="100"
-                    max="599"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.errorCodePlaceholder')"
-                  />
-                </div>
-                <div>
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.durationMinutes') }}</label>
-                  <input
-                    v-model.number="rule.duration_minutes"
-                    type="number"
-                    min="1"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.durationPlaceholder')"
-                  />
-                </div>
-                <div class="sm:col-span-2">
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.keywords') }}</label>
-                  <input
-                    v-model="rule.keywords"
-                    type="text"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.keywordsPlaceholder')"
-                  />
-                  <p class="input-hint">{{ t('admin.accounts.tempUnschedulable.keywordsHint') }}</p>
-                </div>
-                <div class="sm:col-span-2">
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.description') }}</label>
-                  <input
-                    v-model="rule.description"
-                    type="text"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.descriptionPlaceholder')"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            @click="addTempUnschedRule()"
-            class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-          >
-            <svg
-              class="mr-1 inline h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            {{ t('admin.accounts.tempUnschedulable.addRule') }}
-          </button>
-        </div>
+        <TempUnschedRulesEditor v-if="tempUnschedEnabled" v-model="tempUnschedRules" />
       </div>
 
       <!-- Intercept Warmup Requests (Anthropic/Antigravity) -->
@@ -3886,16 +3784,16 @@
     @confirm="handleMixedChannelConfirm"
     @cancel="handleMixedChannelCancel"
   />
-  <ClineAccountModal v-if="show && showClineCreate" :show="true" :proxies="proxies" :groups="groups"
-    :allow-composite="!authStore.isSimpleMode" :initial="{ name: form.name, notes: form.notes || '' }"
-    show-platform-back @back="showClineCreate = false" @close="handleClose" @saved="emit('created')" />
 </template>
 
 <script setup lang="ts">
+import TempUnschedRulesEditor from './TempUnschedRulesEditor.vue'
+import { buildTempUnschedRules, type TempUnschedRuleForm } from './tempUnschedulableRules'
+
 import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier } from '@/utils/accountCost'
 
 import OpenAITwoFAImport from './OpenAITwoFAImport.vue'
-import ClineAccountModal from './ClineAccountModal.vue'
+import { CLINE_BASE_URL, clineModeOptions, clineAuthOptions, clineModelError, applyClineCredentialFields, type ClineMode, type ClineAuthType } from './clineAccountForm'
 import { createTokenGuardV2Account } from '@/api/admin/accountTokenGuardV2'
 import type { TokenGuardReloginAccount } from '@/api/admin/accountTokenGuard'
 import { ref, reactive, computed, watch } from 'vue'
@@ -4041,14 +3939,14 @@ const withAccountExtraSettings = (extra?: Record<string, unknown>): Record<strin
 const baseUrlHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
-  if (form.platform === 'grok') return ''
+  if (form.platform === 'grok' || form.platform === 'cline') return ''
   return t('admin.accounts.baseUrlHint')
 })
 
 const apiKeyHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.apiKeyHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.apiKeyHint')
-  if (form.platform === 'grok') return ''
+  if (form.platform === 'grok' || form.platform === 'cline') return ''
   return t('admin.accounts.apiKeyHint')
 })
 
@@ -4065,6 +3963,8 @@ const apiKeyBaseUrlPlaceholder = computed(() => {
       return 'https://generativelanguage.googleapis.com'
     case 'grok':
       return 'https://api.x.ai/v1'
+    case 'cline':
+      return CLINE_BASE_URL
     case 'typesafe':
       return 'https://api.typesafe.ai'
     default:
@@ -4089,6 +3989,8 @@ const apiKeyValuePlaceholder = computed(() => {
     case 'minimax':
     case 'opencode_go':
       return 'sk-...'
+    case 'cline':
+      return clineAuthType.value === 'account_token' ? 'Account Token' : 'Cline API Key'
     case 'typesafe':
       return 'ts-...'
     default:
@@ -4103,8 +4005,13 @@ interface Props {
 }
 
 const props = defineProps<Props>()
-const showClineCreate = ref(false)
-watch(() => props.show, () => { showClineCreate.value = false })
+const clineAccountMode = ref<ClineMode>('pass')
+const clineAuthType = ref<ClineAuthType>('api_key')
+function selectClinePlatform() {
+  accountCategory.value = 'apikey'
+  form.platform = 'cline'
+}
+
 const emit = defineEmits<{
   close: []
   created: []
@@ -4166,12 +4073,6 @@ interface ModelMapping {
   to: string
 }
 
-interface TempUnschedRuleForm {
-  error_code: number | null
-  keywords: string
-  duration_minutes: number | null
-  description: string
-}
 
 // State
 const step = ref(1)
@@ -4382,6 +4283,8 @@ const syncPreviewCredentials = computed(() => {
     type: form.type,
     base_url: baseUrl || undefined,
     api_key: apiKeyValue.value,
+    proxy_id: form.proxy_id ?? undefined,
+    ...(form.platform === 'cline' ? { account_mode: clineAccountMode.value, cline_auth_type: clineAuthType.value } : {}),
     ...(modelMapping ? { model_mapping: modelMapping } : {})
   }
 })
@@ -4448,7 +4351,7 @@ const validateGrokOAuthUpstreamConfig = (): boolean => {
     }
   }
   if (headerOverrideEnabled.value) {
-    const headerError = validateHeaderOverrideRows(headerOverrideRows.value)
+    const headerError = validateHeaderOverrideRows(headerOverrideRows.value, form.platform)
     if (headerError) {
       appStore.showError(t(`admin.accounts.headerOverride.${headerError}`))
       return false
@@ -4544,7 +4447,6 @@ const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('create-model-mapping')
 const getOpenAICompactModelMappingKey = createStableObjectKeyResolver<ModelMapping>('create-openai-compact-model-mapping')
 const getAntigravityModelMappingKey = createStableObjectKeyResolver<ModelMapping>('create-antigravity-model-mapping')
-const getTempUnschedRuleKey = createStableObjectKeyResolver<TempUnschedRuleForm>('create-temp-unsched-rule')
 const geminiOAuthType = ref<'code_assist' | 'google_one' | 'ai_studio'>('google_one')
 const geminiAIStudioOAuthEnabled = ref(false)
 const openAICompactModeOptions = computed(() => [
@@ -4730,35 +4632,6 @@ const geminiHelpLinks = {
 
 // Computed: current preset mappings based on platform
 const presetMappings = computed(() => getPresetMappingsByPlatform(form.platform))
-const tempUnschedPresets = computed(() => [
-  {
-    label: t('admin.accounts.tempUnschedulable.presets.overloadLabel'),
-    rule: {
-      error_code: 529,
-      keywords: 'overloaded, too many',
-      duration_minutes: 60,
-      description: t('admin.accounts.tempUnschedulable.presets.overloadDesc')
-    }
-  },
-  {
-    label: t('admin.accounts.tempUnschedulable.presets.rateLimitLabel'),
-    rule: {
-      error_code: 429,
-      keywords: 'rate limit, too many requests',
-      duration_minutes: 10,
-      description: t('admin.accounts.tempUnschedulable.presets.rateLimitDesc')
-    }
-  },
-  {
-    label: t('admin.accounts.tempUnschedulable.presets.unavailableLabel'),
-    rule: {
-      error_code: 503,
-      keywords: 'unavailable, maintenance',
-      duration_minutes: 30,
-      description: t('admin.accounts.tempUnschedulable.presets.unavailableDesc')
-    }
-  }
-])
 
 const form = reactive({
   name: '',
@@ -4875,13 +4748,14 @@ watch(
 // Reset platform-specific settings when platform changes
 watch(
   () => form.platform,
-  (newPlatform) => {
+  (newPlatform, previousPlatform) => {
     // Reset base URL based on platform
     if (isCNProviderPlatform(newPlatform) || newPlatform === 'opencode_go') {
       const mode = newPlatform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
       apiKeyBaseUrl.value = defaultCNBaseUrl(newPlatform, mode, apiProtocol.value)
     } else {
       apiKeyBaseUrl.value =
+        newPlatform === 'cline' ? CLINE_BASE_URL :
         (newPlatform === 'openai')
           ? 'https://api.openai.com'
           : newPlatform === 'gemini'
@@ -4891,6 +4765,17 @@ watch(
               : newPlatform === 'typesafe'
                 ? 'https://api.typesafe.ai'
               : 'https://api.anthropic.com'
+    }
+    // Never carry another provider's unsaved secret or policy into Cline (or back).
+    if (newPlatform === 'cline' || previousPlatform === 'cline') {
+      apiKeyValue.value = ''
+    }
+    if (newPlatform === 'cline') {
+      accountCategory.value = 'apikey'
+      poolModeEnabled.value = false
+      upstreamBillingAutoProbeEnabled.value = false
+      clineAccountMode.value = 'pass'
+      clineAuthType.value = 'api_key'
     }
     // Clear model-related settings
     allowedModels.value = []
@@ -5133,64 +5018,6 @@ const removeErrorCode = (code: number) => {
   }
 }
 
-const addTempUnschedRule = (preset?: TempUnschedRuleForm) => {
-  if (preset) {
-    tempUnschedRules.value.push({ ...preset })
-    return
-  }
-  tempUnschedRules.value.push({
-    error_code: null,
-    keywords: '',
-    duration_minutes: 30,
-    description: ''
-  })
-}
-
-const removeTempUnschedRule = (index: number) => {
-  tempUnschedRules.value.splice(index, 1)
-}
-
-const moveTempUnschedRule = (index: number, direction: number) => {
-  const target = index + direction
-  if (target < 0 || target >= tempUnschedRules.value.length) return
-  const rules = tempUnschedRules.value
-  const current = rules[index]
-  rules[index] = rules[target]
-  rules[target] = current
-}
-
-const buildTempUnschedRules = (rules: TempUnschedRuleForm[]) => {
-  const out: Array<{
-    error_code: number
-    keywords: string[]
-    duration_minutes: number
-    description: string
-  }> = []
-
-  for (const rule of rules) {
-    const errorCode = Number(rule.error_code)
-    const duration = Number(rule.duration_minutes)
-    const keywords = splitTempUnschedKeywords(rule.keywords)
-    if (!Number.isFinite(errorCode) || errorCode < 100 || errorCode > 599) {
-      continue
-    }
-    if (!Number.isFinite(duration) || duration <= 0) {
-      continue
-    }
-    if (keywords.length === 0) {
-      continue
-    }
-    out.push({
-      error_code: Math.trunc(errorCode),
-      keywords,
-      duration_minutes: Math.trunc(duration),
-      description: rule.description.trim()
-    })
-  }
-
-  return out
-}
-
 const applyTempUnschedConfig = (credentials: Record<string, unknown>) => {
   if (!tempUnschedEnabled.value) {
     delete credentials.temp_unschedulable_enabled
@@ -5209,12 +5036,6 @@ const applyTempUnschedConfig = (credentials: Record<string, unknown>) => {
   return true
 }
 
-const splitTempUnschedKeywords = (value: string) => {
-  return value
-    .split(/[,;]/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
-}
 
 const needsMixedChannelCheck = (platform: AccountPlatform) => platform === 'antigravity' || platform === 'anthropic'
 
@@ -5302,7 +5123,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       Object.values(modelMapping).some((target) =>
         typeof target === 'string' && target.trim() !== '' && !target.includes('*')
       )
-    if (upstreamModelsPreviewed.value || hasConcreteMappedTarget) {
+    if (payload.platform !== 'cline' && (upstreamModelsPreviewed.value || hasConcreteMappedTarget)) {
       try {
         const result = await adminAPI.accounts.syncUpstreamModels(account.id)
         const warnings = result.warnings ?? []
@@ -5695,6 +5516,7 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (submitting.value) return
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !isOpenAITwoFA.value && !form.name.trim()) {
@@ -5839,6 +5661,13 @@ const handleSubmit = async () => {
     return
   }
 
+  // The standard form owns all common settings; this hook validates only Cline's provider contract.
+  if (form.platform === 'cline') {
+    const issue = clineModelError(clineAccountMode.value,
+      modelRestrictionMode.value === 'whitelist' ? allowedModels.value : [],
+      modelRestrictionMode.value === 'mapping' ? modelMappings.value : [])
+    if (issue) { appStore.showError(t(`clineAccount.errors.${issue}`)); return }
+  }
   // For apikey type, create directly
   if (!apiKeyValue.value.trim()) {
     appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
@@ -5847,6 +5676,7 @@ const handleSubmit = async () => {
 
   // Determine default base URL based on platform
   const defaultBaseUrl =
+    form.platform === 'cline' ? CLINE_BASE_URL :
     form.platform === 'openai'
       ? 'https://api.openai.com'
       : form.platform === 'gemini'
@@ -5868,7 +5698,7 @@ const handleSubmit = async () => {
 
   // 国产供应商：账号模式 + 协议 + 对应端点写入凭据；后端按 account_mode 路由
   // 额度/余额探测，按 api_protocol 路由转发端点与格式。注意 CN apikey 走本函数
-  // 的通用路径（直接 doCreateAccount），不经过 createAccountAndFinish。
+  // 的通用路径，最终共用 createAccountAndFinish 序列化配额与通用设置。
   if (isCNProviderPlatform(form.platform) || form.platform === 'opencode_go') {
     credentials.account_mode = form.platform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
     credentials.api_protocol = apiProtocol.value
@@ -5934,7 +5764,7 @@ const handleSubmit = async () => {
   // Add header override if enabled for this API-key platform
   if (isHeaderOverrideCapable(form.platform, 'apikey')) {
     if (headerOverrideEnabled.value) {
-      const headerError = validateHeaderOverrideRows(headerOverrideRows.value)
+      const headerError = validateHeaderOverrideRows(headerOverrideRows.value, form.platform)
       if (headerError) {
         appStore.showError(t(`admin.accounts.headerOverride.${headerError}`))
         return
@@ -5948,16 +5778,16 @@ const handleSubmit = async () => {
     return
   }
 
+  if (form.platform === 'cline') {
+    const issue = applyClineCredentialFields(credentials, clineAccountMode.value, clineAuthType.value)
+    if (issue) { appStore.showError(t(`clineAccount.errors.${issue}`)); return }
+  }
   form.credentials = credentials
   const extra = buildAnthropicExtra(buildOpenAIExtra())
 
-  await doCreateAccount({
-    ...form,
-    group_ids: form.group_ids,
-    extra: withAccountExtraSettings(extra),
-    upstream_billing_probe_enabled: upstreamBillingAutoProbeEnabled.value,
-    auto_pause_on_expired: autoPauseOnExpired.value
-  })
+  // Reuse the same quota/notification and common-settings finalizer as the
+  // other API-key creation paths; do not bypass it for a provider extension.
+  await createAccountAndFinish(form.platform, form.type, credentials, extra)
 }
 
 const goBackToBasicInfo = () => {

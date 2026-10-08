@@ -17,7 +17,6 @@
             @create="showCreate = true"
           >
             <template #after>
-              <button type="button" class="btn btn-secondary" data-testid="create-cline-account" @click="openCreateCline">{{ t('clineAccount.create') }}</button>
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button
@@ -457,7 +456,6 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <ClineAccountModal :show="showCline" :account="clineEditAccount" :proxies="proxies" :groups="groups" :allow-composite="!authStore.isSimpleMode" @close="showCline = false" @saved="reload" />
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
@@ -515,7 +513,6 @@ import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
-import ClineAccountModal from '@/components/account/ClineAccountModal.vue'
 import { clineModeLabel } from '@/components/account/clineAccountForm'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
@@ -616,9 +613,6 @@ const selTypes = computed<AccountType[]>(() => {
   )
   return [...types]
 })
-const showCline = ref(false)
-const clineEditAccount = ref<Account | null>(null)
-const openCreateCline = () => { clineEditAccount.value = null; showCline.value = true }
 const showCreate = ref(false)
 const showEdit = ref(false)
 const showSync = ref(false)
@@ -1403,7 +1397,6 @@ watch(accounts, (rows) => {
 const isAnyModalOpen = computed(() => {
   return (
     showCreate.value ||
-    showCline.value ||
     showEdit.value ||
     showSync.value ||
     showImportData.value ||
@@ -1892,11 +1885,6 @@ const loadAccountDetails = async (account: Pick<AccountListItem, 'id'>): Promise
 const handleEdit = async (a: AccountListItem) => {
   const account = await loadAccountDetails(a)
   if (!account) return
-  if (account.platform === 'cline') {
-    clineEditAccount.value = account
-    showCline.value = true
-    return
-  }
   edAcc.value = account
   showEdit.value = true
 }

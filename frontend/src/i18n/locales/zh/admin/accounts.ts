@@ -321,6 +321,9 @@ export default {
       quotaLimitAmount: '总限额',
       quotaLimitAmountHint: '累计消费上限，不会自动重置。',
       quotaNotify: {
+        daily: '日额度通知',
+        weekly: '周额度通知',
+        total: '总额度通知',
         alert: '提醒阈值',
         enabled: '启用告警',
         threshold: '告警金额',
@@ -681,6 +684,15 @@ export default {
         partialSuccess: '操作部分完成：{success} 成功，{failed} 失败'
       },
       bulkEdit: {
+        quotaPatchHint: '仅提交实际修改的额度和周期字段；未操作的字段保持不变。填 0 或清空已修改字段表示移除限制，不重置已用额度。',
+        clearQuotaLimits: '清除总、日、周金额限额',
+        notifyPatchHint: '仅修改勾选的通知项目。发送邮件仍需全局额度通知开关及收件人配置。',
+        disableKeepRules: '关闭，保留已有规则',
+        enableSavedRules: '启用已有规则',
+        replaceRules: '替换规则并启用',
+        tempRulesHint: '启停不会删除规则，也不会清除当前临时停调、官方冷却或用量。替换会覆盖所选账户的全部规则。',
+        moveRuleUp: '上移规则',
+        moveRuleDown: '下移规则',
         title: '批量编辑账号',
         selectionInfo: '已选择 {count} 个账号。只更新您勾选或填写的字段，未勾选的字段保持不变。',
         baseUrlPlaceholder: 'https://api.anthropic.com 或 https://api.openai.com',

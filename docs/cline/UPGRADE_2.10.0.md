@@ -1,5 +1,7 @@
 # Clean v2.10.0 Cline rebuild
 
+The subsequent [native account flow refactor](NATIVE_ACCOUNT_FLOW.md) removes the parallel Cline account editor. Use the standard **Add account → Cline** tab and standard Edit/Bulk Edit controls; the provider protocol and quota protections below are unchanged.
+
 ## Source identity and scope
 
 - Upstream: `ranxi2001/sub2api` tag `v2.10.0`, peeled commit `5ca3cca21eeaf4ca8a694a7f2f8f0ecd9575c549`.

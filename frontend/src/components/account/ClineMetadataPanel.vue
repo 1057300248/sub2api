@@ -61,7 +61,7 @@
                 <p>{{ t('clineMetadata.entitlementUnknown') }}</p>
               </details>
             </div>
-            <button type="button" class="btn btn-secondary shrink-0" :disabled="busy || !selectable(model.id)" @click="emit('select', model.id)">{{ t('clineMetadata.add') }}</button>
+            <button v-if="!readonlyCatalog" type="button" class="btn btn-secondary shrink-0" :disabled="busy || !selectable(model.id)" @click="emit('select', model.id)">{{ t('clineMetadata.add') }}</button>
           </div>
         </div>
       </div>
@@ -74,7 +74,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getClineMetadata, refreshClineMetadata, type ClineMetadata } from '@/api/admin/clineMetadata'
 
-const props = defineProps<{ accountId: number; mode: string }>()
+const props = defineProps<{ accountId: number; mode: string; readonlyCatalog?: boolean }>()
 const emit = defineEmits<{ select: [modelId: string] }>()
 const { t } = useI18n()
 const metadata = ref<ClineMetadata | null>(null)

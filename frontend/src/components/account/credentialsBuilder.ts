@@ -1,3 +1,4 @@
+import { validateClineHeaderRows } from './clineAccountForm'
 import { openAIPlanTypeKey, openAIPlanTypeLabel, openAIPlanTypes } from '@/utils/planType'
 
 export function applyInterceptWarmup(
@@ -120,8 +121,10 @@ function utf8ByteLength(value: string): number {
  * 值含控制字符或超长 → invalidValue；条目过多 → tooManyEntries。
  */
 export function validateHeaderOverrideRows(
-  rows: HeaderOverrideRow[]
+  rows: HeaderOverrideRow[],
+  platform?: string
 ): 'invalidName' | 'blockedName' | 'duplicateName' | 'invalidValue' | 'tooManyEntries' | null {
+  if (platform === 'cline' && !validateClineHeaderRows(rows)) return 'blockedName'
   const seen = new Set<string>()
   for (const row of rows) {
     const name = row.name.trim()

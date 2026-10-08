@@ -8,6 +8,8 @@ import { nextTick } from 'vue'
 import BulkEditAccountModal from '../BulkEditAccountModal.vue'
 import HeaderOverrideEditor from '../HeaderOverrideEditor.vue'
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
+import QuotaLimitCard from '../QuotaLimitCard.vue'
+import QuotaNotifyToggle from '../QuotaNotifyToggle.vue'
 import { adminAPI } from '@/api/admin'
 
 const { showError, showSuccess, translate, authIsSimpleMode } = vi.hoisted(() => ({
@@ -96,6 +98,159 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 }
 
 describe('BulkEditAccountModal', () => {
+  it('omits unchecked quota edits and clears the draft when the bulk modal is reopened', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-quota-enabled').setValue(true)
+    await wrapper.getComponent(QuotaLimitCard).get('input[type="number"]').setValue(25)
+    await wrapper.get('#bulk-edit-quota-enabled').setValue(false)
+    await wrapper.get('#bulk-edit-temp-unsched-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { credentials: { temp_unschedulable_enabled: false } })
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockClear()
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await wrapper.get('#bulk-edit-quota-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenLastCalledWith('admin.accounts.bulkEdit.noFieldsSelected')
+    wrapper.unmount()
+  })
+
+  it('clears only the daily limit when its input changes from a positive amount to zero', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-quota-enabled').setValue(true)
+    const dailyInput = wrapper.getComponent(QuotaLimitCard).get('input[type="number"]')
+    await dailyInput.setValue(25)
+    await dailyInput.setValue(0)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { quota_daily_limit: 0 } })
+    wrapper.unmount()
+  })
+
+  it('explicitly clears all local spending limits without resetting cycles or usage', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-quota-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-clear-quota-limits"]').trigger('click')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra: { quota_limit: null, quota_daily_limit: null, quota_weekly_limit: null }
+    })
+    wrapper.unmount()
+  })
+
+  it('updates a fixed daily cycle using the shared quota controls and preserves other dimensions', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-quota-enabled').setValue(true)
+    const card = wrapper.getComponent(QuotaLimitCard)
+    await card.get('select').setValue('fixed')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra: { quota_daily_reset_mode: 'fixed', quota_daily_reset_hour: 0, quota_reset_timezone: 'UTC' }
+    })
+    wrapper.unmount()
+  })
+
+  it('sends an explicit zero percentage notification threshold for only the selected dimension', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-notify-weekly').setValue(true)
+    const notify = wrapper.getComponent(QuotaNotifyToggle)
+    await notify.get('button').trigger('click')
+    await notify.get('select').setValue('percentage')
+    await notify.get('input').setValue(0)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra: { quota_notify_weekly_enabled: true, quota_notify_weekly_threshold: 0, quota_notify_weekly_threshold_type: 'percentage' }
+    })
+    wrapper.unmount()
+  })
+
+  it('replaces pause rules in the order selected in the shared editor', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-temp-unsched-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-temp-unsched-action').setValue('replace')
+    for (const label of ['overloadLabel', 'unavailableLabel']) {
+      await wrapper.findAll('button').find(button => button.text().includes(`presets.${label}`))!.trigger('click')
+    }
+    await wrapper.findAll('[aria-label="admin.accounts.bulkEdit.moveRuleUp"]')[1].trigger('click')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      credentials: { temp_unschedulable_enabled: true, temp_unschedulable_rules: [
+        { error_code: 503, keywords: ['unavailable', 'maintenance'], duration_minutes: 30, description: 'admin.accounts.tempUnschedulable.presets.unavailableDesc' },
+        { error_code: 529, keywords: ['overloaded', 'too many'], duration_minutes: 60, description: 'admin.accounts.tempUnschedulable.presets.overloadDesc' },
+      ] }
+    })
+    wrapper.unmount()
+  })
+
+  it('blocks replacing pause rules when a row is incomplete instead of silently dropping it', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-temp-unsched-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-temp-unsched-action').setValue('replace')
+    await wrapper.findAll('button').find(button => button.text().includes('presets.overloadLabel'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('tempUnschedulable.addRule'))!.trigger('click')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenLastCalledWith('admin.accounts.tempUnschedulable.rulesInvalid')
+    wrapper.unmount()
+  })
+
+  it('enables saved pause rules through a filtered mixed-platform request without sending replacement rules', async () => {
+    const filters = { type: 'apikey' }
+    const wrapper = mountModal({ target: { mode: 'filtered', filters, previewCount: 3, selectedPlatforms: ['cline', 'openai'], selectedTypes: ['apikey'] } })
+    await wrapper.get('#bulk-edit-temp-unsched-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-temp-unsched-action').setValue('enable')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith({ filters, credentials: { temp_unschedulable_enabled: true } })
+    wrapper.unmount()
+  })
+
+  it('disables custom error handling without erasing configured error codes', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-custom-error-codes-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-custom-error-action').setValue('disable')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { credentials: { custom_error_codes_enabled: false } })
+    wrapper.unmount()
+  })
+
+  it('updates only an edited local quota field through the native bulk API', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-quota-enabled').setValue(true)
+    wrapper.getComponent(QuotaLimitCard).vm.$emit('update:dailyLimit', 25)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { quota_daily_limit: 25 } })
+    wrapper.unmount()
+  })
+
+  it('disables only the selected notification dimension without clearing thresholds', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-notify-daily').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { quota_notify_daily_enabled: false } })
+    wrapper.unmount()
+  })
+
+  it('disables temporary pause policies without replacing saved rules', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-temp-unsched-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { credentials: { temp_unschedulable_enabled: false } })
+    wrapper.unmount()
+  })
+
   it('repairs OAuth alias scope without replacing mappings or enabling BPS', async () => {
     const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
     await wrapper.get('[data-testid="enable-model-aliases"]').setValue(true)
@@ -1418,18 +1573,12 @@ describe('Cline bulk header settings', () => {
   })
 })
 
-it('offers Cline-only advanced bulk edits with explicit removal and no runtime counters', async () => {
+
+it.each([['cline'], ['cline', 'openai']])('uses only native bulk controls for %j', async (...platforms) => {
   vi.mocked(adminAPI.accounts.bulkUpdate).mockClear()
-  const w = mountModal({ selectedPlatforms: ['cline'], selectedTypes: ['apikey'] })
-  await w.get('[data-testid=cline-bulk-advanced-enabled]').setValue(true)
-  await w.get('[data-testid=cline-bulk-clear-limits]').setValue(true)
-  await w.get('[data-testid=cline-bulk-disable-notify]').setValue(true)
-  await w.get('[data-testid=cline-bulk-disable-policies]').setValue(true)
-  await w.get('#bulk-edit-account-form').trigger('submit.prevent'); await flushPromises()
-  expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { credentials: { custom_error_codes_enabled: false, temp_unschedulable_enabled: false }, extra: { quota_limit: null, quota_daily_limit: null, quota_weekly_limit: null, quota_notify_total_enabled: false, quota_notify_daily_enabled: false, quota_notify_weekly_enabled: false } })
+  const w = mountModal({ selectedPlatforms: platforms, selectedTypes: ['apikey'] })
+  expect(w.find('[data-testid=cline-bulk-advanced]').exists()).toBe(false)
+  expect(w.find('#bulk-edit-header-override-enabled').exists()).toBe(true)
+  expect(w.find('#bulk-edit-account-form').exists()).toBe(true)
   w.unmount()
-})
-it('does not expose Cline-specific advanced bulk settings for mixed platforms', () => {
-  const w = mountModal({ selectedPlatforms: ['cline', 'openai'], selectedTypes: ['apikey'] })
-  expect(w.find('[data-testid=cline-bulk-advanced]').exists()).toBe(false); w.unmount()
 })

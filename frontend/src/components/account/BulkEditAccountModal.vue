@@ -627,7 +627,10 @@
           />
         </div>
 
-        <div v-if="enableCustomErrorCodes" id="bulk-edit-custom-error-codes-body" class="space-y-3">
+        <Select v-if="enableCustomErrorCodes" id="bulk-edit-custom-error-action" v-model="customErrorAction"
+          :aria-label="t('admin.accounts.customErrorCodes')"
+          :options="customErrorOptions" />
+        <div v-if="enableCustomErrorCodes && customErrorAction === 'replace'" id="bulk-edit-custom-error-codes-body" class="space-y-3">
           <div class="rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20">
             <p class="text-xs text-amber-700 dark:text-amber-400">
               <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
@@ -1191,14 +1194,67 @@
         </div>
       </div>
 
-      <section v-if="allClineAccounts" class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="cline-bulk-advanced">
-        <label class="flex items-center gap-2 text-sm font-medium"><input v-model="enableClineAdvanced" type="checkbox" data-testid="cline-bulk-advanced-enabled" />{{ t('clineAccount.advanced.bulkTitle') }}</label>
-        <template v-if="enableClineAdvanced">
-          <p class="text-xs text-amber-700 dark:text-amber-300">{{ t('clineAccount.advanced.bulkHint') }}</p>
-          <ClineAdvancedSettings v-model="clineAdvanced" :can-operate="false" />
-          <label class="flex items-center gap-2 text-sm"><input v-model="clearClineLimits" type="checkbox" data-testid="cline-bulk-clear-limits" />{{ t('clineAccount.advanced.bulkClearLimits') }}</label>
-          <label class="flex items-center gap-2 text-sm"><input v-model="disableClineNotifications" type="checkbox" data-testid="cline-bulk-disable-notify" />{{ t('clineAccount.advanced.bulkDisableNotify') }}</label>
-          <label class="flex items-center gap-2 text-sm"><input v-model="disableClinePolicies" type="checkbox" data-testid="cline-bulk-disable-policies" />{{ t('clineAccount.advanced.bulkDisablePolicies') }}</label>
+      <!-- Shared account quota and policy controls; the original bulk endpoint owns saving. -->
+      <section class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label flex items-center gap-2" for="bulk-edit-quota-enabled">
+          <input id="bulk-edit-quota-enabled" v-model="enableQuota" type="checkbox" />
+          {{ t('admin.accounts.quotaLimit') }}
+        </label>
+        <template v-if="enableQuota">
+          <p class="input-hint">{{ t('admin.accounts.bulkEdit.quotaPatchHint') }}</p>
+          <QuotaLimitCard
+            embedded
+            :total-limit="quotaPatch.quota_limit ?? null"
+            :daily-limit="quotaPatch.quota_daily_limit ?? null"
+            :weekly-limit="quotaPatch.quota_weekly_limit ?? null"
+            :daily-reset-mode="quotaPatch.quota_daily_reset_mode ?? null"
+            :daily-reset-hour="quotaPatch.quota_daily_reset_hour ?? null"
+            :weekly-reset-mode="quotaPatch.quota_weekly_reset_mode ?? null"
+            :weekly-reset-day="quotaPatch.quota_weekly_reset_day ?? null"
+            :weekly-reset-hour="quotaPatch.quota_weekly_reset_hour ?? null"
+            :reset-timezone="quotaPatch.quota_reset_timezone ?? null"
+            @update:total-limit="quotaPatch.quota_limit = $event"
+            @update:daily-limit="quotaPatch.quota_daily_limit = $event"
+            @update:weekly-limit="quotaPatch.quota_weekly_limit = $event"
+            @update:daily-reset-mode="quotaPatch.quota_daily_reset_mode = $event"
+            @update:daily-reset-hour="quotaPatch.quota_daily_reset_hour = $event"
+            @update:weekly-reset-mode="quotaPatch.quota_weekly_reset_mode = $event"
+            @update:weekly-reset-day="quotaPatch.quota_weekly_reset_day = $event"
+            @update:weekly-reset-hour="quotaPatch.quota_weekly_reset_hour = $event"
+            @update:reset-timezone="quotaPatch.quota_reset_timezone = $event"
+          />
+          <button type="button" class="btn btn-secondary" data-testid="bulk-clear-quota-limits"
+            @click="Object.assign(quotaPatch, { quota_limit: null, quota_daily_limit: null, quota_weekly_limit: null })">
+            {{ t('admin.accounts.bulkEdit.clearQuotaLimits') }}
+          </button>
+        </template>
+      </section>
+
+      <section class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600">
+        <p class="input-hint">{{ t('admin.accounts.bulkEdit.notifyPatchHint') }}</p>
+        <div v-for="dim in QUOTA_NOTIFY_DIMS" :key="dim" class="space-y-2">
+          <label :for="`bulk-edit-notify-${dim}`" class="input-label flex items-center gap-2">
+            <input :id="`bulk-edit-notify-${dim}`" v-model="notifySelected[dim]" type="checkbox" />
+            {{ t(`admin.accounts.quotaNotify.${dim}`) }}
+          </label>
+          <QuotaNotifyToggle v-if="notifySelected[dim]"
+            :label="t(`admin.accounts.quotaNotify.${dim}`)"
+            v-model:enabled="quotaNotifyState[dim].enabled"
+            v-model:threshold="quotaNotifyState[dim].threshold"
+            v-model:threshold-type="quotaNotifyState[dim].thresholdType" />
+        </div>
+      </section>
+
+      <section class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label flex items-center gap-2" for="bulk-edit-temp-unsched-enabled">
+          <input id="bulk-edit-temp-unsched-enabled" v-model="enableTempUnsched" type="checkbox" />
+          {{ t('admin.accounts.tempUnschedulable.title') }}
+        </label>
+        <template v-if="enableTempUnsched">
+          <Select id="bulk-edit-temp-unsched-action" v-model="tempUnschedAction" :options="tempUnschedOptions"
+            :aria-label="t('admin.accounts.tempUnschedulable.title')" />
+          <p class="input-hint">{{ t('admin.accounts.bulkEdit.tempRulesHint') }}</p>
+          <TempUnschedRulesEditor v-if="tempUnschedAction === 'replace'" v-model="tempUnschedRules" />
         </template>
       </section>
 
@@ -1574,7 +1630,14 @@
 </template>
 
 <script setup lang="ts">
-import { validateClineHeaderRows } from './clineAccountSettings'
+import QuotaLimitCard from './QuotaLimitCard.vue'
+import QuotaNotifyToggle from './QuotaNotifyToggle.vue'
+import TempUnschedRulesEditor from './TempUnschedRulesEditor.vue'
+import { buildTempUnschedRules, type TempUnschedRuleForm } from './tempUnschedulableRules'
+import { useQuotaNotifyState, QUOTA_NOTIFY_DIMS } from '@/composables/useQuotaNotifyState'
+import type { QuotaResetMode } from '@/constants/account'
+
+import { validateClineHeaderRows } from './clineAccountForm'
 import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier } from '@/utils/accountCost'
 
 import { ref, watch, computed } from 'vue'
@@ -1610,8 +1673,6 @@ import {
   getPresetMappingsByPlatform
 } from '@/composables/useModelWhitelist'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
-import ClineAdvancedSettings from './ClineAdvancedSettings.vue'
-import { clineAdvancedDraft, clineAdvancedPayload, ClineAdvancedError } from './clineAdvancedSettings'
 import {
   buildHeaderOverridesObject,
   isHeaderOverrideCapable,
@@ -1759,18 +1820,41 @@ interface ModelMapping {
   to: string
 }
 
+// Native bulk edits send configuration deltas, never account runtime snapshots.
+const enableQuota = ref(false)
+const quotaPatch = ref<{
+  quota_limit?: number | null
+  quota_daily_limit?: number | null
+  quota_weekly_limit?: number | null
+  quota_daily_reset_mode?: QuotaResetMode | null
+  quota_daily_reset_hour?: number | null
+  quota_weekly_reset_mode?: QuotaResetMode | null
+  quota_weekly_reset_day?: number | null
+  quota_weekly_reset_hour?: number | null
+  quota_reset_timezone?: string | null
+}>({})
+const notifySelected = ref({ daily: false, weekly: false, total: false })
+const { state: quotaNotifyState, writeToExtra: writeQuotaNotify, reset: resetQuotaNotify } = useQuotaNotifyState()
+const enableTempUnsched = ref(false)
+const tempUnschedAction = ref<'disable' | 'enable' | 'replace'>('disable')
+const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
+const tempUnschedOptions = computed(() => [
+  { value: 'disable', label: t('admin.accounts.bulkEdit.disableKeepRules') },
+  { value: 'enable', label: t('admin.accounts.bulkEdit.enableSavedRules') },
+  { value: 'replace', label: t('admin.accounts.bulkEdit.replaceRules') },
+])
+
 // State - field enable flags
 const enableBaseUrl = ref(false)
 const enableModelRestriction = ref(false)
 const enableOpenAIModelAliases = ref(false)
 const openaiModelAliases = ref(true)
-const allClineAccounts = computed(() => targetSelectedPlatforms.value.length === 1 && targetSelectedPlatforms.value[0] === 'cline' && targetSelectedTypes.value.length === 1 && targetSelectedTypes.value[0] === 'apikey')
-const enableClineAdvanced = ref(false)
-const clineAdvanced = ref(clineAdvancedDraft())
-const clearClineLimits = ref(false)
-const disableClineNotifications = ref(false)
-const disableClinePolicies = ref(false)
 const enableCustomErrorCodes = ref(false)
+const customErrorAction = ref<'replace' | 'disable'>('replace')
+const customErrorOptions = computed(() => [
+  { value: 'replace', label: t('admin.accounts.bulkEdit.replaceRules') },
+  { value: 'disable', label: t('admin.accounts.bulkEdit.disableKeepRules') },
+])
 const enableInterceptWarmup = ref(false)
 const enableHeaderOverride = ref(false)
 const enableProxy = ref(false)
@@ -2236,9 +2320,11 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     credentialsChanged = true
   }
 
-  if (enableCustomErrorCodes.value && !(allClineAccounts.value && enableClineAdvanced.value)) {
-    credentials.custom_error_codes_enabled = true
-    credentials.custom_error_codes = [...selectedErrorCodes.value]
+  if (enableCustomErrorCodes.value) {
+    credentials.custom_error_codes_enabled = customErrorAction.value === 'replace'
+    if (customErrorAction.value === 'replace') {
+      credentials.custom_error_codes = [...selectedErrorCodes.value]
+    }
     credentialsChanged = true
   }
 
@@ -2343,16 +2429,29 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     umqExtra.user_msg_queue_enabled = false  // 清理旧字段（JSONB merge）
   }
 
-  if (allClineAccounts.value && enableClineAdvanced.value) {
-    const advanced = clineAdvancedPayload(clineAdvanced.value)
-    if (clearClineLimits.value) for (const key of ['quota_limit', 'quota_daily_limit', 'quota_weekly_limit']) advanced.extra[key] = null
-    if (disableClineNotifications.value) for (const dim of ['total', 'daily', 'weekly']) advanced.extra[`quota_notify_${dim}_enabled`] = false
-    if (disableClinePolicies.value) {
-      advanced.credentials.custom_error_codes_enabled = false
-      advanced.credentials.temp_unschedulable_enabled = false
+  if (enableQuota.value && Object.keys(quotaPatch.value).length) {
+    Object.assign(ensureExtra(), quotaPatch.value)
+  }
+  const notifyExtra: Record<string, unknown> = {}
+  writeQuotaNotify(notifyExtra, 'create')
+  for (const dim of QUOTA_NOTIFY_DIMS) {
+    if (!notifySelected.value[dim]) continue
+    const extra = ensureExtra()
+    const enabled = quotaNotifyState[dim].enabled === true
+    extra[`quota_notify_${dim}_enabled`] = enabled
+    if (enabled) {
+      for (const suffix of ['threshold', 'threshold_type']) {
+        const key = `quota_notify_${dim}_${suffix}`
+        if (key in notifyExtra) extra[key] = notifyExtra[key]
+      }
     }
-    if (Object.keys(advanced.extra).length) Object.assign(ensureExtra(), advanced.extra)
-    if (Object.keys(advanced.credentials).length) { Object.assign(credentials, advanced.credentials); credentialsChanged = true }
+  }
+  if (enableTempUnsched.value) {
+    credentials.temp_unschedulable_enabled = tempUnschedAction.value !== 'disable'
+    if (tempUnschedAction.value === 'replace') {
+      credentials.temp_unschedulable_rules = buildTempUnschedRules(tempUnschedRules.value)
+    }
+    credentialsChanged = true
   }
 
   if (credentialsChanged) {
@@ -2410,7 +2509,9 @@ const handleSubmit = async () => {
   }
 
   const hasAnyFieldEnabled =
-    (allClineAccounts.value && enableClineAdvanced.value) ||
+    (enableQuota.value && Object.keys(quotaPatch.value).length > 0) ||
+    QUOTA_NOTIFY_DIMS.some(dim => notifySelected.value[dim]) ||
+    enableTempUnsched.value ||
     enableBaseUrl.value ||
     (enableExcelBPS.value && allOpenAIOAuthOnly.value) ||
     enableOpenAIPassthrough.value ||
@@ -2494,9 +2595,17 @@ const handleSubmit = async () => {
     return
   }
 
+  if (enableTempUnsched.value && tempUnschedAction.value === 'replace') {
+    const rules = buildTempUnschedRules(tempUnschedRules.value)
+    if (!rules.length || rules.length !== tempUnschedRules.value.length) {
+      appStore.showError(t('admin.accounts.tempUnschedulable.rulesInvalid'))
+      return
+    }
+  }
+
   let built: ReturnType<typeof buildUpdatePayload>
-  try { built = buildUpdatePayload() } catch (error) {
-    appStore.showError(error instanceof ClineAdvancedError ? t(`clineAccount.advanced.errors.${error.issue}`) : t('admin.accounts.bulkEdit.failed'))
+  try { built = buildUpdatePayload() } catch {
+    appStore.showError(t('admin.accounts.bulkEdit.failed'))
     return
   }
   if (!built) {
@@ -2591,17 +2700,20 @@ watch(
   () => props.show,
   (newShow) => {
     if (!newShow) {
-      enableClineAdvanced.value = false
-      clineAdvanced.value = clineAdvancedDraft()
-      clearClineLimits.value = false
-      disableClineNotifications.value = false
-      disableClinePolicies.value = false
+      enableQuota.value = false
+      quotaPatch.value = {}
+      notifySelected.value = { daily: false, weekly: false, total: false }
+      resetQuotaNotify()
+      enableTempUnsched.value = false
+      tempUnschedAction.value = 'disable'
+      tempUnschedRules.value = []
       // Reset all enable flags
       enableBaseUrl.value = false
       enableModelRestriction.value = false
       enableOpenAIModelAliases.value = false
       openaiModelAliases.value = true
       enableCustomErrorCodes.value = false
+      customErrorAction.value = 'replace'
       enableInterceptWarmup.value = false
       enableHeaderOverride.value = false
       enableProxy.value = false

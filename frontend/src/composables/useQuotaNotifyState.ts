@@ -41,14 +41,18 @@ export function useQuotaNotifyState() {
   function writeToExtra(extra: Record<string, unknown>, mode: 'create' | 'update') {
     for (const d of QUOTA_NOTIFY_DIMS) {
       const s = state[d]
-      if (s.enabled) {
-        extra[`quota_notify_${d}_enabled`] = true
+      if (s.enabled !== null) {
+        extra[`quota_notify_${d}_enabled`] = s.enabled
         if (s.threshold != null) {
           extra[`quota_notify_${d}_threshold`] = s.threshold
         } else if (mode === 'update') {
           delete extra[`quota_notify_${d}_threshold`]
         }
-        extra[`quota_notify_${d}_threshold_type`] = s.thresholdType || QUOTA_THRESHOLD_TYPE_FIXED
+        if (s.thresholdType != null || s.enabled) {
+          extra[`quota_notify_${d}_threshold_type`] = s.thresholdType || QUOTA_THRESHOLD_TYPE_FIXED
+        } else if (mode === 'update') {
+          delete extra[`quota_notify_${d}_threshold_type`]
+        }
       } else if (mode === 'update') {
         delete extra[`quota_notify_${d}_enabled`]
         delete extra[`quota_notify_${d}_threshold`]

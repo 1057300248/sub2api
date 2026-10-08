@@ -1,3 +1,5 @@
+> **UI superseded by [Native account flow](NATIVE_ACCOUNT_FLOW.md).** Cline now uses the original CreateAccountModal, EditAccountModal and BulkEditAccountModal. The standalone editor and advanced bulk section described in this historical document were removed. Local quota/reset/notification validation and database ownership safeguards below remain the deployed API contract. Local reset is available through the original account action menu; temporary pause through the original status modal; metadata through the inline provider readout. There is no second account CRUD entry or form.
+
 # Native Cline advanced settings
 
 Completes the two remaining v2.9.10 native-editor gaps: local monetary quotas and
