@@ -3221,6 +3221,7 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 		ModelMapping  map[string]string `json:"model_mapping"`
 		AccountMode   string            `json:"account_mode"`
 		ClineAuthType string            `json:"cline_auth_type"`
+		ProxyID       *int64            `json:"proxy_id" binding:"omitempty,min=0"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -3244,6 +3245,30 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 	if h.accountTestService == nil {
 		response.InternalError(c, "Account test service is not configured")
 		return
+	}
+
+	// Reuse the proxy selected in the native account form. An explicit proxy
+	// lookup failure must not silently turn model preview into a direct request.
+	if req.ProxyID != nil && *req.ProxyID > 0 {
+		if h.adminService == nil {
+			response.InternalError(c, "Proxy service is not configured")
+			return
+		}
+		proxy, err := h.adminService.GetProxy(c.Request.Context(), *req.ProxyID)
+		if err != nil {
+			if errors.Is(err, service.ErrProxyNotFound) {
+				response.BadRequest(c, "Selected proxy is unavailable")
+			} else {
+				response.InternalError(c, "Failed to load selected proxy")
+			}
+			return
+		}
+		if proxy == nil || !proxy.IsActive() || proxy.IsExpired(time.Now()) {
+			response.BadRequest(c, "Selected proxy is unavailable")
+			return
+		}
+		tempAccount.ProxyID = req.ProxyID
+		tempAccount.Proxy = proxy
 	}
 
 	if tempAccount.IsCline() {

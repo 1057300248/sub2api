@@ -661,6 +661,7 @@ export interface SyncUpstreamPreviewParams {
   type: string
   base_url?: string
   api_key: string
+  proxy_id?: number
   model_mapping?: Record<string, string>
   account_mode?: string
   cline_auth_type?: string

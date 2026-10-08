@@ -1106,3 +1106,20 @@ describe('CreateAccountModal native Cline workflow', () => {
     finish({ id: 81 }); await flushPromises()
   })
 })
+
+
+it('native model preview uses the currently selected proxy without persisting an account', async () => {
+  const wrapper = mountModal([{ id: 11, name: 'Cline', platform: 'cline' }])
+  await flushPromises()
+  await wrapper.get('[data-testid="create-platform-cline"]').trigger('click')
+  await flushPromises()
+  const state = (wrapper.vm as any).$.setupState
+  state.apiKeyValue = 'preview-fixture'
+  state.form.proxy_id = 8
+  await flushPromises()
+  expect(state.syncPreviewCredentials).toMatchObject({ platform: 'cline', proxy_id: 8 })
+  state.form.proxy_id = null
+  await flushPromises()
+  expect(state.syncPreviewCredentials.proxy_id).toBeUndefined()
+  wrapper.unmount()
+})

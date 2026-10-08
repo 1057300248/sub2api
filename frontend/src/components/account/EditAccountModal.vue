@@ -3635,7 +3635,8 @@ const showClineMetadata = ref(false)
 const clineDiscoveryDraftChanged = computed(() => props.account?.platform === 'cline' && (
   !!editApiKey.value.trim() || editClineMode.value !== clineMode(props.account.credentials?.account_mode) ||
   editClineAuth.value !== (props.account.credentials?.cline_auth_type || 'api_key') ||
-  editBaseUrl.value.trim() !== (props.account.credentials?.base_url || CLINE_BASE_URL)
+  editBaseUrl.value.trim() !== (props.account.credentials?.base_url || CLINE_BASE_URL) ||
+  (form.proxy_id ?? 0) !== (props.account.proxy_fallback_origin_id ?? props.account.proxy_id ?? 0)
 ))
 watch(() => [props.show, props.account?.id], () => { showClineMetadata.value = false })
 const editBaseUrl = ref('https://api.anthropic.com')

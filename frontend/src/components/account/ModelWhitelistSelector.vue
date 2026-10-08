@@ -181,6 +181,7 @@ const searchQuery = ref('')
 const customModel = ref('')
 const isComposing = ref(false)
 const isSyncingUpstream = ref(false)
+let syncEpoch = 0
 const normalizedPlatforms = computed(() => {
   const rawPlatforms =
     props.platforms && props.platforms.length > 0
@@ -252,6 +253,7 @@ const toggleDropdown = () => {
 }
 
 const removeModel = (model: string) => {
+  syncEpoch += 1
   emit('update:modelValue', props.modelValue.filter(m => m !== model))
 }
 
@@ -259,6 +261,7 @@ const toggleModel = (model: string) => {
   if (props.modelValue.includes(model)) {
     removeModel(model)
   } else {
+    syncEpoch += 1
     emit('update:modelValue', [...props.modelValue, model])
   }
 }
@@ -279,6 +282,7 @@ const addCustom = () => {
     appStore.showInfo(t('admin.accounts.modelMappingConflict', { from: model, to: conflict.to.trim() }))
     return
   }
+  syncEpoch += 1
   emit('update:modelValue', [...props.modelValue, model])
   customModel.value = ''
 }
@@ -288,6 +292,7 @@ const handleEnter = () => {
 }
 
 const fillRelated = () => {
+  syncEpoch += 1
   const newModels = [...props.modelValue]
   for (const platform of normalizedPlatforms.value) {
     for (const model of getModelsByPlatform(platform)) {
@@ -299,8 +304,7 @@ const fillRelated = () => {
   emit('update:modelValue', newModels)
 }
 
-let syncEpoch = 0
-watch(() => [props.accountId, props.platform, props.syncCredentials, props.syncDisabled], () => { syncEpoch += 1 }, { deep: true, flush: 'sync' })
+watch(() => [props.accountId, props.platform, props.platforms, props.syncCredentials, props.syncDisabled], () => { syncEpoch += 1 }, { deep: true, flush: 'sync' })
 onBeforeUnmount(() => { syncEpoch += 1 })
 const syncUpstreamModels = async () => {
   if (isSyncingUpstream.value || props.syncDisabled) return
@@ -331,7 +335,15 @@ const syncUpstreamModels = async () => {
 
     const newModels = [...props.modelValue]
     let addedCount = 0
+    let firstConflict: { from: string; to: string } | undefined
     for (const model of upstreamModels) {
+      // Discovery only appends unconfigured models. Do not create an identity
+      // entry that collides with a saved alias or silently repairs an invalid row.
+      const mapping = props.modelMappings?.find(row => row.from.trim() === model)
+      if (mapping) {
+        if (mapping.to.trim() !== model) firstConflict ??= mapping
+        continue
+      }
       if (!newModels.includes(model)) {
         newModels.push(model)
         addedCount += 1
@@ -339,6 +351,11 @@ const syncUpstreamModels = async () => {
     }
 
     emit('update:modelValue', newModels)
+    if (firstConflict) {
+      appStore.showInfo(t('admin.accounts.modelMappingConflict', {
+        from: firstConflict.from.trim(), to: firstConflict.to.trim()
+      }))
+    }
     const warnings = result.warnings ?? []
     const hasPartialMetadata = warnings.some(
       warning => warning.code === 'upstream_model_metadata_partial'
@@ -371,6 +388,8 @@ const syncUpstreamModels = async () => {
 }
 
 const clearAll = () => {
+  // A later explicit clear wins over an earlier model discovery request.
+  syncEpoch += 1
   emit('update:modelValue', [])
 }
 

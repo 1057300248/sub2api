@@ -4405,6 +4405,7 @@ const syncPreviewCredentials = computed(() => {
     type: form.type,
     base_url: baseUrl || undefined,
     api_key: apiKeyValue.value,
+    proxy_id: form.proxy_id ?? undefined,
     ...(form.platform === 'cline' ? { account_mode: clineAccountMode.value, cline_auth_type: clineAuthType.value } : {}),
     ...(modelMapping ? { model_mapping: modelMapping } : {})
   }

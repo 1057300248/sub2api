@@ -2567,3 +2567,24 @@ it('native Cline group limits cannot become unrestricted by clearing a selected 
   expect(updateAccountMock.mock.calls[0][1].group_allowed_models).toEqual({11:['public']})
   w.unmount()
 })
+
+
+it('native Cline saved-model sync stops when the configured proxy changes in the draft', async () => {
+  const account = { ...buildAccount(), platform: 'cline', proxy_id: 9, proxy_fallback_origin_id: 3,
+    credentials: { api_key: 'fixture', base_url: 'https://api.cline.bot/api/v1', account_mode: 'pass',
+      cline_auth_type: 'api_key', model_mapping: { public: 'cline-pass/model' } } }
+  const wrapper = mountModal(account)
+  await flushPromises()
+  const state = (wrapper.vm as any).$.setupState
+  expect(state.clineDiscoveryDraftChanged).toBe(false)
+  state.form.proxy_id = 8
+  await flushPromises()
+  expect(state.clineDiscoveryDraftChanged).toBe(true)
+  state.form.proxy_id = null
+  await flushPromises()
+  expect(state.clineDiscoveryDraftChanged).toBe(true)
+  state.form.proxy_id = 3
+  await flushPromises()
+  expect(state.clineDiscoveryDraftChanged).toBe(false)
+  wrapper.unmount()
+})
